@@ -293,7 +293,9 @@ void seal_pass(FramePacket& frame, uint32_t passIndex) {
 Range push(ByteBuffer& target, const uint8_t* data, size_t length, size_t alignment) {
   if (alignment != 0) {
     const size_t begin = target.size();
-    const size_t alignedBegin = AURORA_ALIGN(begin, alignment);
+    // Any alignment: decoded vertices align to their stride (XR batching
+    // indexes them from the pool's start), which needn't be a power of two.
+    const size_t alignedBegin = (begin + alignment - 1) / alignment * alignment;
     if (alignedBegin > begin) {
       target.append_zeroes(alignedBegin - begin);
     }
@@ -308,7 +310,9 @@ Range push(ByteBuffer& target, const uint8_t* data, size_t length, size_t alignm
 Range map(ByteBuffer& target, size_t length, size_t alignment) {
   if (alignment != 0) {
     const size_t begin = target.size();
-    const size_t alignedBegin = AURORA_ALIGN(begin, alignment);
+    // Any alignment: decoded vertices align to their stride (XR batching
+    // indexes them from the pool's start), which needn't be a power of two.
+    const size_t alignedBegin = (begin + alignment - 1) / alignment * alignment;
     if (alignedBegin > begin) {
       target.append_zeroes(alignedBegin - begin);
     }
@@ -585,9 +589,31 @@ bool g_preserveFrameBuffer = false;
 static uint64_t g_recordingSeq = 0;
 uint64_t recording_seq() noexcept { return g_recordingSeq; }
 
+bool xr_batching() noexcept {
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  // On by default on Android, where it's measured (the eye and motion
+  // passes there need their vertices decoded on the CPU, which batching uses).
+  static const bool on = [] {
+    const char* v = std::getenv("AURORA_XR_BATCH");
+    if (v != nullptr && *v != '\0')
+      return *v != '0';
+#ifdef __ANDROID__
+    return true;
+#else
+    return false;
+#endif
+  }();
+  return on;
+#else
+  return false;
+#endif
+}
+
 void begin_recording(FramePacket& packet, size_t frameSlot) {
   CHECK(!g_recorder.active(), "A recording session is already active");
   ++g_recordingSeq;
+  if (xr_batching() && !packet.indexShadow)
+    packet.indexShadow = std::make_unique<uint8_t[]>(IndexBufferSize);
   if (g_recorder.normalRequested && webgpu::enable_normal_buffer()) {
     g_recorder.normalRequested = false;
   }
@@ -1214,7 +1240,11 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
   if (!check_recording("push_indices")) {
     return {};
   }
-  return push(current_frame_packet().indices, data, length, alignment);
+  auto& packet = current_frame_packet();
+  const Range range = push(packet.indices, data, length, alignment);
+  if (packet.indexShadow && range.offset + range.size <= IndexBufferSize)
+    std::memcpy(packet.indexShadow.get() + range.offset, data, length);
+  return range;
 }
 
 Range push_uniform(const uint8_t* data, size_t length) {

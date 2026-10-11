@@ -976,7 +976,10 @@ bool size_stereo_stream() {
   dr.on = g_multiview && env_flag("AURORA_XR_DYNRES", false);
 #endif
   if (dr.on) {
-    dr.minScale = std::clamp(env_float("AURORA_XR_DYNRES_MIN", 1.f), 0.5f, 1.f);
+    // With SpaceWarp the floor is 0.8 (only while it's on, update_dynamic_
+    // resolution): a frame it can't fit loses it for the fight, so a little
+    // softness is the cheaper trade.
+    dr.minScale = std::clamp(env_float("AURORA_XR_DYNRES_MIN", B.appSw ? 0.8f : 1.f), 0.5f, 1.f);
     dr.wantMarginNs = std::clamp(env_float("AURORA_XR_DYNRES_MARGIN_MS", 3.f), 0.f, 8.f) * 1.0e6;
     dr.maxScale = std::clamp(env_float("AURORA_XR_DYNRES_MAX", 1.3f), 1.f, 1.6f);
     // The target follows the display and the compositor (DynamicResolution);
@@ -1957,7 +1960,6 @@ bool release_staged(Stream& st, bool& released) {
     if (!r.inFlight || vkGetFenceStatus(B.dev, r.fence) != VK_SUCCESS)
       continue;
     vkResetFences(B.dev, 1, &r.fence);
-    r.inFlight = false;
     for (VkSemaphore sem : r.waitSems)
       vkDestroySemaphore(B.dev, sem, nullptr);
     r.waitSems.clear();
@@ -1967,7 +1969,9 @@ bool release_staged(Stream& st, bool& released) {
       write_dump(st);
     }
     std::lock_guard lock{g_mutex};
-    r.state = SlotState::Free;
+    r.inFlight = false; // read by the render worker under g_mutex (take_slot_locked)
+    if (r.state == SlotState::Released) // the render worker may have taken it already
+      r.state = SlotState::Free;
     freed = true;
   }
   if (freed)
@@ -2064,7 +2068,10 @@ bool release_staged(Stream& st, bool& released) {
     si.commandBufferCount = 1;
     si.pCommandBuffers = &r.cmd;
     VK_TRY(vkQueueSubmit(B.queue, 1, &si, r.fence));
-    r.inFlight = true;
+    {
+      std::lock_guard lock{g_mutex};
+      r.inFlight = true;
+    }
     if (&st == &g_streams[kStereo])
       trace_counter("XR 3D released", static_cast<int64_t>(st.releases & 1));
     XR_TRY(xrReleaseSwapchainImage(st.swapchain, nullptr));
@@ -3399,7 +3406,7 @@ void sync_boundary() {
 
 // Adaptive SpaceWarp (AURORA_XR_APPSW_ADAPT, on): a fight that misses over
 // 6 3D frames in each of two 2 s windows running with it, past its first 5 s
-// (pipelines compiling), turns it off until the next fight (one window: a
+// and not while pipelines compile, turns it off until the next fight (one window: a
 // hitch on Battlefield missed 8); the runtime then runs the loop at the
 // display's rate again, and the motion pass and draw matching stop. Four-CPU
 // Brinstar, GPU-bound with it (eyes 8.8 ms, motion 4.2), lost 16 a second.
@@ -3423,7 +3430,15 @@ void adapt_space_warp(bool fight, bool held, std::chrono::steady_clock::time_poi
   wasFight = fight;
   if (!adapt || !fight || !g_appSwOn)
     return;
-  if (held || now - fightStart < std::chrono::seconds(5)) {
+  // Nor while pipelines compile (the first minute after launch compiles
+  // thousands; their hitches aren't the stage's cost).
+  static uint32_t pipelinesSeen = 0;
+  static std::chrono::steady_clock::time_point compiledAt{};
+  if (const uint32_t created = gfx::pipelines_created(); created != pipelinesSeen) {
+    pipelinesSeen = created;
+    compiledAt = now;
+  }
+  if (held || now - fightStart < std::chrono::seconds(5) || now - compiledAt < std::chrono::seconds(2)) {
     windowStart = now;
     missedAtWindow = missed;
     strikes = 0;
@@ -4063,6 +4078,17 @@ int take_slot_locked(Stream& st, bool unwaited = false) {
   for (int i = 0; i < static_cast<int>(slots.size()); ++i)
     if (slots[i].state == SlotState::Free && (best < 0 || slots[i].acquireSeq < slots[best].acquireSeq))
       best = i;
+  // A staged image whose copy out is done is free, though the XR thread only
+  // notices on its next loop (16.7 ms apart with SpaceWarp): the render worker
+  // waited ~11 ms for one nearly every frame. The XR thread still cleans up
+  // after the copy (release_staged) before it reuses the fence.
+  if (best < 0 && st.staged)
+    for (int i = 0; i < static_cast<int>(slots.size()); ++i)
+      if (slots[i].state == SlotState::Released && slots[i].inFlight &&
+          vkGetFenceStatus(B.dev, slots[i].fence) == VK_SUCCESS) {
+        best = i;
+        break;
+      }
   if (best < 0 && unwaited && !st.staged)
     for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
       if (st.slots[i].state == SlotState::Acquired && !st.slots[i].claimed)
@@ -5071,7 +5097,9 @@ void update_dynamic_resolution(bool missed) {
     }
     if (next > dr.level)
       next = std::min(next, std::max(ceiling, dr.level));
-    next = std::clamp(next, 0, levels - 1);
+    // Below 1.0 only while SpaceWarp is on (see minScale).
+    const int floor = appsw_on() ? 0 : std::max(static_cast<int>((1.f - dr.minScale) / kDynresStep + 0.5f), 0);
+    next = std::clamp(next, std::min(floor, levels - 1), levels - 1);
     if (next != dr.level) {
       dr.level = next;
       dr.emaNs = 0;

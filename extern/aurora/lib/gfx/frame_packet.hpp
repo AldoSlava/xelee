@@ -6,6 +6,7 @@
 #include "texture.hpp"
 
 #include <array>
+#include <memory>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -151,6 +152,9 @@ inline void finalize_render_target_layout(RenderTargetLayout& layout) noexcept {
   if (layout.xrMotion != 0) {
     hasher.update(layout.xrMotion + 0x3a71u);
   }
+  if (layout.xrBatch != 0) {
+    hasher.update(layout.xrBatch + 0x6c2du);
+  }
   layout.key = hasher.digest();
 }
 
@@ -214,6 +218,9 @@ struct FramePacket {
   ByteBuffer verts;
   ByteBuffer uniforms;
   ByteBuffer indices;
+  // XR batching (gx::xr_batch_*): a CPU copy of `indices`, readable after
+  // the pool is unmapped for the early eyes; null when batching is off.
+  std::unique_ptr<uint8_t[]> indexShadow;
   ByteBuffer storage;
   ByteBuffer textureUpload;
   wgpu::CommandEncoder encoder;

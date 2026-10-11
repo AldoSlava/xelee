@@ -17,6 +17,8 @@ struct RecordedFrame {
 void begin_recording(FramePacket& packet, size_t frameSlot);
 // Frames begun so far (recording thread): a new value starts a new frame.
 uint64_t recording_seq() noexcept;
+// XR batching (AURORA_XR_BATCH): frames keep a CPU copy of their indices.
+bool xr_batching() noexcept;
 RecordedFrame end_recording();
 void shutdown_recording();
 void increment_merged_draw_count() noexcept;

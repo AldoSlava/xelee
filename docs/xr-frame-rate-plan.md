@@ -41,11 +41,32 @@ How it ended up, and where it left the A2 design below:
   and four-CPU Brinstar stuck at 33 3D frames a second.
 - **Adaptive:** a fight missing over 6 3D frames in each of two 2 s windows
   turns SpaceWarp off until the next fight (the loop goes back to 120 Hz).
+  Windows while pipelines compile don't count.
+- **Batching (`AURORA_XR_BATCH`, on with Android):** the eye and motion
+  passes join runs of consecutive draws into one draw. A draw costs about
+  6 us of GPU by itself on the Quest 3 (an extra one-triangle draw per real
+  draw added 2.3 ms to Brinstar's eye pass; re-binding uniforms or switching
+  pipelines first added nothing more), and four-CPU Brinstar issues ~400 eye
+  draws a frame. Indices are joined into one 32-bit list on the storage
+  pool's vertices (decoded vertices align to their stride for it); each
+  vertex finds its draw by a binary search of the batch's range table and
+  reads that draw's push constants and matrices (from its uniform, the pool
+  bound as storage). Eye draws batch only with the same pipeline, textures
+  and uniforms but the matrices, in order: neighbours change material on
+  most draws, so only ~19% join; regrouping opaque draws by material would
+  have reached ~36%, with coplanar decals at risk. Motion draws share
+  pipelines, so most join. Four-CPU Brinstar: motion pass 3.2 -> 1.35 ms,
+  eye pass 11.1 -> 10.0 ms.
+- **Resolution floor 0.8 while SpaceWarp is on** (1.0 otherwise).
+- **Staged images free when their copy is done:** the render worker takes
+  them itself once the copy's fence signals, not on the XR thread's next
+  loop (16.7 ms apart with SpaceWarp; it waited ~11 ms nearly every frame).
 
-Measured: two-CPU Battlefield holds 60 with SpaceWarp, at dynamic
-resolution's 1.30 ceiling. Four-CPU Battlefield and Brinstar's heavy
-phases (eyes 10-11.5 ms) can't fit eyes, motion pass and the compositor's
-~4.7 ms in 16.7, and fall back.
+Measured with all of it: two-CPU Battlefield holds 60 with SpaceWarp at
+dynamic resolution's 1.30 ceiling; four-CPU Battlefield and Brinstar hold it
+too (59.6-59.9 3D frames a second, 0.1-0.3 stale), Brinstar at the 0.8
+floor (eyes ~8.3 ms, motion ~0.9). Before batching and the floor, both fell
+back.
 
 Open: the motion vectors' vertical sign needs a check in the headset
 (moving objects jitter the wrong way if it's flipped); the first launch

@@ -31,11 +31,19 @@ inline constexpr uint64_t TextureUploadSize = 25165824; // 24 MiB
 #endif
 
 namespace detail {
+// XR batching: per frame in flight, room for merged indices and records.
+inline constexpr uint64_t XrBatchSlotSize = 2097152; // 2 MiB
+inline constexpr uint64_t XrBatchSlots = 4;
+
 struct Resources {
   wgpu::Buffer vertexBuffer;
   wgpu::Buffer uniformBuffer;
   wgpu::Buffer indexBuffer;
   wgpu::Buffer storageBuffer;
+  // XR batching: merged indices, per-draw records and range tables, written
+  // per frame (gx::xr_batch_*); bound as storage in group 0 with the uniform
+  // pool, which batched shaders read draws' matrices from.
+  wgpu::Buffer xrBatchBuffer;
   wgpu::BindGroupLayout staticBindGroupLayout;
   wgpu::BindGroup staticBindGroup;
   wgpu::BindGroupLayout uniformBindGroupLayout;

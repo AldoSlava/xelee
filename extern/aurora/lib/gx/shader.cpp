@@ -874,7 +874,7 @@ absl::flat_hash_set<gfx::ShaderRef> s_seenShaders;
 } // namespace
 
 std::string build_shader_source(const ShaderConfig& config, uint32_t normalAttachment, uint32_t viewCount,
-                                bool softClip, bool motion) noexcept {
+                                bool softClip, bool motion, bool batch) noexcept {
   ZoneScoped;
   const auto hash = xxh3_hash(normalAttachment, xxh3_hash(config));
   const auto info = build_shader_info(config);
@@ -2314,6 +2314,84 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
         }
       }
     }
+    // XR batching (gx::xr_batch_*): one draw stands for a run of draws. Each
+    // vertex finds its draw by its index (absolute in the storage pool) in
+    // the batch's range table (xr_bimm, in the batch buffer), loads that
+    // draw's record into a private `imm` (so the GX code reading it is
+    // unchanged), and reads the draw's position and normal matrices from its
+    // own uniform in the uniform pool (bound as storage); the rest of the
+    // uniform is the same for every draw in a batch.
+    if (multiview && batch && config.lineMode == 0) {
+      // The draw's matrices, wherever the GX code indexes them.
+      const auto redirect = [&](std::string_view from, std::string_view fn) {
+        for (size_t at = shaderSource.find(from); at != std::string::npos; at = shaderSource.find(from, at)) {
+          size_t depth = 1, end = at + from.size();
+          for (; end < shaderSource.size() && depth > 0; ++end)
+            depth += shaderSource[end] == '[' ? 1 : shaderSource[end] == ']' ? -1 : 0;
+          const std::string index = shaderSource.substr(at + from.size(), end - 1 - at - from.size());
+          const std::string to = fmt::format("{}({})", fn, index);
+          shaderSource.replace(at, end - at, to);
+          at += to.size();
+        }
+      };
+      redirect("ubuf.postex_mtx[", "xr_postex");
+      redirect("ubuf.nrm_mtx[", "xr_nrm");
+      const std::string immDecl = "var<immediate> imm: Immediate;";
+      const std::string vtxParam = "@builtin(vertex_index) vidx: u32";
+      const auto fsAt = shaderSource.find("fn fs_main(");
+      const auto fsBody = fsAt == std::string::npos ? fsAt : shaderSource.find('{', fsAt);
+      if (shaderSource.find(immDecl) == std::string::npos || shaderSource.find(vtxParam) == std::string::npos ||
+          fsBody == std::string::npos) {
+        Log.warn("XR batch shader variant: anchors missing");
+      } else {
+        shaderSource.insert(fsBody + 1, "\n    imm.fog_range_base = xr_bimm.fog_range_base;");
+        std::string outDecl = "var out: XrGxOut;";
+        auto d = shaderSource.find(outDecl);
+        if (d == std::string::npos) {
+          outDecl = "var out: VertexOutput;";
+          d = shaderSource.find(outDecl);
+        }
+        shaderSource.insert(d + outDecl.size(),
+                            "\n    var xr_lo = 0u;"
+                            "\n    var xr_hi = xr_bimm.count;"
+                            "\n    while (xr_hi - xr_lo > 1u) {"
+                            "\n        let xr_mid = (xr_lo + xr_hi) / 2u;"
+                            "\n        if (xr_batch[xr_bimm.table + xr_mid * 2u] <= xr_vi) { xr_lo = xr_mid; } else { xr_hi = xr_mid; }"
+                            "\n    }"
+                            "\n    let xr_vbase = xr_batch[xr_bimm.table + xr_lo * 2u];"
+                            "\n    let xr_r = xr_batch[xr_bimm.table + xr_lo * 2u + 1u];"
+                            "\n    imm.vtx_start = xr_batch[xr_r];"
+                            "\n    imm.current_pnmtx = xr_batch[xr_r + 1u];"
+                            "\n    imm.fog_range_base = xr_batch[xr_r + 2u];"
+                            "\n    imm.xr_prev_mtx = xr_batch[xr_r + 3u];"
+                            "\n    imm.array_start0 = vec4u(xr_batch[xr_r + 4u], xr_batch[xr_r + 5u], xr_batch[xr_r + 6u], xr_batch[xr_r + 7u]);"
+                            "\n    imm.array_start1 = vec4u(xr_batch[xr_r + 8u], xr_batch[xr_r + 9u], xr_batch[xr_r + 10u], xr_batch[xr_r + 11u]);"
+                            "\n    imm.array_start2 = vec4u(xr_batch[xr_r + 12u], xr_batch[xr_r + 13u], xr_batch[xr_r + 14u], xr_batch[xr_r + 15u]);"
+                            "\n    xr_uword = xr_batch[xr_r + 16u];"
+                            "\n    let vidx = xr_vi - xr_vbase;");
+        shaderSource.replace(shaderSource.find(vtxParam), vtxParam.size(), "@builtin(vertex_index) xr_vi: u32");
+        // Position matrices are the first 10 of postex_mtx (word 20 of the
+        // uniform: viewport sizes and proj before them), normal ones follow
+        // all 20 postex matrices (word 260); texture matrices are shared.
+        shaderSource.replace(shaderSource.find(immDecl), immDecl.size(),
+                             "struct XrBatchImm { table: u32, count: u32, fog_range_base: u32, _pad: u32 };"
+                             "\nvar<immediate> xr_bimm: XrBatchImm;"
+                             "\nvar<private> imm: Immediate;"
+                             "\nvar<private> xr_uword: u32;"
+                             "\n@group(0) @binding(2)\nvar<storage, read> xr_batch: array<u32>;"
+                             "\n@group(0) @binding(3)\nvar<storage, read> xr_ubufs: array<u32>;"
+                             "\nfn xr_mtx(w: u32) -> mat3x4f {"
+                             "\n    return mat3x4f(bitcast<vec4f>(vec4u(xr_ubufs[w], xr_ubufs[w + 1u], xr_ubufs[w + 2u], xr_ubufs[w + 3u])),"
+                             "\n                   bitcast<vec4f>(vec4u(xr_ubufs[w + 4u], xr_ubufs[w + 5u], xr_ubufs[w + 6u], xr_ubufs[w + 7u])),"
+                             "\n                   bitcast<vec4f>(vec4u(xr_ubufs[w + 8u], xr_ubufs[w + 9u], xr_ubufs[w + 10u], xr_ubufs[w + 11u])));"
+                             "\n}"
+                             "\nfn xr_postex(i: u32) -> mat3x4f {"
+                             "\n    if (i < 10u) { return xr_mtx(xr_uword + 20u + i * 12u); }"
+                             "\n    return ubuf.postex_mtx[i];"
+                             "\n}"
+                             "\nfn xr_nrm(i: u32) -> mat3x4f { return xr_mtx(xr_uword + 260u + i * 12u); }");
+      }
+    }
     for (const std::string_view var : {"mv_pos_a", "mv_pos_b", "mv_pos"}) {
       const std::string from = fmt::format("vec4f({}, 1.0) * ubuf.proj", var);
       const std::string to = fmt::format("gx_proj({})", var);
@@ -2341,7 +2419,7 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
     }
   }
   const auto hash = layout.viewCount > 1
-                        ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8) + (layout.xrMotion << 9),
+                        ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8) + (layout.xrMotion << 9) + (layout.xrBatch << 10),
                                     xxh3_hash(normalAttachment, xxh3_hash(config)))
                         : xxh3_hash(normalAttachment, xxh3_hash(config));
 #ifdef __EMSCRIPTEN__
@@ -2353,7 +2431,7 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
   if (auto it = modules.find(hash); it != modules.end()) return it->second;
 #endif
   const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip != 0,
-                                                 layout.xrMotion != 0);
+                                                 layout.xrMotion != 0, layout.xrBatch != 0);
   wgpu::ShaderSourceWGSL wgslDescriptor{};
   wgslDescriptor.code = shaderSource.c_str();
   const auto label = fmt::format("GX Shader {:x}", hash);

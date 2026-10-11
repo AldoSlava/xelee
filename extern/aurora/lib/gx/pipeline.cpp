@@ -5,6 +5,8 @@
 #include "../gfx/pipeline_cache.hpp"
 #include "../gfx/recording.hpp"
 #include "../gfx/resource_cache.hpp"
+#include "../gfx/frame_packet.hpp"
+#include "../webgpu/gpu.hpp"
 
 #include "gx_fmt.hpp"
 #include "shader_info.hpp"
@@ -121,7 +123,7 @@ static bool xr_link_filter(const DrawData& data) {
 }
 #endif
 
-void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+static void render_direct(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
   if (gfx::xr_multiview_replay() && !gfx::xr_motion_replay() && xr_link_filter(data))
     return;
@@ -246,6 +248,207 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
     pass.DrawIndexed(data.xrSolidIndexCount, data.instanceCount);
   }
 #endif
+}
+
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+// XR batching (AURORA_XR_BATCH): in an eye or motion replay, a run of
+// consecutive draws that differ only in their matrices and per-draw
+// constants goes as one draw. Their indices, rebased onto the storage pool's
+// start (decoded vertices are aligned to their stride for this), are joined
+// into one 32-bit list; each draw's push constants and uniform offset go in a
+// record, and a table of (first vertex, record) lets each vertex find its
+// draw (the batched shader variant, gx/shader.cpp). Eye draws batch with the
+// same pipeline, textures, blend constant, fog and uniform but for the
+// position and normal matrices; motion draws with the same pipeline. The data
+// goes in this frame's slot of the batch buffer, uploaded at the replay's end.
+namespace {
+struct XrBatcher {
+  bool active = false;
+  bool motion = false;
+  const uint8_t* shadow = nullptr; // the frame's CPU copy of its indices
+  uint64_t frameId = UINT64_MAX;
+  uint64_t used = 0, uploaded = 0; // bytes of this frame's slot
+  std::vector<uint8_t> staging = std::vector<uint8_t>(gfx::detail::XrBatchSlotSize);
+  std::vector<const DrawData*> members;
+  uint32_t memberIndices = 0;
+  uint64_t draws = 0, batches = 0, batchedDraws = 0;
+} sXrBatch;
+
+gfx::PipelineRef batch_pipeline(const DrawData& d) {
+  return sXrBatch.motion ? d.xrMotionBatchPipeline : d.xrBatchPipeline;
+}
+
+uint32_t draw_index_count(const DrawData& d) {
+  return d.xrIndexCount != 0 ? d.xrIndexCount : d.indexCount != 0 ? d.indexCount : d.vtxCount;
+}
+
+bool batchable(const DrawData& d) {
+  return batch_pipeline(d) != 0 && d.instanceCount == 1 && d.posRange.size != 0 && d.vtxCount != 0 &&
+         d.posRange.size % d.vtxCount == 0 && d.posRange.offset % (d.posRange.size / d.vtxCount) == 0 &&
+         (sXrBatch.motion || d.xrSolidIndexCount == 0);
+}
+
+bool joins(const DrawData& first, const DrawData& d) {
+  if (batch_pipeline(d) != batch_pipeline(first) || sXrBatch.members.size() >= 128 ||
+      sXrBatch.memberIndices + draw_index_count(d) > 65536 * 4)
+    return false;
+  if (sXrBatch.motion)
+    return true;
+  return d.bindGroups.textureBindGroup == first.bindGroups.textureBindGroup && d.dstAlpha == first.dstAlpha &&
+         d.uniformSharedKey == first.uniformSharedKey &&
+         d.immediateData.fogRangeBase == first.immediateData.fogRangeBase;
+}
+
+// Bytes in this frame's slot, 16-aligned (null: full).
+uint8_t* slot_alloc(uint64_t bytes, uint64_t& offset) {
+  auto& b = sXrBatch;
+  const uint64_t at = (b.used + 15) & ~uint64_t{15};
+  if (at + bytes > gfx::detail::XrBatchSlotSize)
+    return nullptr;
+  b.used = at + bytes;
+  offset = (b.frameId % gfx::detail::XrBatchSlots) * gfx::detail::XrBatchSlotSize + at;
+  return b.staging.data() + at;
+}
+
+void emit_batch(const wgpu::RenderPassEncoder& pass) {
+  auto& b = sXrBatch;
+  const auto& first = *b.members.front();
+  const auto n = static_cast<uint32_t>(b.members.size());
+  constexpr uint32_t kRecordWords = 17;
+  uint64_t idxOffset = 0, tableOffset = 0;
+  auto* idx = reinterpret_cast<uint32_t*>(slot_alloc(uint64_t{b.memberIndices} * 4, idxOffset));
+  auto* table = idx != nullptr ? reinterpret_cast<uint32_t*>(slot_alloc(uint64_t{n} * (2 + kRecordWords) * 4, tableOffset))
+                               : nullptr;
+  if (table == nullptr || !gfx::bind_pipeline(batch_pipeline(first), pass)) {
+    for (const DrawData* d : b.members)
+      render_direct(*d, pass);
+    return;
+  }
+  const auto tableWord = static_cast<uint32_t>(tableOffset / 4);
+  uint32_t* records = table + n * 2;
+  uint32_t written = 0;
+  for (uint32_t i = 0; i < n; ++i) {
+    const DrawData& d = *b.members[i];
+    const uint32_t stride = d.posRange.size / d.vtxCount;
+    const uint32_t vbase = d.posRange.offset / stride;
+    uint32_t* rec = records + i * kRecordWords;
+    static_assert(sizeof(d.immediateData) == 16 * 4);
+    std::memcpy(rec, &d.immediateData, sizeof(d.immediateData));
+    rec[16] = d.uniformRange.offset / 4;
+    table[i * 2] = vbase;
+    table[i * 2 + 1] = tableWord + n * 2 + i * kRecordWords;
+    if (d.indexCount == 0) {
+      for (uint32_t v = 0; v < d.vtxCount; ++v)
+        idx[written++] = vbase + v;
+    } else {
+      const gfx::Range& r = d.xrIndexCount != 0 ? d.xrIdxRange : d.idxRange;
+      const uint32_t count = d.xrIndexCount != 0 ? d.xrIndexCount : d.indexCount;
+      const auto* src = reinterpret_cast<const uint16_t*>(b.shadow + r.offset);
+      for (uint32_t k = 0; k < count; ++k)
+        idx[written++] = vbase + src[k];
+    }
+  }
+  // Table entries by first vertex (draws push their vertices in order, so
+  // this is almost always already so).
+  bool sorted = true;
+  for (uint32_t i = 1; i < n; ++i)
+    sorted &= table[i * 2] > table[(i - 1) * 2];
+  if (!sorted) {
+    std::vector<std::pair<uint32_t, uint32_t>> entries(n);
+    for (uint32_t i = 0; i < n; ++i)
+      entries[i] = {table[i * 2], table[i * 2 + 1]};
+    std::sort(entries.begin(), entries.end());
+    for (uint32_t i = 0; i < n; ++i) {
+      table[i * 2] = entries[i].first;
+      table[i * 2 + 1] = entries[i].second;
+    }
+  }
+  const auto& resources = gfx::detail::resources();
+  const struct {
+    uint32_t table, count, fogRangeBase, pad;
+  } bimm{tableWord, n, first.immediateData.fogRangeBase, 0};
+  pass.SetImmediates(0, &bimm, sizeof(bimm));
+  const std::array offsets{first.uniformRange.offset};
+  pass.SetBindGroup(1, resources.uniformBindGroup, offsets.size(), offsets.data());
+  if (first.bindGroups.textureBindGroup)
+    pass.SetBindGroup(2, gfx::find_bind_group(first.bindGroups.textureBindGroup));
+  pass.SetIndexBuffer(resources.xrBatchBuffer, wgpu::IndexFormat::Uint32, idxOffset, uint64_t{written} * 4);
+  pass.SetVertexBuffer(0, resources.storageBuffer);
+  if (first.dstAlpha != UINT32_MAX) {
+    const wgpu::Color color{0.f, 0.f, 0.f, first.dstAlpha / 255.f};
+    pass.SetBlendConstant(&color);
+  }
+  pass.DrawIndexed(written);
+  ++b.batches;
+  b.batchedDraws += n;
+}
+} // namespace
+
+void xr_batch_begin(const gfx::detail::FramePacket& frame, bool multiview, bool motion) {
+  auto& b = sXrBatch;
+  b.active = multiview && gfx::detail::xr_batching() && frame.indexShadow != nullptr;
+  b.motion = motion;
+  b.shadow = frame.indexShadow.get();
+  if (frame.frameId != b.frameId) {
+    b.frameId = frame.frameId;
+    b.used = b.uploaded = 0;
+  }
+  b.members.clear();
+  b.memberIndices = 0;
+}
+
+void xr_batch_flush(const wgpu::RenderPassEncoder& pass) {
+  auto& b = sXrBatch;
+  if (b.members.empty())
+    return;
+  if (b.members.size() == 1)
+    render_direct(*b.members.front(), pass);
+  else
+    emit_batch(pass);
+  b.members.clear();
+  b.memberIndices = 0;
+}
+
+void xr_batch_end() {
+  auto& b = sXrBatch;
+  if (!b.active)
+    return;
+  b.active = false;
+  if (b.used > b.uploaded) {
+    const uint64_t base = (b.frameId % gfx::detail::XrBatchSlots) * gfx::detail::XrBatchSlotSize;
+    webgpu::g_queue.WriteBuffer(gfx::detail::resources().xrBatchBuffer, base + b.uploaded, b.staging.data() + b.uploaded,
+                             b.used - b.uploaded);
+    b.uploaded = b.used;
+  }
+  // AURORA_XR_BATCH_STATS=1: replayed draws against draws actually issued.
+  static const bool stats = env_flag("AURORA_XR_BATCH_STATS");
+  if (stats && b.draws >= 50000) {
+    Log.info("XR batching: {} replayed draws in {} batches of {} draws, the rest alone", b.draws, b.batches,
+             b.batchedDraws);
+    b.draws = b.batches = b.batchedDraws = 0;
+  }
+}
+#endif
+
+void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  auto& b = sXrBatch;
+  if (b.active) {
+    ++b.draws;
+    if (!gfx::xr_multiview_replay() || !batchable(data) ||
+        (!gfx::xr_motion_replay() && xr_link_filter(data))) {
+      xr_batch_flush(pass);
+      render_direct(data, pass);
+      return;
+    }
+    if (!b.members.empty() && !joins(*b.members.front(), data))
+      xr_batch_flush(pass);
+    b.members.push_back(&data);
+    b.memberIndices += draw_index_count(data);
+    return;
+  }
+#endif
+  render_direct(data, pass);
 }
 
 } // namespace aurora::gx

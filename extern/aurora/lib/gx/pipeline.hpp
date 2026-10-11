@@ -3,6 +3,10 @@
 #include "../gfx/types.hpp"
 #include "gx.hpp"
 
+namespace aurora::gfx::detail {
+struct FramePacket;
+} // namespace aurora::gfx::detail
+
 namespace aurora::gx {
 struct DrawData {
   gfx::PipelineRef pipeline;
@@ -39,6 +43,12 @@ struct DrawData {
   // XR SpaceWarp motion replay only: the motion-vector twin of xrPipeline
   // (0: not drawn into the motion vectors).
   gfx::PipelineRef xrMotionPipeline = 0;
+  // XR batching (AURORA_XR_BATCH): the batched twins of xrPipeline and
+  // xrMotionPipeline (0: never batched), and the uniform without its
+  // position and normal matrices, hashed (draws batch only when it agrees).
+  gfx::PipelineRef xrBatchPipeline = 0;
+  gfx::PipelineRef xrMotionBatchPipeline = 0;
+  uint64_t uniformSharedKey = 0;
 };
 
 #ifdef __EMSCRIPTEN__
@@ -65,6 +75,13 @@ static_assert(std::has_unique_object_representations_v<PipelineConfig>);
 
 wgpu::RenderPipeline create_pipeline(const PipelineConfig& config, const gfx::RenderTargetLayout& layout);
 void render(const DrawData& data, const wgpu::RenderPassEncoder& pass);
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+// XR batching around an eye or motion replay (encode_xr_replay): begin, flush
+// before anything that changes what later draws see (group 3), end (uploads).
+void xr_batch_begin(const gfx::detail::FramePacket& frame, bool multiview, bool motion);
+void xr_batch_flush(const wgpu::RenderPassEncoder& pass);
+void xr_batch_end();
+#endif
 
 void queue_surface(const u8* dlStart, uint32_t dlSize, bool bigEndian) noexcept;
 } // namespace aurora::gx

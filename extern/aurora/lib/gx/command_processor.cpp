@@ -139,7 +139,13 @@ struct DrawCache {
   gfx::PipelineRef xrMotionRef{};
   gfx::PipelineRef xrMotionForPipeline{};
   uint64_t xrMotionForLayout = 0;
+  // XR batching: the batched twins of the eye and motion pipelines.
+  gfx::PipelineRef xrBatchRef{}, xrBatchForPipeline{};
+  uint64_t xrBatchForLayout = 0;
+  gfx::PipelineRef xrMotionBatchRef{}, xrMotionBatchForPipeline{};
+  uint64_t xrMotionBatchForLayout = 0;
   GXBindGroups bindGroups{};
+  uint64_t uniformSharedKey = 0; // build_uniform's key for uniformRange
   uint64_t bindGeneration = 0;
   GXVtxFmt fmt = GX_MAX_VTXFMT;
   u8 lineMode = 0;
@@ -1123,6 +1129,45 @@ static gfx::PipelineRef xr_motion_pipeline() noexcept {
   return cache.xrMotionRef;
 }
 
+// XR batching: a layout's batched twin (gx::xr_batch_*).
+static const gfx::RenderTargetLayout& xr_batch_layout(const gfx::RenderTargetLayout& of) noexcept {
+  static gfx::RenderTargetLayout batched[2];
+  static uint64_t batchedFor[2] = {0, 0};
+  const int i = of.xrMotion != 0 ? 1 : 0;
+  if (batchedFor[i] != of.key) {
+    batchedFor[i] = of.key;
+    batched[i] = of;
+    batched[i].xrBatch = 1;
+    gfx::detail::finalize_render_target_layout(batched[i]);
+  }
+  return batched[i];
+}
+
+// The batched twins of a draw's eye and motion pipelines (0: never batched:
+// lines and points, or batching off).
+static gfx::PipelineRef xr_batch_pipeline(bool motion) noexcept {
+  auto& cache = sDrawCache;
+  if (!gfx::detail::xr_batching() || cache.config.shaderConfig.lineMode != 0)
+    return 0;
+  const auto* base = motion ? gfx::xr_motion_layout() : gfx::xr_multiview_layout();
+  if (base == nullptr)
+    return 0;
+  const auto& layout = xr_batch_layout(*base);
+  auto& ref = motion ? cache.xrMotionBatchRef : cache.xrBatchRef;
+  auto& forPipeline = motion ? cache.xrMotionBatchForPipeline : cache.xrBatchForPipeline;
+  auto& forLayout = motion ? cache.xrMotionBatchForLayout : cache.xrBatchForLayout;
+  if (forPipeline != cache.pipelineRef || forLayout != layout.key) {
+    static const bool shared = [] {
+      const char* v = std::getenv("AURORA_XR_APPSW_SHARED");
+      return v == nullptr || *v != '0';
+    }();
+    ref = gfx::find_pipeline(motion && shared ? xr_motion_config(cache.config) : cache.config, layout);
+    forPipeline = cache.pipelineRef;
+    forLayout = layout.key;
+  }
+  return ref;
+}
+
 // SpaceWarp motion vectors: each opaque world draw's position matrices are
 // kept by what it draws (its vertex bytes and position array, and how many
 // draws with the same before it this frame), so next frame the same draw
@@ -1276,7 +1321,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
 
   const bool uniformValid = (state.dirty & DirtyUniform) == 0 && cache.uniformRange.size != 0;
   if (!uniformValid) {
-    cache.uniformRange = build_uniform(cache.shaderInfo);
+    cache.uniformRange = build_uniform(cache.shaderInfo, &cache.uniformSharedKey);
     state.dirty &= ~DirtyUniform;
   }
   if (cache.config.shaderConfig.fogRangeEnabled) {
@@ -1374,7 +1419,10 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
   const u32 xrPrevMtx = xr_motion_eligible() ? xr_prev_matrices(raw, vertRange.size, fmt) : 0;
 #endif
   const gfx::Range posRange =
-      sc.decodedPos || sc.decodedAll ? push_decoded_vertices(sc, raw, vtxCount, 4) : gfx::Range{};
+      sc.decodedPos || sc.decodedAll
+          // Aligned to its stride: XR batching indexes it from the pool's start.
+          ? push_decoded_vertices(sc, raw, vtxCount, gfx::detail::xr_batching() ? decode_layout_for(sc).stride : 4)
+          : gfx::Range{};
   gfx::PipelineRef xrPipeline = 0;
   gfx::Range xrIdxRange{};
   u32 xrIndexCount = 0;
@@ -1382,6 +1430,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
   gfx::Range xrSolidIdxRange{};
   u32 xrSolidIndexCount = 0;
   gfx::PipelineRef xrMotionPipeline = 0;
+  bool cls_inside = false; // the draw lies wholly inside any clip (batchable)
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
   // Clipped stage parts: only draws that straddle a clip use the dithering
   // variant; the rest keep early depth (no discard) or are dropped.
@@ -1392,6 +1441,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     XrClipClass cls;
     bool masked;
     xrPipeline = xr_world_pipeline(raw, vtxCount, &cls, outside.data(), &masked, unsolid.data());
+    cls_inside = cls == XrClipClass::Inside;
     if (xrPipeline != 0 && cls == XrClipClass::Inside && (xrMotionPipeline = xr_motion_pipeline()) != 0)
       immediates.xrPrevMtx = xrPrevMtx;
     // A straddling draw's triangles wholly past one plane are left out of
@@ -1448,6 +1498,77 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     }
   }
 #endif
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  // AURORA_XR_BATCH_STATS=1: how many eye draws would merge with the one
+  // before (same eye pipeline, textures, fog, uniforms but the matrices),
+  // and what breaks the rest.
+  {
+    static const bool stats = std::getenv("AURORA_XR_BATCH_STATS") != nullptr;
+    if (stats && xrPipeline != 0) {
+      struct Key {
+        gfx::PipelineRef pipeline = 0;
+        uint64_t uniform = 0;
+        GXBindGroups textures{};
+        u32 dstAlpha = 0, fog = 0;
+        bool eligible = false;
+      };
+      static Key last;
+      static u32 draws = 0, batches = 0, frames = 0, seq = 0;
+      static std::array<u32, 5> breaks{}; // ineligible, pipeline, textures, uniform, fog/alpha
+      // Reordering opaque draws: distinct materials among them per frame.
+      static std::unordered_map<uint64_t, u32> opaqueKeys;
+      static u32 opaque = 0, opaqueGroups = 0, ordered = 0;
+      if (const u32 s = static_cast<u32>(gfx::detail::recording_seq()); s != seq) {
+        seq = s;
+        last = {};
+        opaqueGroups += static_cast<u32>(opaqueKeys.size());
+        opaqueKeys.clear();
+        if (++frames % 600 == 0) {
+          Log.info("XR batching: {} eye draws would go as {} batches ({:.0f}%); breaks: ineligible {}, pipeline {}, "
+                   "textures {}, uniforms {}, fog/alpha {}",
+                   draws, batches, draws ? 100.0 * batches / draws : 0.0, breaks[0], breaks[1], breaks[2], breaks[3],
+                   breaks[4]);
+          Log.info("XR batching, opaque draws regrouped by material: {} opaque as {} groups ({:.0f}%), {} others in order",
+                   opaque, opaqueGroups, opaque ? 100.0 * opaqueGroups / opaque : 0.0, ordered);
+          draws = batches = 0;
+          breaks = {};
+          opaque = opaqueGroups = ordered = 0;
+        }
+      }
+      const Key key{xrPipeline, cache.uniformSharedKey, cache.bindGroups, state.dstAlpha, immediates.fogRangeBase,
+                    instanceCount == 1 && cache.config.shaderConfig.lineMode == 0 && xrSolidIndexCount == 0};
+      ++draws;
+      int why = -1;
+      if (!key.eligible || !last.eligible)
+        why = 0;
+      else if (key.pipeline != last.pipeline)
+        why = 1;
+      else if (std::memcmp(&key.textures, &last.textures, sizeof(key.textures)) != 0)
+        why = 2;
+      else if (key.uniform != last.uniform)
+        why = 3;
+      else if (key.dstAlpha != last.dstAlpha || key.fog != last.fog)
+        why = 4;
+      if (why >= 0) {
+        ++batches;
+        ++breaks[why];
+      }
+      last = key;
+      const auto& c = cache.config;
+      const bool isOpaque = key.eligible && c.depthCompare && c.depthUpdate &&
+                            (c.blendMode == GX_BM_NONE ||
+                             (c.blendMode == GX_BM_BLEND && c.blendFacSrc == GX_BL_ONE && c.blendFacDst == GX_BL_ZERO));
+      if (isOpaque) {
+        ++opaque;
+        uint64_t k = XXH3_64bits_withSeed(&key.pipeline, sizeof(key.pipeline), key.uniform);
+        k = XXH3_64bits_withSeed(&key.textures, sizeof(key.textures), k);
+        ++opaqueKeys[k];
+      } else {
+        ++ordered;
+      }
+    }
+  }
+#endif
   gfx::push_draw_command(DrawData{
       .pipeline = cache.pipelineRef,
       .xrPipeline = xrPipeline,
@@ -1471,6 +1592,9 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
       .xrSolidIdxRange = xrSolidIdxRange,
       .xrSolidIndexCount = xrSolidIndexCount,
       .xrMotionPipeline = xrMotionPipeline,
+      .xrBatchPipeline = xrPipeline != 0 && xrSolidIndexCount == 0 && cls_inside ? xr_batch_pipeline(false) : 0,
+      .xrMotionBatchPipeline = xrMotionPipeline != 0 ? xr_batch_pipeline(true) : 0,
+      .uniformSharedKey = cache.uniformSharedKey,
   });
 }
 

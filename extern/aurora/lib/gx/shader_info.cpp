@@ -416,6 +416,10 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
   return info;
 }
 
+// fill_uniform: where the position and normal matrices went (for
+// build_uniform's key).
+static size_t sPosStart, sPosEnd, sNrmStart, sNrmEnd;
+
 static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
   buf.reserve_extra(info.uniformSize);
 
@@ -444,17 +448,21 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
   }
   buf.append(proj);
 
+  sPosStart = buf.size();
   for (int i = 0; i < MaxPnMtx; i++) {
     buf.append(g_gxState.pnMtx[i].pos);
   }
+  sPosEnd = buf.size();
 
   for (int i = 0; i < MaxTexMtx; i++) {
     buf.append(g_gxState.texMtxs[i]);
   }
 
+  sNrmStart = buf.size();
   for (int i = 0; i < MaxPnMtx; i++) {
     buf.append(g_gxState.pnMtx[i].nrm);
   }
+  sNrmEnd = buf.size();
 
   for (int i = 0; i < info.loadsTevReg.size(); ++i) {
     if (info.loadsTevReg.test(i)) {
@@ -539,11 +547,18 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
   }
 }
 
-gfx::Range build_uniform(const ShaderInfo& info) noexcept {
+gfx::Range build_uniform(const ShaderInfo& info, u64* sharedKey) noexcept {
   ZoneScoped;
   static ByteBuffer buf;
   buf.clear();
   fill_uniform(buf, info);
+  if (sharedKey != nullptr) {
+    // Everything but the position and normal matrices.
+    const u8* d = buf.data();
+    u64 key = XXH3_64bits(d, sPosStart);
+    key = XXH3_64bits_withSeed(d + sPosEnd, sNrmStart - sPosEnd, key);
+    *sharedKey = XXH3_64bits_withSeed(d + sNrmEnd, buf.size() - sNrmEnd, key);
+  }
   return gfx::push_uniform(buf.data(), buf.size());
 }
 } // namespace aurora::gx

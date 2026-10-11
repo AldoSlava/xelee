@@ -8,7 +8,7 @@
 
 namespace aurora::gfx {
 
-inline constexpr size_t InlineDrawPayloadSize = 192; // gx::DrawData with its XR multiview twin pipelines and eye index lists
+inline constexpr size_t InlineDrawPayloadSize = 224; // gx::DrawData with its XR twin pipelines, eye index lists, batch keys
 inline constexpr size_t MaxColorAttachments = 8;
 inline constexpr uint32_t SceneColorAttachmentIndex = 0;
 
@@ -39,6 +39,9 @@ struct RenderTargetLayout {
   // XR Application SpaceWarp: the motion-vector twin of an eye pipeline
   // (writes current minus previous NDC, unblended, into one RGBA16F target).
   uint32_t xrMotion = 0;
+  // XR batching: a batched twin (one draw for a run of draws; per-draw data
+  // looked up per vertex, gx::xr_batch_*).
+  uint32_t xrBatch = 0;
 };
 
 /// Generational handle: 0 is never valid, and IDs are not reused after unregister_draw_type.

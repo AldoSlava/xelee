@@ -494,8 +494,18 @@ void initialize() {
     };
     out = g_device.CreateBuffer(&descriptor);
   };
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  // Also read as storage by XR-batched shaders (a batch's draws' matrices).
+  createBuffer(g_resources.uniformBuffer,
+               wgpu::BufferUsage::Uniform | wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst, UniformBufferSize,
+               "Shared Uniform Buffer");
+  createBuffer(g_resources.xrBatchBuffer,
+               wgpu::BufferUsage::Storage | wgpu::BufferUsage::Index | wgpu::BufferUsage::CopyDst,
+               XrBatchSlotSize * XrBatchSlots, "XR batch buffer");
+#else
   createBuffer(g_resources.uniformBuffer, wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst, UniformBufferSize,
                "Shared Uniform Buffer");
+#endif
   createBuffer(g_resources.vertexBuffer,
                wgpu::BufferUsage::Storage | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst, VertexBufferSize,
                "Shared Vertex Buffer");
@@ -550,6 +560,19 @@ void initialize() {
                     .type = wgpu::BufferBindingType::ReadOnlyStorage,
                 },
         },
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+        // XR batching: the batch buffer, and the uniform pool as storage
+        wgpu::BindGroupLayoutEntry{
+            .binding = 2,
+            .visibility = wgpu::ShaderStage::Vertex,
+            .buffer = wgpu::BufferBindingLayout{.type = wgpu::BufferBindingType::ReadOnlyStorage},
+        },
+        wgpu::BindGroupLayoutEntry{
+            .binding = 3,
+            .visibility = wgpu::ShaderStage::Vertex,
+            .buffer = wgpu::BufferBindingLayout{.type = wgpu::BufferBindingType::ReadOnlyStorage},
+        },
+#endif
     };
     const wgpu::BindGroupLayoutDescriptor layoutDesc{
         .label = "Static bind group layout",
@@ -566,6 +589,16 @@ void initialize() {
             .binding = 1,
             .buffer = g_resources.storageBuffer,
         },
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+        wgpu::BindGroupEntry{
+            .binding = 2,
+            .buffer = g_resources.xrBatchBuffer,
+        },
+        wgpu::BindGroupEntry{
+            .binding = 3,
+            .buffer = g_resources.uniformBuffer,
+        },
+#endif
     };
     const wgpu::BindGroupDescriptor bindGroupDescriptor{
         .label = "Static bind group",
@@ -650,6 +683,7 @@ void shutdown() {
   }
   g_resources.vertexBuffer = {};
   g_resources.uniformBuffer = {};
+  g_resources.xrBatchBuffer = {};
   g_resources.indexBuffer = {};
   g_resources.storageBuffer = {};
   g_stagingBuffers.fill({});

@@ -768,6 +768,7 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
   g_currentPipeline = UINTPTR_MAX;
   g_xrMultiviewReplay = target.viewMask != 0;
   g_xrMotionReplay = target.motion;
+  gx::xr_batch_begin(frame, target.viewMask != 0, target.motion);
   pass.SetBindGroup(0, resources().staticBindGroup);
   pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
 
@@ -786,6 +787,7 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
       return g ? g : gx::g_xrDisabledBindGroup;
     };
     uint32_t boundTransform = 0;
+    gx::xr_batch_flush(pass);
     pass.SetBindGroup(3, group(0));
     if (target.fullViewport) {
       const bool whole = view.width <= 0.f || view.height <= 0.f;
@@ -836,6 +838,7 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
         case CommandType::Draw:
           if (c.xrCategory == category && c.data.draw.encoder != nullptr) {
             if (c.xrTransform != boundTransform) {
+              gx::xr_batch_flush(pass); // batched draws see the transform they were recorded with
               boundTransform = c.xrTransform;
               pass.SetBindGroup(3, group(boundTransform));
             }
@@ -851,12 +854,14 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
       }
     }
   }
+  gx::xr_batch_flush(pass);
   if (target.finish != nullptr) {
     pass.SetViewport(0.f, 0.f, w, h, 0.f, 1.f);
     pass.SetScissorRect(0, 0, target.size.width, target.size.height);
     target.finish(pass, target.finishUser);
   }
   pass.End();
+  gx::xr_batch_end();
   g_xrMultiviewReplay = false;
   g_xrMotionReplay = false;
   g_currentPipeline = UINTPTR_MAX;
