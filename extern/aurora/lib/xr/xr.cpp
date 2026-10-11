@@ -1476,6 +1476,13 @@ struct Presentation {
 std::atomic<uint32_t> g_earlyEyes{0}, g_earlyResumed{0};
 // SpaceWarp: 3D frames dropped for starting too late (render_eyes), logged.
 std::atomic<uint32_t> g_appSwDropped{0};
+// ... and all frames without a 3D image since the start (late or none
+// free), for adaptive SpaceWarp.
+std::atomic<uint32_t> g_appSwMissed{0};
+// Adaptive SpaceWarp (adapt_space_warp): off for the rest of a fight the GPU
+// can't keep at 60 with it.
+std::atomic<bool> g_appSwOn{true};
+bool appsw_on() { return B.appSw && g_appSwOn.load(std::memory_order_relaxed); }
 // 3D frames done over 1 ms after the slot they're released in, so far
 // (pacing probe; dynamic resolution's brake).
 std::atomic<uint32_t> g_lateFrames{0};
@@ -3390,6 +3397,50 @@ void sync_boundary() {
 #endif
 }
 
+// Adaptive SpaceWarp (AURORA_XR_APPSW_ADAPT, on): a fight that misses over
+// 6 3D frames in each of two 2 s windows running with it, past its first 5 s
+// (pipelines compiling), turns it off until the next fight (one window: a
+// hitch on Battlefield missed 8); the runtime then runs the loop at the
+// display's rate again, and the motion pass and draw matching stop. Four-CPU
+// Brinstar, GPU-bound with it (eyes 8.8 ms, motion 4.2), lost 16 a second.
+void adapt_space_warp(bool fight, bool held, std::chrono::steady_clock::time_point now) {
+  if (!B.appSw)
+    return;
+  static const bool adapt = env_flag("AURORA_XR_APPSW_ADAPT", true);
+  static bool wasFight = false;
+  static std::chrono::steady_clock::time_point fightStart{}, windowStart{};
+  static uint32_t missedAtWindow = 0;
+  static int strikes = 0;
+  const uint32_t missed = g_appSwMissed.load(std::memory_order_relaxed);
+  if (fight && !wasFight) {
+    fightStart = windowStart = now;
+    missedAtWindow = missed;
+    strikes = 0;
+    gfx::set_xr_motion_active(true);
+    if (!g_appSwOn.exchange(true))
+      Log.info("SpaceWarp back on for a new fight");
+  }
+  wasFight = fight;
+  if (!adapt || !fight || !g_appSwOn)
+    return;
+  if (held || now - fightStart < std::chrono::seconds(5)) {
+    windowStart = now;
+    missedAtWindow = missed;
+    strikes = 0;
+    return;
+  }
+  if (now - windowStart < std::chrono::seconds(2))
+    return;
+  strikes = missed - missedAtWindow > 6 ? strikes + 1 : 0;
+  if (strikes >= 2) {
+    g_appSwOn = false;
+    gfx::set_xr_motion_active(false);
+    Log.warn("SpaceWarp off for this fight: {} 3D frames missed in 2 s", missed - missedAtWindow);
+  }
+  windowStart = now;
+  missedAtWindow = missed;
+}
+
 bool render_xr_frame() {
   XrFrameState fs{XR_TYPE_FRAME_STATE};
   {
@@ -3519,6 +3570,7 @@ bool render_xr_frame() {
   // Paused, or held before it starts for placing the stage.
   const int placing = g_placing.load();
   const bool held = g_fightPaused || placing > 0;
+  adapt_space_warp(fight, held, now);
   {
     // Each 3D image is due for g_displayPerGameFrame display frames under
     // lock-step pacing; one shown longer is late. Counted once per image.
@@ -3588,7 +3640,7 @@ bool render_xr_frame() {
       // infinite far plane: 0 is infinitely far, 1 at the 0.05 m near plane.
       const auto& mvs = g_streams[kMotion];
       const auto& mds = g_streams[kMotionDepth];
-      if (B.appSw && mvs.haveImage && mds.haveImage) {
+      if (appsw_on() && mvs.haveImage && mds.haveImage) {
         auto& sw = spaceWarp[i];
         sw = {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB};
         sw.motionVectorSubImage.swapchain = mvs.swapchain;
@@ -5166,7 +5218,7 @@ void render_motion_early(gfx::detail::FramePacket& frame,
   R.motionCopy = false;
   static const bool presubmit = env_flag("AURORA_XR_PRESUBMIT", true);
   // Staged, the motion pass draws straight into images of ours anyway.
-  if (!B.appSw || !R.early || !presubmit || g_streams[kMotion].staged ||
+  if (!appsw_on() || !R.early || !presubmit || g_streams[kMotion].staged ||
       g_streams[kMotionDepth].format != VK_FORMAT_D32_SFLOAT ||
       !env_flag("AURORA_XR_APPSW_EARLY", true))
     return;
@@ -5348,10 +5400,11 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
     // four-CPU Brinstar settled at 33 3D frames a second for good.
     // AURORA_XR_APPSW_DROP_MS: how late (0: never drop).
     static const float dropMs = env_float("AURORA_XR_APPSW_DROP_MS", 16.7f);
-    const int64_t tickNs = B.appSw && dropMs > 0.f && R.renderedTick != 0 ? pace_wait_ns(R.renderedTick) : 0;
+    const int64_t tickNs = appsw_on() && dropMs > 0.f && R.renderedTick != 0 ? pace_wait_ns(R.renderedTick) : 0;
     if (tickNs != 0 && monotonic_ns() - tickNs > static_cast<int64_t>(dropMs * 1e6)) {
       R.missedStereo = true;
       ++g_appSwDropped;
+      ++g_appSwMissed;
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
       return false;
     }
@@ -5411,13 +5464,15 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       ++R.timing.worldFrames;
       R.renderedViews = views;
       R.renderedStereo = true;
-      if (B.appSw)
+      if (appsw_on())
         render_motion(cmd, frame, passes);
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
     } else {
       // No 3D image this frame: still a fight, so don't present the flat
       // frame nobody sees (the headset keeps showing the last 3D image).
       R.missedStereo = true;
+      if (appsw_on())
+        ++g_appSwMissed;
       if (g_dynres.on)
         update_dynamic_resolution(true);
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
@@ -5503,7 +5558,7 @@ void render_3d_frame(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& 
     // loop starts: once frames ran late, waiting up to 10 ms for it held up
     // the render worker every frame, and four-CPU Brinstar never caught up
     // (33 3D frames a second). Missing it keeps the last HUD up a frame.
-    const auto hudWait = std::chrono::milliseconds(B.appSw ? 2 : 10);
+    const auto hudWait = std::chrono::milliseconds(appsw_on() ? 2 : 10);
     if (auto dst = acquire_slot(g_streams[kHud], hudWait)) {
       compose(cmd, dst, {2}, kZoneComposeHud);
     }

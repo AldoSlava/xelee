@@ -1079,10 +1079,11 @@ static bool xr_motion_eligible() noexcept {
 }
 
 static gfx::PipelineRef xr_motion_pipeline() noexcept {
-  if (!xr_motion_eligible())
+  const auto* layout = gfx::xr_motion_layout(); // null once adaptive SpaceWarp turns it off
+  if (layout == nullptr || !xr_motion_eligible())
     return 0;
   auto& cache = sDrawCache;
-  return xr_twin(*gfx::xr_motion_layout(), cache.xrMotionRef, cache.xrMotionForPipeline, cache.xrMotionForLayout);
+  return xr_twin(*layout, cache.xrMotionRef, cache.xrMotionForPipeline, cache.xrMotionForLayout);
 }
 
 // SpaceWarp motion vectors: each opaque world draw's position matrices are
@@ -1115,8 +1116,12 @@ static u32 xr_prev_matrices(const u8* raw, size_t bytes, GXVtxFmt fmt) noexcept 
   ZoneScoped;
   auto& h = sXrMotion;
   if (const uint64_t seq = gfx::detail::recording_seq(); seq != h.seq) {
+    // Frames went by unmatched (no world, or SpaceWarp off): too old.
+    const bool consecutive = seq == h.seq + 1;
     h.seq = seq;
     h.prev.swap(h.cur);
+    if (!consecutive)
+      h.prev.clear();
     h.cur.clear();
     h.seen.clear();
   }

@@ -1415,7 +1415,16 @@ void set_xr_motion_layout(const RenderTargetLayout& layout) noexcept {
   g_xrMotionLayout.store(new RenderTargetLayout(layout), std::memory_order_release);
 }
 
-const RenderTargetLayout* xr_motion_layout() noexcept { return g_xrMotionLayout.load(std::memory_order_acquire); }
+namespace {
+std::atomic<bool> g_xrMotionActive{true};
+} // namespace
+
+void set_xr_motion_active(bool active) noexcept { g_xrMotionActive.store(active, std::memory_order_relaxed); }
+
+const RenderTargetLayout* xr_motion_layout() noexcept {
+  return g_xrMotionActive.load(std::memory_order_relaxed) ? g_xrMotionLayout.load(std::memory_order_acquire)
+                                                           : nullptr;
+}
 
 namespace {
 
