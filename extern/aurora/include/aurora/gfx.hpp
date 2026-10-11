@@ -36,6 +36,9 @@ struct RenderTargetLayout {
   // XR soft clip: the eye shaders fade geometry out (ordered dither) across a
   // band above the clip plane (aurora_xr_world_clip with a fade band).
   uint32_t xrSoftClip = 0;
+  // XR Application SpaceWarp: the motion-vector twin of an eye pipeline
+  // (writes current minus previous NDC, unblended, into one RGBA16F target).
+  uint32_t xrMotion = 0;
 };
 
 /// Generational handle: 0 is never valid, and IDs are not reused after unregister_draw_type.

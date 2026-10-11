@@ -148,6 +148,9 @@ inline void finalize_render_target_layout(RenderTargetLayout& layout) noexcept {
   if (layout.xrSoftClip != 0) {
     hasher.update(layout.xrSoftClip + 0x50f7u);
   }
+  if (layout.xrMotion != 0) {
+    hasher.update(layout.xrMotion + 0x3a71u);
+  }
   layout.key = hasher.digest();
 }
 

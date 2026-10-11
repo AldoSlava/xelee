@@ -36,6 +36,9 @@ struct DrawData {
   gfx::PipelineRef xrSolidPipeline = 0;
   gfx::Range xrSolidIdxRange{};
   uint32_t xrSolidIndexCount = 0;
+  // XR SpaceWarp motion replay only: the motion-vector twin of xrPipeline
+  // (0: not drawn into the motion vectors).
+  gfx::PipelineRef xrMotionPipeline = 0;
 };
 
 #ifdef __EMSCRIPTEN__

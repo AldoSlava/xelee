@@ -68,7 +68,11 @@ static bool env_flag(const char* name) {
 void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
   // A multiview replay can only bind multiview pipelines.
-  if (gfx::xr_multiview_replay() && (data.xrPipeline == 0 || !gfx::bind_pipeline(data.xrPipeline, pass))) {
+  if (gfx::xr_motion_replay()) {
+    if (data.xrMotionPipeline == 0 || !gfx::bind_pipeline(data.xrMotionPipeline, pass))
+      return;
+  } else if (gfx::xr_multiview_replay() &&
+             (data.xrPipeline == 0 || !gfx::bind_pipeline(data.xrPipeline, pass))) {
     return;
   }
   if (!gfx::xr_multiview_replay() && !gfx::bind_pipeline(data.pipeline, pass)) {
@@ -172,7 +176,8 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
   // The same draw's triangles inside the clip's solid region, without the
   // discard (same bind groups and buffers; the pipelines share a layout).
-  if (gfx::xr_multiview_replay() && data.xrSolidIndexCount != 0 && gfx::bind_pipeline(data.xrSolidPipeline, pass)) {
+  if (gfx::xr_multiview_replay() && !gfx::xr_motion_replay() && data.xrSolidIndexCount != 0 &&
+      gfx::bind_pipeline(data.xrSolidPipeline, pass)) {
     pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
     if (data.dstAlpha != UINT32_MAX) {
       const wgpu::Color color{0.f, 0.f, 0.f, data.dstAlpha / 255.f};

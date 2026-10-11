@@ -135,6 +135,10 @@ struct DrawCache {
   gfx::PipelineRef xrSoftRef{};
   gfx::PipelineRef xrSoftForPipeline{};
   uint64_t xrSoftForLayout = 0;
+  // Its motion-vector twin (Application SpaceWarp), for plain opaque draws.
+  gfx::PipelineRef xrMotionRef{};
+  gfx::PipelineRef xrMotionForPipeline{};
+  uint64_t xrMotionForLayout = 0;
   GXBindGroups bindGroups{};
   uint64_t bindGeneration = 0;
   GXVtxFmt fmt = GX_MAX_VTXFMT;
@@ -1060,6 +1064,95 @@ static gfx::PipelineRef xr_world_pipeline(const u8* raw, u16 vtxCount, XrClipCla
   return xr_twin(*mv, cache.xrPipelineRef, cache.xrForPipeline, cache.xrForLayout);
 }
 
+// The motion-vector pipeline for a world draw drawn whole and plainly in the
+// eyes (0: none). Only opaque draws that write depth and colour, without
+// alpha test or depth textures: the SpaceWarp depth and motion are of the
+// nearest solid surface; whatever is blended or cut out over it is not.
+static bool xr_motion_eligible() noexcept {
+  if (gfx::xr_motion_layout() == nullptr || !gfx::xr_recording_world())
+    return false;
+  const auto& c = sDrawCache.config;
+  const bool opaque = c.blendMode == GX_BM_NONE ||
+                      (c.blendMode == GX_BM_BLEND && c.blendFacSrc == GX_BL_ONE && c.blendFacDst == GX_BL_ZERO);
+  return opaque && c.depthCompare && c.depthUpdate && c.colorUpdate && !c.shaderConfig.alphaCompare &&
+         c.shaderConfig.lineMode == 0 && c.shaderConfig.zTexOp == 0;
+}
+
+static gfx::PipelineRef xr_motion_pipeline() noexcept {
+  if (!xr_motion_eligible())
+    return 0;
+  auto& cache = sDrawCache;
+  return xr_twin(*gfx::xr_motion_layout(), cache.xrMotionRef, cache.xrMotionForPipeline, cache.xrMotionForLayout);
+}
+
+// SpaceWarp motion vectors: each opaque world draw's position matrices are
+// kept by what it draws (its vertex bytes and position array, and how many
+// draws with the same before it this frame), so next frame the same draw
+// finds where its vertices were. Display lists are copied into the FIFO,
+// so the bytes, not their address, are what stays the same. A draw found
+// gets last frame's matrices pushed to the storage buffer; one not found
+// (new, immediate-mode data that changes, or a jump: a respawn, a cut) is
+// taken as fixed in the game world.
+namespace {
+struct XrPrevMatrices {
+  std::array<Mat3x4<float>, MaxPnMtx> pos;
+};
+struct XrMotionHistory {
+  uint64_t seq = 0;
+  std::unordered_map<uint64_t, XrPrevMatrices> prev, cur;
+  std::unordered_map<uint64_t, uint32_t> seen; // this frame's draws per content key
+} sXrMotion;
+} // namespace
+
+static u32 xr_prev_matrices(const u8* raw, size_t bytes, GXVtxFmt fmt) noexcept {
+  // AURORA_XR_APPSW_MATCH=0: every draw as if fixed in the game world.
+  static const bool match = [] {
+    const char* v = std::getenv("AURORA_XR_APPSW_MATCH");
+    return v == nullptr || *v != '0';
+  }();
+  if (!match)
+    return 0;
+  ZoneScoped;
+  auto& h = sXrMotion;
+  if (const uint64_t seq = gfx::detail::recording_seq(); seq != h.seq) {
+    h.seq = seq;
+    h.prev.swap(h.cur);
+    h.cur.clear();
+    h.seen.clear();
+  }
+  const auto& state = g_gxState;
+  uint64_t content = XXH3_64bits_withSeed(raw, bytes, fmt);
+  content ^= reinterpret_cast<uintptr_t>(state.arrays[GX_VA_POS].data) * 0x9E3779B97F4A7C15ull;
+  const uint64_t key = content + 0x632BE59BD9B4E019ull * h.seen[content]++;
+  XrPrevMatrices now;
+  for (u32 i = 0; i < MaxPnMtx; ++i)
+    now.pos[i] = state.pnMtx[i].pos;
+  const auto it = h.prev.find(key);
+  h.cur.insert_or_assign(key, now);
+  // AURORA_XR_MOTION_STATS=1: how many opaque world draws found themselves
+  // in last frame, every 20000.
+  static const bool stats = std::getenv("AURORA_XR_MOTION_STATS") != nullptr;
+  if (stats) {
+    static u32 found, n;
+    found += it != h.prev.end() ? 1 : 0;
+    if (++n % 20000 == 0) {
+      Log.info("XR motion: {} of {} opaque world draws matched last frame's", found, n);
+      found = n = 0;
+    }
+  }
+  if (it == h.prev.end())
+    return 0;
+  // A jump of over 40 units (camera space) in the draw's own matrix is a
+  // cut, not motion.
+  const auto& a = it->second.pos[std::min<u32>(state.currentPnMtx, MaxPnMtx - 1)];
+  const auto& b = now.pos[std::min<u32>(state.currentPnMtx, MaxPnMtx - 1)];
+  const float dx = a.m0[3] - b.m0[3], dy = a.m1[3] - b.m1[3], dz = a.m2[3] - b.m2[3];
+  if (dx * dx + dy * dy + dz * dz > 40.f * 40.f)
+    return 0;
+  const auto range = gfx::push_storage(reinterpret_cast<const u8*>(it->second.pos.data()), sizeof(it->second.pos));
+  return range.offset / sizeof(u32) + 1; // 0 is none
+}
+
 // The eye pipeline without the clip's discard, for a straddling draw's
 // triangles wholly inside the solid region.
 static gfx::PipelineRef xr_solid_pipeline() noexcept {
@@ -1233,6 +1326,11 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
 
   cache.lastDrawFmt = fmt;
   const auto& sc = cache.config.shaderConfig;
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  // Before the decoded positions: a draw merging into this one needs them
+  // to end the storage pool.
+  const u32 xrPrevMtx = xr_motion_eligible() ? xr_prev_matrices(raw, vertRange.size, fmt) : 0;
+#endif
   const gfx::Range posRange =
       sc.decodedPos || sc.decodedAll ? push_decoded_vertices(sc, raw, vtxCount, 4) : gfx::Range{};
   gfx::PipelineRef xrPipeline = 0;
@@ -1241,6 +1339,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
   gfx::PipelineRef xrSolidPipeline = 0;
   gfx::Range xrSolidIdxRange{};
   u32 xrSolidIndexCount = 0;
+  gfx::PipelineRef xrMotionPipeline = 0;
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
   // Clipped stage parts: only draws that straddle a clip use the dithering
   // variant; the rest keep early depth (no discard) or are dropped.
@@ -1251,6 +1350,8 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     XrClipClass cls;
     bool masked;
     xrPipeline = xr_world_pipeline(raw, vtxCount, &cls, outside.data(), &masked, unsolid.data());
+    if (xrPipeline != 0 && cls == XrClipClass::Inside && (xrMotionPipeline = xr_motion_pipeline()) != 0)
+      immediates.xrPrevMtx = xrPrevMtx;
     // A straddling draw's triangles wholly past one plane are left out of
     // the eyes (their own index list; the flat frame keeps every one). On
     // the Quest the dithering pipeline's discard costs early depth for the
@@ -1327,6 +1428,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
       .xrSolidPipeline = xrSolidPipeline,
       .xrSolidIdxRange = xrSolidIdxRange,
       .xrSolidIndexCount = xrSolidIndexCount,
+      .xrMotionPipeline = xrMotionPipeline,
   });
 }
 

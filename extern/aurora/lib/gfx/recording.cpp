@@ -582,8 +582,12 @@ void enqueue_pass(FramePacket& frame, uint32_t passIndex) {
 namespace detail {
 bool g_preserveFrameBuffer = false;
 
+static uint64_t g_recordingSeq = 0;
+uint64_t recording_seq() noexcept { return g_recordingSeq; }
+
 void begin_recording(FramePacket& packet, size_t frameSlot) {
   CHECK(!g_recorder.active(), "A recording session is already active");
+  ++g_recordingSeq;
   if (g_recorder.normalRequested && webgpu::enable_normal_buffer()) {
     g_recorder.normalRequested = false;
   }
@@ -1398,6 +1402,20 @@ void set_xr_multiview_layout(const RenderTargetLayout& layout) noexcept {
 const RenderTargetLayout* xr_multiview_layout() noexcept {
   return g_xrMultiviewLayout.load(std::memory_order_acquire);
 }
+
+namespace {
+std::atomic<const RenderTargetLayout*> g_xrMotionLayout{nullptr};
+} // namespace
+
+void set_xr_motion_layout(const RenderTargetLayout& layout) noexcept {
+  const auto* current = g_xrMotionLayout.load(std::memory_order_acquire);
+  if (current != nullptr && current->key == layout.key) {
+    return;
+  }
+  g_xrMotionLayout.store(new RenderTargetLayout(layout), std::memory_order_release);
+}
+
+const RenderTargetLayout* xr_motion_layout() noexcept { return g_xrMotionLayout.load(std::memory_order_acquire); }
 
 namespace {
 

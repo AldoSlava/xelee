@@ -107,7 +107,8 @@ struct PendingAccess {
 };
 
 struct Slot {
-  VkImage image = VK_NULL_HANDLE; // the runtime's swapchain image
+  VkImage image = VK_NULL_HANDLE; // the runtime's swapchain image, or a staged stream's own (ring)
+  VkDeviceMemory memory = VK_NULL_HANDLE; // ring images: theirs
 
   // Render worker only.
   wgpu::SharedTextureMemory stm;
@@ -130,7 +131,10 @@ struct Slot {
   std::vector<VkSemaphore> waitSems;
 };
 
-enum StreamId : int { kScreen = 0, kStereo = 1, kHud = 2, kStreamCount = 3 };
+// kMotion and kMotionDepth: Application SpaceWarp's low-res motion vectors
+// and depth for the 3D image (XR_FB_space_warp; only with AURORA_XR_APPSW,
+// else empty). Released with the 3D image of the same frame.
+enum StreamId : int { kScreen = 0, kStereo = 1, kHud = 2, kMotion = 3, kMotionDepth = 4, kStreamCount = 5 };
 
 struct Stream {
   const char* name = "";
@@ -154,8 +158,21 @@ struct Stream {
   VkDeviceMemory dumpMem = VK_NULL_HANDLE;
   void* dumpPtr = nullptr;
   int dumpSlot = -1;
+  bool depth = false;     // a depth swapchain (kMotionDepth)
+  bool ownFormat = false; // keeps its own format (not the color swapchains' sRGB one)
+  bool unwaited = false;  // render worker: its slot was taken before the XR thread waited it
   bool dumped = false;
+  // Staged (create_ring): the render worker draws into images of ours, never
+  // the runtime's, and the XR thread copies each into a swapchain image as
+  // it hands it over (release_staged). Ring slots are Free, Rendering, Ready,
+  // then Released while the copy runs.
+  bool staged = false;
+  std::vector<Slot> ring;
+  int dumpRing = -1; // the ring slot whose copy also dumps (AURORA_XR_DUMP)
 };
+
+// The images the render worker draws into.
+std::vector<Slot>& worker_slots(Stream& st) { return st.staged ? st.ring : st.slots; }
 
 enum class Phase { Idle, Starting, SlotsReady, Imported, Failed };
 
@@ -417,6 +434,12 @@ struct Bridge {
 
   bool hasRefreshRateExt = false;
   bool hasPerfSettingsExt = false;
+  // Application SpaceWarp (XR_FB_space_warp, AURORA_XR_APPSW): the runtime
+  // runs the app at half the display rate and synthesizes the frames between
+  // from each frame's motion vectors and depth, at this size per eye.
+  bool hasSpaceWarpExt = false;
+  bool appSw = false;
+  uint32_t mvWidth = 0, mvHeight = 0;
 #ifdef XR_META_performance_metrics
   // The runtime's own counters (XR_META_performance_metrics): the
   // compositor's GPU time per display frame, for dynamic resolution's budget.
@@ -559,7 +582,8 @@ uint32_t find_memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
 
 VkImageMemoryBarrier barrier(VkImage img, VkImageLayout from, VkImageLayout to, VkAccessFlags srcA,
                              VkAccessFlags dstA, uint32_t srcQ = VK_QUEUE_FAMILY_IGNORED,
-                             uint32_t dstQ = VK_QUEUE_FAMILY_IGNORED) {
+                             uint32_t dstQ = VK_QUEUE_FAMILY_IGNORED,
+                             VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) {
   VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
   b.srcAccessMask = srcA;
   b.dstAccessMask = dstA;
@@ -568,7 +592,7 @@ VkImageMemoryBarrier barrier(VkImage img, VkImageLayout from, VkImageLayout to, 
   b.srcQueueFamilyIndex = srcQ;
   b.dstQueueFamilyIndex = dstQ;
   b.image = img;
-  b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS};
+  b.subresourceRange = {aspect, 0, 1, 0, VK_REMAINING_ARRAY_LAYERS};
   return b;
 }
 
@@ -617,6 +641,7 @@ bool create_instance() {
     B.hasPerfMetricsExt |= !std::strcmp(p.extensionName, XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
 #endif
     B.hasHandTrackingExt |= !std::strcmp(p.extensionName, XR_EXT_HAND_TRACKING_EXTENSION_NAME);
+    B.hasSpaceWarpExt |= !std::strcmp(p.extensionName, XR_FB_SPACE_WARP_EXTENSION_NAME);
 #ifdef XR_META_boundary_visibility
     B.hasBoundaryVisibilityExt |= !std::strcmp(p.extensionName, XR_META_BOUNDARY_VISIBILITY_EXTENSION_NAME);
 #endif
@@ -638,6 +663,10 @@ bool create_instance() {
   if (B.hasPerfMetricsExt)
     exts.push_back(XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
 #endif
+  // Multiview is decided later (with Dawn's device): size_stereo_stream.
+  B.hasSpaceWarpExt &= env_flag("AURORA_XR_APPSW", false);
+  if (B.hasSpaceWarpExt)
+    exts.push_back(XR_FB_SPACE_WARP_EXTENSION_NAME);
   // AURORA_XR_HANDS=0 leaves hand tracking off, for measuring what it costs.
   B.hasHandTrackingExt &= env_flag("AURORA_XR_HANDS", true);
   if (B.hasHandTrackingExt)
@@ -672,6 +701,19 @@ bool create_instance() {
   XrSystemGetInfo si{XR_TYPE_SYSTEM_GET_INFO};
   si.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
   XR_TRY(xrGetSystem(B.instance, &si, &B.systemId));
+  if (B.hasSpaceWarpExt) {
+    XrSystemSpaceWarpPropertiesFB sw{XR_TYPE_SYSTEM_SPACE_WARP_PROPERTIES_FB};
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    sp.next = &sw;
+    if (XR_SUCCEEDED(xrGetSystemProperties(B.instance, B.systemId, &sp)) && sw.recommendedMotionVectorImageRectWidth > 0) {
+      B.mvWidth = sw.recommendedMotionVectorImageRectWidth;
+      B.mvHeight = sw.recommendedMotionVectorImageRectHeight;
+      B.appSw = true;
+      Log.info("Application SpaceWarp on: motion vectors and depth at {}x{} per eye", B.mvWidth, B.mvHeight);
+    } else {
+      Log.warn("XR_FB_space_warp offered without a motion vector size; SpaceWarp off");
+    }
+  }
   if (B.hasPassthroughExt) {
     B.createPassthrough = xr_proc<PFN_xrCreatePassthroughFB>("xrCreatePassthroughFB");
     B.destroyPassthrough = xr_proc<PFN_xrDestroyPassthroughFB>("xrDestroyPassthroughFB");
@@ -800,7 +842,7 @@ bool adopt_dawn_device() {
 // already sRGB-encoded bytes unchanged and the compositor decodes them.
 VkImageCreateInfo swapchain_image_info(const Stream& st) {
   VkImageCreateInfo ici{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-  ici.flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+  ici.flags = st.ownFormat ? 0 : VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
   ici.imageType = VK_IMAGE_TYPE_2D;
   ici.format = st.format;
   ici.extent = {st.width, st.height, 1};
@@ -808,16 +850,27 @@ VkImageCreateInfo swapchain_image_info(const Stream& st) {
   ici.arrayLayers = st.layers;
   ici.samples = VK_SAMPLE_COUNT_1_BIT;
   ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-  ici.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  // The SpaceWarp images also take copies of the motion pass (render_eyes).
+  ici.usage = st.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                             VK_IMAGE_USAGE_TRANSFER_DST_BIT
+              : st.ownFormat
+                  ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                             : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   return ici;
 }
 
 bool create_swapchain(Stream& st) {
+  if (st.width == 0)
+    return true; // not in use (the SpaceWarp streams without AURORA_XR_APPSW)
   XrSwapchainCreateInfo ci{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-  ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT |
-                  XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+  ci.usageFlags = st.depth ? XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
+                                XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT
+                  : st.ownFormat ? XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
+                                       XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT
+                                 : XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT |
+                                       XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
   ci.format = st.swapFormat;
   ci.sampleCount = 1;
   ci.width = st.width;
@@ -842,6 +895,56 @@ bool create_swapchain(Stream& st) {
     VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VK_TRY(vkCreateFence(B.dev, &fci, nullptr, &s.fence));
   }
+  return true;
+}
+
+// A staged stream's own images: the swapchain's, in the format Dawn draws as
+// (copied into the sRGB swapchain bit for bit), also a copy source.
+VkImageCreateInfo ring_image_info(const Stream& st) {
+  VkImageCreateInfo ici = swapchain_image_info(st);
+  ici.flags = 0;
+  ici.usage = (st.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) |
+              VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  return ici;
+}
+
+// Staging the eyes (AURORA_XR_STAGED, on with SpaceWarp): drawn into the
+// runtime's images, a frame could start only once the compositor gave one
+// back, and the render worker waited on it. With SpaceWarp's 60 Hz loop that
+// came only as the next loop began, one late frame held its images into the
+// next frame's, and four-CPU Brinstar stuck at 33 3D frames a second. Drawn
+// into a ring of our own, nothing the render worker does waits on the
+// runtime; the XR thread copies a finished image in when it hands it over
+// (40 MB for the 3D image). Without SpaceWarp, four-CPU Brinstar finished
+// frames 8 ms sooner but kept a little less resolution (1.07 against 1.18,
+// the copy) for nothing gained: off. AURORA_XR_STAGED_IMAGES: the ring's size.
+bool create_ring(Stream& st) {
+  const bool stageable = &st == &g_streams[kStereo] || &st == &g_streams[kHud] || &st == &g_streams[kMotion] ||
+                         &st == &g_streams[kMotionDepth];
+  if (!stageable || st.width == 0 || !env_flag("AURORA_XR_STAGED", B.appSw))
+    return true;
+  const int count = std::clamp(static_cast<int>(env_float("AURORA_XR_STAGED_IMAGES", 4.f)), 2, 8);
+  const VkImageCreateInfo ici = ring_image_info(st);
+  st.ring = std::vector<Slot>(static_cast<size_t>(count));
+  for (auto& s : st.ring) {
+    VK_TRY(vkCreateImage(B.dev, &ici, nullptr, &s.image));
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(B.dev, s.image, &mr);
+    VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = find_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VK_TRY(vkAllocateMemory(B.dev, &mai, nullptr, &s.memory));
+    VK_TRY(vkBindImageMemory(B.dev, s.image, s.memory, 0));
+    VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    cai.commandPool = B.pool;
+    cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cai.commandBufferCount = 1;
+    VK_TRY(vkAllocateCommandBuffers(B.dev, &cai, &s.cmd));
+    VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VK_TRY(vkCreateFence(B.dev, &fci, nullptr, &s.fence));
+    s.state = SlotState::Free;
+  }
+  st.staged = true;
   return true;
 }
 
@@ -898,6 +1001,24 @@ bool size_stereo_stream() {
   g_streams[kStereo].width = g_multiview ? eyeW : eyeW * 2;
   g_streams[kStereo].height = eyeH;
   g_streams[kStereo].layers = g_multiview ? 2 : 1;
+  if (B.appSw && !g_multiview) {
+    Log.warn("Application SpaceWarp off: it needs the multiview eyes");
+    B.appSw = false;
+  }
+  if (B.appSw) {
+    for (int i : {kMotion, kMotionDepth}) {
+      auto& st = g_streams[i];
+      st.width = B.mvWidth;
+      st.height = B.mvHeight;
+      st.layers = 2;
+      st.ownFormat = true;
+    }
+    g_streams[kMotion].name = "motion";
+    g_streams[kMotion].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    g_streams[kMotion].swapFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    g_streams[kMotionDepth].name = "motion depth";
+    g_streams[kMotionDepth].depth = true; // its format: create_session, from the runtime's
+  }
   return true;
 }
 
@@ -937,7 +1058,27 @@ bool create_session() {
     return false;
   }
   for (auto& st : g_streams)
-    st.swapFormat = B.swapFormat;
+    if (!st.ownFormat)
+      st.swapFormat = B.swapFormat;
+  if (B.appSw) {
+    // SpaceWarp's depth: 32-bit float if offered, else 24-bit.
+    auto& d = g_streams[kMotionDepth];
+    for (int64_t f : {int64_t{VK_FORMAT_D32_SFLOAT}, int64_t{VK_FORMAT_D24_UNORM_S8_UINT}})
+      if (std::find(fmts.begin(), fmts.end(), f) != fmts.end()) {
+        d.format = static_cast<VkFormat>(f);
+        d.swapFormat = f;
+        break;
+      }
+    if (d.swapFormat == 0 ||
+        std::find(fmts.begin(), fmts.end(), int64_t{VK_FORMAT_R16G16B16A16_SFLOAT}) == fmts.end()) {
+      Log.warn("SpaceWarp: no motion vector or depth swapchain format; SpaceWarp off");
+      B.appSw = false;
+      for (int i : {kMotion, kMotionDepth})
+        g_streams[i].width = 0;
+    }
+    if (B.appSw)
+      Log.info("SpaceWarp depth: {}", d.format == VK_FORMAT_D32_SFLOAT ? "D32_SFLOAT" : "D24_UNORM_S8_UINT");
+  }
   // The 3D image takes the framebuffer's channel order when the eyes render
   // straight into it (single-sample BGRA8 framebuffers, e.g. desktop NVIDIA).
   auto& stereo = g_streams[kStereo];
@@ -1260,7 +1401,11 @@ bool acquire_ahead(Stream& st) {
   }
   // Acquiring needn't wait for the last image's release, only waiting on
   // it does; deferred eyes draw into it in between.
-  const bool preAcquire = g_deferEyes && &st == &g_streams[kStereo];
+  // SpaceWarp's images go with the 3D one: waiting on them blocked the
+  // render worker until the next loop, every frame.
+  const bool preAcquire = g_deferEyes && !st.staged &&
+                          (&st == &g_streams[kStereo] || &st == &g_streams[kMotion] ||
+                           &st == &g_streams[kMotionDepth]);
   if (pending < 0 && held < st.slots.size() && (!haveWaited || preAcquire)) {
     uint32_t index = 0;
     XR_TRY(xrAcquireSwapchainImage(st.swapchain, nullptr, &index));
@@ -1329,13 +1474,15 @@ struct Presentation {
 // Frames whose eyes went early, and of those, drawn again at the frame's end
 // (world draws after the split); logged with the frame stats.
 std::atomic<uint32_t> g_earlyEyes{0}, g_earlyResumed{0};
+// SpaceWarp: 3D frames dropped for starting too late (render_eyes), logged.
+std::atomic<uint32_t> g_appSwDropped{0};
 // 3D frames done over 1 ms after the slot they're released in, so far
 // (pacing probe; dynamic resolution's brake).
 std::atomic<uint32_t> g_lateFrames{0};
 // Render worker: the longest wait for a swapchain image, and waits over 2 ms,
 // per stream (read racily by the frame stats).
-std::array<int64_t, 3> g_acquireWaitMaxNs{};
-std::array<uint32_t, 3> g_acquireWaitsOver2{};
+std::array<int64_t, kStreamCount> g_acquireWaitMaxNs{};
+std::array<uint32_t, kStreamCount> g_acquireWaitsOver2{};
 
 // Pacing probe (Android): where each 3D frame's time goes after its tick,
 // and when its GPU work finishes against the display time it's due for. A
@@ -1535,6 +1682,14 @@ std::string pace_summary() {
   return s;
 }
 
+// The most display frames past the tick an image is held for: about 33 ms
+// (4 at 120 Hz, 2 with SpaceWarp's 60 Hz loop). Holding images longer ties
+// up the swapchain's few images, and the render worker then finds none free.
+int latency_cap() {
+  const float hz = g_displayHz > 0.f ? g_displayHz.load() : 120.f;
+  return std::max(std::max(g_displayPerGameFrame.load(), 1) + 1, static_cast<int>(hz / 30.f + 0.01f));
+}
+
 void note_ready_latency(uint64_t lat) {
   auto& p = g_present;
   p.samples[p.next++ % p.samples.size()] = static_cast<uint8_t>(std::min<uint64_t>(lat, 15));
@@ -1555,9 +1710,7 @@ void note_ready_latency(uint64_t lat) {
     if (acc * 100 >= static_cast<int>(p.count) * 97)
       break;
   }
-  // At most two display frames past the ideal: holding images longer ties up
-  // the swapchain's few images, and the render worker then finds none free.
-  k = std::min(k, std::max(g_displayPerGameFrame.load(), 1) + 2);
+  k = std::min(k, latency_cap());
   if (k > p.latency) {
     p.latency = k;
     p.steadyLower = 0;
@@ -1596,8 +1749,7 @@ void note_lateness(int latency, bool late) {
   p.lateNext = (p.lateNext + 1) % static_cast<int>(p.late.size());
   if (++p.lateFrames == 600)
     p.bans[p.latency] = 0;
-  const int cap = std::max(g_displayPerGameFrame.load(), 1) + 2;
-  if (p.lateCount > 2 && p.latency < cap) {
+  if (p.lateCount > 2 && p.latency < latency_cap()) {
     const int n = std::min(p.bans[p.latency]++, 3);
     p.bannedUntilNs[p.latency] = monotonic_ns() + (int64_t{15'000'000'000} << n);
     ++p.latency;
@@ -1611,7 +1763,61 @@ void note_lateness(int latency, bool late) {
 // runtime expects, then hands it to the runtime.
 void write_dump_layout(const std::array<XrView, 2>& views);
 
+// Fixed-latency presentation: hold a 3D or HUD image for its slot (true:
+// not yet; g_mutex held).
+// On with dynamic resolution, which keeps frames on time: without it,
+// frames running late on an overloaded stage were held into slots the
+// render worker then lacked (Pokémon Stadium rock, four CPUs: 58.2 ->
+// 55.5 game fps). AURORA_XR_FIXED_LATENCY=<n> forces it on.
+bool held_for_slot(Stream& st, Slot& sl) {
+  const bool fixedLatency = g_present.forced > 0 || (g_present.forced < 0 && g_dynres.on);
+  if (!fixedLatency || g_displayPerGameFrame <= 0 || sl.tickFrame == 0 ||
+      !(&st == &g_streams[kStereo] || &st == &g_streams[kHud] || &st == &g_streams[kMotion] ||
+        &st == &g_streams[kMotionDepth]))
+    return false;
+  if (sl.readySeen == 0) {
+    sl.readySeen = B.displayFrame;
+#ifndef __ANDROID__
+    // Android samples when the GPU work is done (the pacing probe).
+    if (&st == &g_streams[kStereo] && B.displayFrame >= sl.tickFrame)
+      note_ready_latency(B.displayFrame - sl.tickFrame);
+#endif
+  }
+  if (B.displayFrame < sl.tickFrame + static_cast<uint64_t>(g_present.latency)) {
+    if (&st == &g_streams[kStereo] && sl.readySeen == B.displayFrame)
+      ++g_present.held;
+    return true;
+  }
+  return false;
+}
+
+bool import_dawn_semaphores(PendingAccess& fromDawn, std::vector<VkSemaphore>& out) {
+  for (int fd : fromDawn.fds) {
+    VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkSemaphore sem = VK_NULL_HANDLE;
+    VK_TRY(vkCreateSemaphore(B.dev, &sci, nullptr, &sem));
+    VkImportSemaphoreFdInfoKHR imp{VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR};
+    imp.semaphore = sem;
+    imp.flags = kSemImportFlags;
+    imp.handleType = kSemHandle;
+    imp.fd = fd; // Vulkan owns it on success
+    if (B.importSemaphoreFd(B.dev, &imp) != VK_SUCCESS) {
+      close(fd);
+      vkDestroySemaphore(B.dev, sem, nullptr);
+      Log.error("Importing Dawn's semaphore failed");
+      return false;
+    }
+    out.push_back(sem);
+  }
+  fromDawn.fds.clear();
+  return true;
+}
+
+bool release_staged(Stream& st, bool& released);
+
 bool release_ready(Stream& st, bool& released) {
+  if (st.staged)
+    return release_staged(st, released);
   released = false;
   for (;;) {
     int index = -1;
@@ -1648,28 +1854,8 @@ bool release_ready(Stream& st, bool& released) {
             return true;
         }
 #endif
-      // Fixed-latency presentation: hold a 3D or HUD image for its slot.
-      // On with dynamic resolution, which keeps frames on time: without it,
-      // frames running late on an overloaded stage were held into slots the
-      // render worker then lacked (Pokémon Stadium rock, four CPUs: 58.2 ->
-      // 55.5 game fps). AURORA_XR_FIXED_LATENCY=<n> forces it on.
-      const bool fixedLatency = g_present.forced > 0 || (g_present.forced < 0 && g_dynres.on);
-      if (fixedLatency && g_displayPerGameFrame > 0 && sl.tickFrame != 0 &&
-          (&st == &g_streams[kStereo] || &st == &g_streams[kHud])) {
-        if (sl.readySeen == 0) {
-          sl.readySeen = B.displayFrame;
-#ifndef __ANDROID__
-          // Android samples when the GPU work is done (the pacing probe).
-          if (&st == &g_streams[kStereo] && B.displayFrame >= sl.tickFrame)
-            note_ready_latency(B.displayFrame - sl.tickFrame);
-#endif
-        }
-        if (B.displayFrame < sl.tickFrame + static_cast<uint64_t>(g_present.latency)) {
-          if (&st == &g_streams[kStereo] && sl.readySeen == B.displayFrame)
-            ++g_present.held;
-          return true;
-        }
-      }
+      if (held_for_slot(st, sl))
+        return true;
       fromDawn = std::move(st.slots[index].fromDawn);
       st.slots[index].fromDawn = {};
       views = st.slots[index].views;
@@ -1678,33 +1864,23 @@ bool release_ready(Stream& st, bool& released) {
     Slot& s = st.slots[index];
     retire_slot(st, s, index);
 
-    for (int fd : fromDawn.fds) {
-      VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-      VkSemaphore sem = VK_NULL_HANDLE;
-      VK_TRY(vkCreateSemaphore(B.dev, &sci, nullptr, &sem));
-      VkImportSemaphoreFdInfoKHR imp{VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR};
-      imp.semaphore = sem;
-      imp.flags = kSemImportFlags;
-      imp.handleType = kSemHandle;
-      imp.fd = fd; // Vulkan owns it on success
-      if (B.importSemaphoreFd(B.dev, &imp) != VK_SUCCESS) {
-        close(fd);
-        vkDestroySemaphore(B.dev, sem, nullptr);
-        Log.error("Importing Dawn's semaphore failed");
-        return false;
-      }
-      s.waitSems.push_back(sem);
-    }
+    if (!import_dawn_semaphores(fromDawn, s.waitSems))
+      return false;
 
     // OpenXR takes Vulkan color swapchain images back in
     // COLOR_ATTACHMENT_OPTIMAL; Dawn may have left another layout.
-    const VkImageLayout from = fromDawn.newLayout != VK_IMAGE_LAYOUT_UNDEFINED
-                                   ? fromDawn.newLayout
-                                   : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    const bool dumpNow = !B.dumpDir.empty() && !st.dumped && st.dumpSlot < 0 &&
+    // Depth images (SpaceWarp's) go back in DEPTH_STENCIL_ATTACHMENT_OPTIMAL.
+    const VkImageLayout home =
+        st.depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    const VkImageAspectFlags aspect =
+        !st.depth ? VK_IMAGE_ASPECT_COLOR_BIT
+        : st.format == VK_FORMAT_D24_UNORM_S8_UINT ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                                                   : VK_IMAGE_ASPECT_DEPTH_BIT;
+    const VkImageLayout from = fromDawn.newLayout != VK_IMAGE_LAYOUT_UNDEFINED ? fromDawn.newLayout : home;
+    const bool dumpNow = !st.ownFormat && !B.dumpDir.empty() && !st.dumped && st.dumpSlot < 0 &&
                          st.releases >= static_cast<uint64_t>(env_float("AURORA_XR_DUMP_AFTER", 300.f)) &&
                          (st.dumpBuf || create_dump_buffer(st));
-    const bool record = dumpNow || from != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    const bool record = dumpNow || from != home;
     if (record) {
       VkCommandBufferBeginInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
       cbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1725,9 +1901,12 @@ bool release_ready(Stream& st, bool& released) {
         if (&st == &g_streams[kStereo])
           write_dump_layout(s.views);
       }
-      if (layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-        const auto back = barrier(s.image, layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT, 0);
+      if (layout != home) {
+        const auto back =
+            barrier(s.image, layout, home,
+                    VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                        VK_ACCESS_TRANSFER_READ_BIT,
+                    0, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, aspect);
         vkCmdPipelineBarrier(s.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
                              nullptr, 0, nullptr, 1, &back);
       }
@@ -1748,6 +1927,144 @@ bool release_ready(Stream& st, bool& released) {
     {
       std::lock_guard lock{g_mutex};
       s.state = SlotState::Released;
+    }
+    st.haveImage = true;
+    st.lastRelease = std::chrono::steady_clock::now();
+    st.shownViews = views;
+    st.shownRect = rect;
+    ++st.releases;
+    released = true;
+  }
+}
+
+// A staged stream's hand-over (create_ring): its oldest finished image, once
+// its fixed-latency slot comes, is copied into the swapchain image the XR
+// thread holds waited (acquire_ahead), after Dawn's work on it, and that is
+// released. The ring image goes back to the render worker when the copy is
+// done. Frames go in the order the render worker took their images.
+bool release_staged(Stream& st, bool& released) {
+  released = false;
+  bool freed = false;
+  for (int i = 0; i < static_cast<int>(st.ring.size()); ++i) {
+    Slot& r = st.ring[i];
+    if (!r.inFlight || vkGetFenceStatus(B.dev, r.fence) != VK_SUCCESS)
+      continue;
+    vkResetFences(B.dev, 1, &r.fence);
+    r.inFlight = false;
+    for (VkSemaphore sem : r.waitSems)
+      vkDestroySemaphore(B.dev, sem, nullptr);
+    r.waitSems.clear();
+    if (st.dumpRing == i) {
+      st.dumpRing = -1;
+      st.dumped = true;
+      write_dump(st);
+    }
+    std::lock_guard lock{g_mutex};
+    r.state = SlotState::Free;
+    freed = true;
+  }
+  if (freed)
+    g_slotFreeCv.notify_all();
+  const VkImageLayout home =
+      st.depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  const VkImageAspectFlags aspect =
+      !st.depth ? VK_IMAGE_ASPECT_COLOR_BIT
+      : st.format == VK_FORMAT_D24_UNORM_S8_UINT ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT
+                                                 : VK_IMAGE_ASPECT_DEPTH_BIT;
+  const VkImageAspectFlags copyAspect = st.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+  for (;;) {
+    int index = -1, image = -1;
+    PendingAccess fromDawn;
+    std::array<XrView, 2> views{};
+    std::array<int32_t, 2> rect{};
+    {
+      std::lock_guard lock{g_mutex};
+      for (int i = 0; i < static_cast<int>(st.ring.size()); ++i) {
+        const SlotState state = st.ring[i].state;
+        if ((state == SlotState::Rendering || state == SlotState::Ready) &&
+            (index < 0 || st.ring[i].acquireSeq < st.ring[index].acquireSeq))
+          index = i;
+      }
+      if (index < 0 || st.ring[index].state != SlotState::Ready || held_for_slot(st, st.ring[index]))
+        return true;
+      for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
+        if (st.slots[i].state == SlotState::Free)
+          image = i;
+      if (image < 0)
+        return true; // no swapchain image waited yet: next loop
+      fromDawn = std::move(st.ring[index].fromDawn);
+      st.ring[index].fromDawn = {};
+      views = st.ring[index].views;
+      rect = st.ring[index].rect;
+    }
+    Slot& r = st.ring[index];
+    Slot& s = st.slots[image];
+    if (!import_dawn_semaphores(fromDawn, r.waitSems))
+      return false;
+    const VkImageLayout from = fromDawn.newLayout != VK_IMAGE_LAYOUT_UNDEFINED ? fromDawn.newLayout
+                               : fromDawn.oldLayout != VK_IMAGE_LAYOUT_UNDEFINED ? fromDawn.oldLayout
+                                                                                 : home;
+    VkCommandBufferBeginInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    cbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_TRY(vkResetCommandBuffer(r.cmd, 0));
+    VK_TRY(vkBeginCommandBuffer(r.cmd, &cbi));
+    constexpr VkAccessFlags written = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    const std::array toCopy{
+        barrier(r.image, from, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, written, VK_ACCESS_TRANSFER_READ_BIT,
+                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, aspect),
+        barrier(s.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, aspect),
+    };
+    vkCmdPipelineBarrier(r.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, static_cast<uint32_t>(toCopy.size()), toCopy.data());
+    // Dynamic resolution: only the corner drawn (the layer shows only that).
+    const bool corner = &st == &g_streams[kStereo] && rect[0] > 0 && rect[1] > 0;
+    VkImageCopy region{};
+    region.srcSubresource = {copyAspect, 0, 0, st.layers};
+    region.dstSubresource = region.srcSubresource;
+    region.extent = {corner ? static_cast<uint32_t>(rect[0]) : st.width,
+                     corner ? static_cast<uint32_t>(rect[1]) : st.height, 1};
+    vkCmdCopyImage(r.cmd, r.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, s.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    VkImageLayout layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    const bool dumpNow = !st.ownFormat && !B.dumpDir.empty() && !st.dumped && st.dumpRing < 0 &&
+                         st.releases >= static_cast<uint64_t>(env_float("AURORA_XR_DUMP_AFTER", 300.f)) &&
+                         (st.dumpBuf || create_dump_buffer(st));
+    if (dumpNow) {
+      const auto toSrc = barrier(s.image, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                 VK_ACCESS_TRANSFER_READ_BIT);
+      vkCmdPipelineBarrier(r.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                           nullptr, 1, &toSrc);
+      VkBufferImageCopy rb{};
+      rb.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, st.layers}; // layers stack in the dump
+      rb.imageExtent = {st.width, st.height, 1};
+      vkCmdCopyImageToBuffer(r.cmd, s.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, st.dumpBuf, 1, &rb);
+      st.dumpRing = index;
+      layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      if (&st == &g_streams[kStereo])
+        write_dump_layout(views);
+    }
+    const auto back = barrier(s.image, layout, home, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT, 0,
+                              VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, aspect);
+    vkCmdPipelineBarrier(r.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &back);
+    VK_TRY(vkEndCommandBuffer(r.cmd));
+    std::vector<VkPipelineStageFlags> stages(r.waitSems.size(), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.waitSemaphoreCount = static_cast<uint32_t>(r.waitSems.size());
+    si.pWaitSemaphores = r.waitSems.data();
+    si.pWaitDstStageMask = stages.data();
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &r.cmd;
+    VK_TRY(vkQueueSubmit(B.queue, 1, &si, r.fence));
+    r.inFlight = true;
+    if (&st == &g_streams[kStereo])
+      trace_counter("XR 3D released", static_cast<int64_t>(st.releases & 1));
+    XR_TRY(xrReleaseSwapchainImage(st.swapchain, nullptr));
+    {
+      std::lock_guard lock{g_mutex};
+      s.state = SlotState::Released;
+      r.state = SlotState::Released;
     }
     st.haveImage = true;
     st.lastRelease = std::chrono::steady_clock::now();
@@ -1821,10 +2138,18 @@ void request_refresh_rate() {
 
 // Recompute how many display frames each game frame gets from the current
 // display rate (on session start and on XR_FB_display_refresh_rate changes).
+// The XR loop's period while Application SpaceWarp runs it at half the
+// display rate (xrWaitFrame's predictedDisplayPeriod; 0: the display's).
+int64_t g_loopPeriodNs = 0;
+
 void update_pacing() {
   float rate = 0.f;
   if (B.getRefreshRate)
     B.getRefreshRate(B.session, &rate);
+  // SpaceWarp: the loop runs at what xrWaitFrame paces it to, and the game
+  // ticks on that.
+  if (g_loopPeriodNs > 0)
+    rate = static_cast<float>(1e9 / static_cast<double>(g_loopPeriodNs));
   if (rate <= 0.f && !B.getRefreshRate)
     rate = 60.f; // no extension (e.g. some runtimes): assume a 60 Hz display
   g_displayHz = rate;
@@ -3071,6 +3396,29 @@ bool render_xr_frame() {
     TraceSection trace{"xrWaitFrame"};
     XR_TRY(xrWaitFrame(B.session, nullptr, &fs));
   }
+  // Application SpaceWarp halves the loop's rate while it's active (frames
+  // with SpaceWarp info): pace the game on the loop, not the display.
+  if (B.appSw && fs.predictedDisplayPeriod > 0) {
+    const int64_t period = fs.predictedDisplayPeriod;
+    const int64_t current = g_loopPeriodNs > 0 ? g_loopPeriodNs
+                                               : static_cast<int64_t>(1e9 / std::max(g_displayHz.load(), 1.f));
+    if (std::llabs(period - current) * 10 > current) {
+      g_loopPeriodNs = period;
+      update_pacing();
+      // Latency counts loop frames: keep its time (rounded up, within the
+      // cap) and start its samples and bans over in the new unit.
+      auto& p = g_present;
+      if (p.forced < 0 && p.latency > 0)
+        p.latency = std::min(static_cast<int>((p.latency * current + period - 1) / period), latency_cap());
+      p.count = p.next = 0;
+      p.sinceUpdate = p.steadyLower = 0;
+      p.lateLatency = -1;
+      p.bannedUntilNs = {};
+      p.bans = {};
+      Log.info("XR loop period {:.2f} ms: SpaceWarp {}", period / 1e6,
+               g_displayHz.load() < 100.f ? "active" : "idle");
+    }
+  }
   B.loopWaitNs = monotonic_ns();
   if (B.loopLastWaitNs != 0) {
     const int64_t gap = B.loopWaitNs - B.loopLastWaitNs;
@@ -3210,6 +3558,7 @@ bool render_xr_frame() {
     layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&ptLayer);
   }
   std::array<XrCompositionLayerProjectionView, 2> projViews{};
+  std::array<XrCompositionLayerSpaceWarpInfoFB, 2> spaceWarp{};
   XrCompositionLayerProjection proj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
   XrCompositionLayerQuad hudQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad screenQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
@@ -3232,6 +3581,29 @@ bool render_xr_frame() {
       projViews[i].subImage.imageRect = {
           {x, 0}, {part ? stereo.shownRect[0] : eyeW, part ? stereo.shownRect[1] : static_cast<int32_t>(stereo.height)}};
       projViews[i].subImage.imageArrayIndex = stereo.layers > 1 ? static_cast<uint32_t>(i) : 0;
+      // Application SpaceWarp: this image's motion vectors and depth (handed
+      // over with it). Motion includes head motion (the previous frame's
+      // eye matrices, as Meta's XrSpaceWarp sample does); the app's space
+      // never moves, so its delta is identity. Depth is reversed with an
+      // infinite far plane: 0 is infinitely far, 1 at the 0.05 m near plane.
+      const auto& mvs = g_streams[kMotion];
+      const auto& mds = g_streams[kMotionDepth];
+      if (B.appSw && mvs.haveImage && mds.haveImage) {
+        auto& sw = spaceWarp[i];
+        sw = {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB};
+        sw.motionVectorSubImage.swapchain = mvs.swapchain;
+        sw.motionVectorSubImage.imageRect = {{0, 0}, {static_cast<int32_t>(mvs.width), static_cast<int32_t>(mvs.height)}};
+        sw.motionVectorSubImage.imageArrayIndex = static_cast<uint32_t>(i);
+        sw.appSpaceDeltaPose = {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
+        sw.depthSubImage.swapchain = mds.swapchain;
+        sw.depthSubImage.imageRect = {{0, 0}, {static_cast<int32_t>(mds.width), static_cast<int32_t>(mds.height)}};
+        sw.depthSubImage.imageArrayIndex = static_cast<uint32_t>(i);
+        sw.minDepth = 0.f;
+        sw.maxDepth = 1.f;
+        sw.nearZ = std::numeric_limits<float>::infinity();
+        sw.farZ = 0.05f;
+        projViews[i].next = &sw;
+      }
     }
     proj.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     proj.space = B.space;
@@ -3347,13 +3719,13 @@ bool render_xr_frame() {
              "3D images shown 1/2/3/4+ display frames: {}/{}/{}/{}; presented {} display frames after the tick "
              "({} held, raised {} times for late frames); XR loop: wait to end {:.1f} ms at most, {} over 4 ms; gaps {:.1f} ms at most, {} over 10 ms; "
              "{:.1f} ms least before display; slow loops' sections (most ms, times largest): {}; "
-             "early eyes {} ({} redrawn); image waits (most ms, over 2 ms) 3D {:.1f}/{} HUD {:.1f}/{} screen {:.1f}/{}{}",
+             "early eyes {} ({} redrawn, {} dropped late); image waits (most ms, over 2 ms) 3D {:.1f}/{} HUD {:.1f}/{} screen {:.1f}/{}{}",
              B.framesShown / secs, 100.0 * B.fightFrames / std::max<uint64_t>(B.framesShown, 1),
              B.releasedSinceStats[kScreen] / secs, B.releasedSinceStats[kStereo] / secs,
              B.releasedSinceStats[kHud] / secs, B.shownHistogram[0], B.shownHistogram[1], B.shownHistogram[2],
              B.shownHistogram[3], g_present.latency, g_present.held, g_present.raisedForLate, B.loopMaxNs / 1e6, B.loopOver4,
              B.gapMaxNs / 1e6, B.gapOver10, B.leadMinNs / 1e6, sections, g_earlyEyes.exchange(0),
-             g_earlyResumed.exchange(0), g_acquireWaitMaxNs[kStereo] / 1e6, g_acquireWaitsOver2[kStereo],
+             g_earlyResumed.exchange(0), g_appSwDropped.exchange(0), g_acquireWaitMaxNs[kStereo] / 1e6, g_acquireWaitsOver2[kStereo],
              g_acquireWaitMaxNs[kHud] / 1e6, g_acquireWaitsOver2[kHud], g_acquireWaitMaxNs[kScreen] / 1e6,
              g_acquireWaitsOver2[kScreen], pace_summary());
     g_acquireWaitMaxNs = {};
@@ -3431,8 +3803,10 @@ bool setup() {
   if (!B.prepared || !adopt_dawn_device() || !size_stereo_stream() || !create_session())
     return false;
   for (auto& st : g_streams)
-    if (!create_swapchain(st))
+    if (!create_swapchain(st) || !create_ring(st))
       return false;
+  if (g_streams[kStereo].staged)
+    Log.info("3D images staged: {} of our own per stream, copied into the swapchains", g_streams[kStereo].ring.size());
   if (!create_input())
     Log.warn("Controller input unavailable");
   if (!create_pointer_textures())
@@ -3462,6 +3836,14 @@ void teardown() {
     for (auto& st : g_streams) {
       for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
         retire_slot(st, st.slots[i], i);
+      for (auto& r : st.ring) {
+        if (r.inFlight)
+          vkWaitForFences(B.dev, 1, &r.fence, VK_TRUE, UINT64_MAX);
+        r.inFlight = false;
+        for (VkSemaphore sem : r.waitSems)
+          vkDestroySemaphore(B.dev, sem, nullptr);
+        r.waitSems.clear();
+      }
     }
   }
   for (auto& sp : B.aimSpace) {
@@ -3520,6 +3902,19 @@ void teardown() {
   B.session = XR_NULL_HANDLE;
   if (B.dev) {
     for (auto& st : g_streams) {
+      // Dawn's textures over the ring images never touch them again either.
+      for (auto& r : st.ring) {
+        if (r.fence)
+          vkDestroyFence(B.dev, r.fence, nullptr);
+        if (r.cmd)
+          vkFreeCommandBuffers(B.dev, B.pool, 1, &r.cmd);
+        if (r.image)
+          vkDestroyImage(B.dev, r.image, nullptr);
+        if (r.memory)
+          vkFreeMemory(B.dev, r.memory, nullptr);
+      }
+      st.ring.clear();
+      st.staged = false;
       for (auto& s : st.slots) {
         if (s.fence)
           vkDestroyFence(B.dev, s.fence, nullptr);
@@ -3570,8 +3965,8 @@ void thread_main() {
     bool drawing = false;
     {
       std::lock_guard lock{g_mutex};
-      for (const auto& st : g_streams)
-        for (const auto& s : st.slots)
+      for (auto& st : g_streams)
+        for (const auto& s : worker_slots(st))
           drawing |= s.state == SlotState::Rendering;
     }
     if (!drawing)
@@ -3587,8 +3982,8 @@ void thread_main() {
 // XR thread created the swapchains.
 bool wrap_swapchains_into_dawn() {
   for (auto& st : g_streams) {
-    const VkImageCreateInfo ici = swapchain_image_info(st);
-    for (auto& s : st.slots) {
+    const VkImageCreateInfo ici = st.staged ? ring_image_info(st) : swapchain_image_info(st);
+    for (auto& s : worker_slots(st)) {
       s.stm = wgpu::SharedTextureMemory::Acquire(dawn::native::vulkan::CreateSharedTextureMemoryFromVkImage(
           webgpu::g_device.Get(), reinterpret_cast<uint64_t>(s.image), &ici, st.name));
       if (!s.stm) {
@@ -3611,12 +4006,12 @@ bool wrap_swapchains_into_dawn() {
 // The oldest image the XR thread has ready, so images come back in the
 // order they were acquired.
 int take_slot_locked(Stream& st, bool unwaited = false) {
+  auto& slots = worker_slots(st);
   int best = -1;
-  for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
-    if (st.slots[i].state == SlotState::Free &&
-        (best < 0 || st.slots[i].acquireSeq < st.slots[best].acquireSeq))
+  for (int i = 0; i < static_cast<int>(slots.size()); ++i)
+    if (slots[i].state == SlotState::Free && (best < 0 || slots[i].acquireSeq < slots[best].acquireSeq))
       best = i;
-  if (best < 0 && unwaited)
+  if (best < 0 && unwaited && !st.staged)
     for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
       if (st.slots[i].state == SlotState::Acquired && !st.slots[i].claimed)
         best = i;
@@ -3628,7 +4023,6 @@ int take_slot_locked(Stream& st, bool unwaited = false) {
 // land just after the render worker asks.
 // `unwaited`: may take an image acquired but not yet waited (g_deferEyes);
 // its contents may be written by the GPU only after await_slot_waited.
-bool g_slotUnwaited = false; // render worker: the slot just taken wasn't waited
 
 wgpu::Texture acquire_slot(Stream& st, std::chrono::milliseconds wait = std::chrono::milliseconds(10),
                            bool unwaited = false) {
@@ -3649,18 +4043,23 @@ wgpu::Texture acquire_slot(Stream& st, std::chrono::milliseconds wait = std::chr
     index = take_slot_locked(st, unwaited);
     if (index < 0)
       return {};
-    g_slotUnwaited = st.slots[index].state == SlotState::Acquired;
-    if (g_slotUnwaited)
-      st.slots[index].claimed = true;
-    else
-      st.slots[index].state = SlotState::Rendering;
+    auto& slots = worker_slots(st);
+    const bool claimed = unwaited && slots[index].state == SlotState::Acquired;
+    st.unwaited = claimed;
+    if (claimed) {
+      slots[index].claimed = true;
+    } else {
+      slots[index].state = SlotState::Rendering;
+      if (st.staged)
+        slots[index].acquireSeq = ++st.acquireSeq; // handed over in this order
+    }
   }
-  Slot& s = st.slots[index];
+  Slot& s = worker_slots(st)[index];
   // xrWaitSwapchainImage already returned: no fences. The contents are not
   // kept, so the image starts UNDEFINED.
   wgpu::SharedTextureMemoryVkImageLayoutBeginState bs{};
   bs.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  bs.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  bs.newLayout = st.depth ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   wgpu::SharedTextureMemoryBeginAccessDescriptor bd{};
   bd.nextInChain = &bs;
   // Dynamic resolution renders a corner of the stereo image; marked
@@ -3679,14 +4078,14 @@ wgpu::Texture acquire_slot(Stream& st, std::chrono::milliseconds wait = std::chr
 // Render worker: until the XR thread has waited the image it took unwaited
 // (acquire_slot), counted as this frame's wait for an image.
 void await_slot_waited(Stream& st) {
-  if (!g_slotUnwaited || st.renderingSlot < 0)
+  if (!st.unwaited || st.renderingSlot < 0)
     return;
   const int64_t start = monotonic_ns();
   std::unique_lock lock{g_mutex};
   g_slotFreeCv.wait(lock, [&] {
-    return st.slots[st.renderingSlot].state != SlotState::Acquired || g_phase != Phase::Imported;
+    return worker_slots(st)[st.renderingSlot].state != SlotState::Acquired || g_phase != Phase::Imported;
   });
-  g_slotUnwaited = false;
+  st.unwaited = false;
   const int64_t waited = monotonic_ns() - start;
   if (&st == &g_streams[kStereo]) {
     g_pace.slotWaitNs += waited;
@@ -3701,7 +4100,7 @@ void release_slot(Stream& st, const std::array<XrView, 2>* views, std::array<int
                   uint64_t tickFrame = 0) {
   if (st.renderingSlot < 0)
     return;
-  Slot& s = st.slots[st.renderingSlot];
+  Slot& s = worker_slots(st)[st.renderingSlot];
   st.renderingSlot = -1;
   wgpu::SharedTextureMemoryVkImageLayoutEndState es{};
   wgpu::SharedTextureMemoryEndAccessState state{};
@@ -3865,9 +4264,19 @@ struct ReplayTarget {
 // kZoneFrame has only a begin, written by the frame's first flat pass; the
 // whole frame runs from it to the last end written (the GPU time dynamic
 // resolution steers by, compositor preemptions included).
-enum TimingZone : uint32_t { kZone3D, kZone3DRight, kZoneCompose3D, kZoneHud, kZoneComposeHud, kZoneFrame, kZoneCount };
+// kZoneMotion: the SpaceWarp motion vectors (render_motion).
+enum TimingZone : uint32_t {
+  kZone3D,
+  kZone3DRight,
+  kZoneCompose3D,
+  kZoneHud,
+  kZoneComposeHud,
+  kZoneFrame,
+  kZoneMotion,
+  kZoneCount
+};
 constexpr std::array<const char*, kZoneCount> kZoneNames{"3D eyes", "3D right eye (fallback)", "3D compose", "HUD",
-                                                         "HUD compose", "frame"};
+                                                         "HUD compose", "frame", "motion"};
 
 struct GpuTiming {
   wgpu::QuerySet queries;
@@ -3898,7 +4307,10 @@ struct GpuTiming {
 // game camera space (aurora_xr_world_clip) and their fade bands, four to a
 // vec4.
 static_assert(gfx::XrMaxClipPlanes == AURORA_XR_MAX_CLIPS && gfx::XrMaxClipPlanes % 4 == 0);
-constexpr uint64_t kMultiviewEyeSize = 2 * 64 + 16 + gfx::XrMaxClipPlanes * 16 + gfx::XrMaxClipPlanes * 4;
+// Last, for Application SpaceWarp's motion vectors, both eyes' previous
+// frame matrices: for a point fixed in the game world (from this frame's
+// game camera space), then last frame's own (from last frame's).
+constexpr uint64_t kMultiviewEyeSize = 2 * 64 + 16 + gfx::XrMaxClipPlanes * 16 + gfx::XrMaxClipPlanes * 4 + 4 * 64;
 
 struct Renderer3D {
   uint64_t layoutKey = 0;
@@ -3932,6 +4344,16 @@ struct Renderer3D {
   wgpu::RenderPipeline coverClear, coverSet;
   uint64_t directKey = 0;
   bool loggedPath = false;
+  // SpaceWarp: the last frame's world-to-clip matrix per eye, per world
+  // transform (C without V_game⁻¹), for the motion vectors' previous
+  // positions; prevCount 0: none yet.
+  std::array<std::array<Mat4, 2>, gfx::XrMaxTransforms> prevWorldToClip{};
+  std::array<std::array<Mat4, 2>, gfx::XrMaxTransforms> prevM{}; // last frame's C
+  size_t prevCount = 0;
+  // SpaceWarp, early eyes: the motion pass goes to the GPU before the eyes
+  // wait for their image, into these, copied into the SpaceWarp images after.
+  wgpu::Texture motionColor, motionDepth;
+  bool motionCopy = false; // this frame's motion pass is in them
 };
 Renderer3D R;
 
@@ -4675,6 +5097,130 @@ void render_3d(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& frame)
 // eye into the shared 3D image, with `transforms` as the world placements.
 // False where nothing was encoded (no views, renderer, or the fallback
 // compose can't apply); R says whether a 3D image was rendered or missed.
+// Application SpaceWarp: this frame's motion vectors and depth, at the
+// runtime's recommended size, for the two SpaceWarp images (handed over
+// with the 3D image, release_motion). The opaque world draws are replayed
+// once more, both eyes at once, with their motion twins: each writes its
+// surface's current minus previous NDC position (xr.prev, xr.prev_m) and its
+// depth. Blended and cut-out draws are left out; where nothing opaque is,
+// the motion is zero and the depth infinitely far. AURORA_XR_APPSW_MOTION=0
+// only clears them.
+void encode_motion(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& frame,
+                   const std::vector<const gfx::detail::RenderPass*>* passes, const wgpu::Texture& color,
+                   const wgpu::Texture& depth) {
+  const auto* layout = gfx::xr_motion_layout();
+  const wgpu::TextureViewDescriptor layered{.dimension = wgpu::TextureViewDimension::e2DArray, .arrayLayerCount = 2};
+  if (layout != nullptr && env_flag("AURORA_XR_APPSW_MOTION", true)) {
+    const auto source = gfx::scene_render_target_layout();
+    gfx::XrReplayTarget t;
+    t.layout = *layout;
+    t.sourceLayout = &source;
+    t.motion = true;
+    t.size = {g_streams[kMotion].width, g_streams[kMotion].height, 1};
+    t.colorViews[gfx::SceneColorAttachmentIndex] = color.CreateView(&layered);
+    t.depthView = depth.CreateView(&layered);
+    t.clearColor = {0, 0, 0, 0};
+    t.clearDepth = 0.f; // reversed Z: infinitely far
+    t.depthStore = wgpu::StoreOp::Store;
+    t.views[0] = {R.mvGroups, 0.f, 0.f, static_cast<float>(t.size.width), static_cast<float>(t.size.height)};
+    t.viewCount = 1;
+    t.viewMask = 0b11;
+    t.passes = passes;
+    t.timestampWrites = zone_writes(kZoneMotion);
+    gfx::encode_xr_replay(cmd, frame, gfx::XrCategory::World, t);
+    return;
+  }
+  const wgpu::RenderPassColorAttachment colorAttachment{
+      .view = color.CreateView(&layered),
+      .loadOp = wgpu::LoadOp::Clear,
+      .storeOp = wgpu::StoreOp::Store,
+      .clearValue = {0, 0, 0, 0},
+  };
+  const bool stencil = g_streams[kMotionDepth].format == VK_FORMAT_D24_UNORM_S8_UINT;
+  const wgpu::RenderPassDepthStencilAttachment ds{
+      .view = depth.CreateView(&layered),
+      .depthLoadOp = wgpu::LoadOp::Clear,
+      .depthStoreOp = wgpu::StoreOp::Store,
+      .depthClearValue = 0.f, // reversed Z: infinitely far
+      .stencilLoadOp = stencil ? wgpu::LoadOp::Clear : wgpu::LoadOp::Undefined,
+      .stencilStoreOp = stencil ? wgpu::StoreOp::Discard : wgpu::StoreOp::Undefined,
+  };
+  wgpu::RenderPassMultiview multiview{};
+  multiview.viewMask = 0b11;
+  const wgpu::RenderPassDescriptor rp{.nextInChain = &multiview,
+                                      .label = "XR motion vectors (cleared)",
+                                      .colorAttachmentCount = 1,
+                                      .colorAttachments = &colorAttachment,
+                                      .depthStencilAttachment = &ds};
+  cmd.BeginRenderPass(&rp).End();
+}
+
+// Early eyes: the motion pass costs as much vertex work as the eyes (4.8 ms
+// on four-CPU Brinstar), and with SpaceWarp the eyes' image comes free only
+// as the next loop starts, ~17 ms after the tick, with the GPU idle until
+// then. So it goes first, on its own, into images of ours (the frame's data
+// went with the presubmit), and only a copy waits for the SpaceWarp images.
+// Not with a 24-bit depth image, which can't be copied into.
+void render_motion_early(gfx::detail::FramePacket& frame,
+                         const std::vector<const gfx::detail::RenderPass*>* passes) {
+  R.motionCopy = false;
+  static const bool presubmit = env_flag("AURORA_XR_PRESUBMIT", true);
+  // Staged, the motion pass draws straight into images of ours anyway.
+  if (!B.appSw || !R.early || !presubmit || g_streams[kMotion].staged ||
+      g_streams[kMotionDepth].format != VK_FORMAT_D32_SFLOAT ||
+      !env_flag("AURORA_XR_APPSW_EARLY", true))
+    return;
+  auto& device = webgpu::g_device;
+  if (!R.motionColor) {
+    const wgpu::Extent3D size{g_streams[kMotion].width, g_streams[kMotion].height, 2};
+    const wgpu::TextureDescriptor cd{.label = "XR motion vectors",
+                                     .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc,
+                                     .size = size,
+                                     .format = wgpu::TextureFormat::RGBA16Float};
+    R.motionColor = device.CreateTexture(&cd);
+    const wgpu::TextureDescriptor dd{.label = "XR motion depth",
+                                     .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc,
+                                     .size = size,
+                                     .format = wgpu::TextureFormat::Depth32Float};
+    R.motionDepth = device.CreateTexture(&dd);
+  }
+  constexpr wgpu::CommandEncoderDescriptor desc{.label = "XR motion vectors (early)"};
+  const auto enc = device.CreateCommandEncoder(&desc);
+  encode_motion(enc, frame, passes, R.motionColor, R.motionDepth);
+  const wgpu::CommandBuffer commands = enc.Finish();
+  TraceSection trace{"Submit motion"};
+  webgpu::g_queue.Submit(1, &commands);
+  R.motionCopy = true;
+}
+
+// The SpaceWarp images for this frame: the early pass copied in, or the
+// motion pass drawn straight into them.
+void render_motion(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& frame,
+                   const std::vector<const gfx::detail::RenderPass*>* passes) {
+  const bool unwaited = R.early && g_deferEyes;
+  auto mv = acquire_slot(g_streams[kMotion], std::chrono::milliseconds(10), unwaited);
+  auto depth = acquire_slot(g_streams[kMotionDepth], std::chrono::milliseconds(10), unwaited);
+  if (!mv || !depth)
+    return;
+  if (!R.motionCopy) {
+    encode_motion(cmd, frame, passes, mv, depth);
+    return;
+  }
+  const wgpu::Extent3D size{g_streams[kMotion].width, g_streams[kMotion].height, 2};
+  const wgpu::TexelCopyTextureInfo colorSrc{.texture = R.motionColor}, colorDst{.texture = mv};
+  cmd.CopyTextureToTexture(&colorSrc, &colorDst, &size);
+  const wgpu::TexelCopyTextureInfo depthSrc{.texture = R.motionDepth}, depthDst{.texture = depth};
+  cmd.CopyTextureToTexture(&depthSrc, &depthDst, &size);
+}
+
+// Hands the SpaceWarp images over with the 3D image of the same frame.
+void release_motion(uint64_t tickFrame) {
+  if (!B.appSw)
+    return;
+  release_slot(g_streams[kMotion], nullptr, {}, tickFrame);
+  release_slot(g_streams[kMotionDepth], nullptr, {}, tickFrame);
+}
+
 bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& frame,
                  const std::vector<std::array<float, 12 + gfx::XrClipFloats>>& worldTransforms,
                  const std::vector<const gfx::detail::RenderPass*>* passes) {
@@ -4699,12 +5245,15 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
     uint32_t enabled[4];
     float clip[gfx::XrMaxClipPlanes][4];
     float fade[gfx::XrMaxClipPlanes]; // bands (game units)
+    std::array<Mat4, 2> prev, prevM;
   } mv[gfx::XrMaxTransforms]{};
   static_assert(sizeof(mv[0]) == kMultiviewEyeSize);
+  std::array<std::array<Mat4, 2>, gfx::XrMaxTransforms> worldToClip{};
   for (int eye = 0; eye < 2; ++eye) {
     const Mat4 eyeToClip = mul(projection(views[eye].fov, 0.05f), view_from_pose(views[eye].pose));
     for (size_t t = 0; t < transforms; ++t) {
       Mat4 world = cameraToWorld;
+      Mat4 place{1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f}; // T
       // Clip plane, game world -> game camera space (the shader clips the
       // camera-space position): plane_cam = plane_world · V_game⁻¹.
       std::array<std::array<float, 4>, gfx::XrMaxClipPlanes> clipCam{};
@@ -4712,8 +5261,8 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
         c = {0.f, 0.f, 0.f, 1.f};
       if (t > 0) {
         const auto& m = worldTransforms[t - 1];
-        world = mul(Mat4{m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], 0.f, 0.f, 0.f, 1.f},
-                    cameraToWorld);
+        place = {m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], 0.f, 0.f, 0.f, 1.f};
+        world = mul(place, cameraToWorld);
         for (int k = 0; k < gfx::XrMaxClipPlanes; ++k)
           for (int j = 0; j < 4; ++j) {
             clipCam[k][j] = 0.f;
@@ -4728,6 +5277,11 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       static_assert(sizeof(u) == gx::XrEyeUniformSize);
       if (g_multiview) {
         mv[t].m[eye] = u.m;
+        // The previous position of a point fixed in the game world (game
+        // camera motion cancels: V_game⁻¹ is this frame's on both sides).
+        worldToClip[t][eye] = mul(mul(eyeToClip, arena), place);
+        mv[t].prev[eye] = mul(t < R.prevCount ? R.prevWorldToClip[t][eye] : worldToClip[t][eye], cameraToWorld);
+        mv[t].prevM[eye] = t < R.prevCount ? R.prevM[t][eye] : u.m;
         mv[t].enabled[0] = 1;
         // The clipped geometry's dissolve, as 1 - opacity (0: solid).
         // The entry's layout: move 3x4, planes, fades, opacity.
@@ -4745,6 +5299,10 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
   if (g_multiview) {
     for (size_t t = 0; t < transforms; ++t)
       webgpu::g_queue.WriteBuffer(R.mvUniforms[t], 0, &mv[t], sizeof(mv[t]));
+    R.prevWorldToClip = worldToClip;
+    for (size_t t = 0; t < transforms; ++t)
+      R.prevM[t] = mv[t].m;
+    R.prevCount = transforms;
   }
 
   // Direct path: the framebuffer's format matches the shared 3D image and
@@ -4775,10 +5333,29 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
     auto wait = std::chrono::milliseconds(10);
     if (const int64_t tickNs = R.renderedTick != 0 ? pace_wait_ns(R.renderedTick) : 0;
         tickNs != 0 && g_present.latency > 1) {
+      // A display frame for the GPU at 120 Hz; with SpaceWarp's 60 Hz loop
+      // the same 8.3 ms, not a whole loop frame: the image comes free only
+      // as the next loop starts (the runtime keeps the shown one), and a
+      // deadline right there missed every sixth frame.
       const float hz = g_displayHz > 0.f ? g_displayHz.load() : 120.f;
-      const int64_t deadline = tickNs + static_cast<int64_t>((g_present.latency - 1) * 1e9 / hz);
+      const double frameNs = 1e9 / hz;
+      const int64_t deadline = tickNs + static_cast<int64_t>(g_present.latency * frameNs - std::min(frameNs, 1e9 / 120.0));
       wait = std::max(wait, std::chrono::milliseconds((deadline - monotonic_ns()) / 1000000));
     }
+    // SpaceWarp: a frame whose eyes start over a loop after its tick is
+    // dropped (the runtime synthesizes from the last one). Drawn, it held
+    // its images into the next frame's loop, that frame's eyes waited, and
+    // four-CPU Brinstar settled at 33 3D frames a second for good.
+    // AURORA_XR_APPSW_DROP_MS: how late (0: never drop).
+    static const float dropMs = env_float("AURORA_XR_APPSW_DROP_MS", 16.7f);
+    const int64_t tickNs = B.appSw && dropMs > 0.f && R.renderedTick != 0 ? pace_wait_ns(R.renderedTick) : 0;
+    if (tickNs != 0 && monotonic_ns() - tickNs > static_cast<int64_t>(dropMs * 1e6)) {
+      R.missedStereo = true;
+      ++g_appSwDropped;
+      g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
+      return false;
+    }
+    render_motion_early(frame, passes);
     if (auto dst = acquire_slot(stereo, wait, R.early && g_deferEyes)) {
       gfx::XrReplayTarget t;
       t.layout = layout;
@@ -4834,6 +5411,8 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       ++R.timing.worldFrames;
       R.renderedViews = views;
       R.renderedStereo = true;
+      if (B.appSw)
+        render_motion(cmd, frame, passes);
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
     } else {
       // No 3D image this frame: still a fight, so don't present the flat
@@ -4886,21 +5465,24 @@ bool early_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& frame
 // waited (g_deferEyes), Dawn translates them with its flush held, and the
 // flush goes once the XR thread has waited the image.
 void early_around_submit(bool before) {
-  if (!g_slotUnwaited)
+  if (!g_streams[kStereo].unwaited && !g_streams[kMotion].unwaited && !g_streams[kMotionDepth].unwaited)
     return;
   if (before) {
     dawn::native::vulkan::HoldQueueFlush(webgpu::g_device.Get(), true);
     return;
   }
-  await_slot_waited(g_streams[kStereo]);
+  for (int i : {kStereo, kMotion, kMotionDepth})
+    await_slot_waited(g_streams[i]);
   TraceSection trace{"Flush eyes"};
   if (!dawn::native::vulkan::HoldQueueFlush(webgpu::g_device.Get(), false))
     Log.error("Submitting the held eyes failed");
 }
 
 void early_submitted(gfx::detail::FramePacket&) {
-  await_slot_waited(g_streams[kStereo]); // not held after all: never release an image not waited
+  for (int i : {kStereo, kMotion, kMotionDepth})
+    await_slot_waited(g_streams[i]); // not held after all: never release an image not waited
   release_slot(g_streams[kStereo], &R.renderedViews, R.renderedRect, R.renderedTick);
+  release_motion(R.renderedTick);
   ++g_earlyEyes;
 }
 
@@ -4917,7 +5499,12 @@ void render_3d_frame(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& 
   if (frame.xrHasHud) {
     R.targets[2].target.timestampWrites = zone_writes(kZoneHud);
     gfx::encode_xr_replay(cmd, frame, gfx::XrCategory::Hud, R.targets[2].target);
-    if (auto dst = acquire_slot(g_streams[kHud])) {
+    // With SpaceWarp the HUD's image, like the 3D one, comes free only as a
+    // loop starts: once frames ran late, waiting up to 10 ms for it held up
+    // the render worker every frame, and four-CPU Brinstar never caught up
+    // (33 3D frames a second). Missing it keeps the last HUD up a frame.
+    const auto hudWait = std::chrono::milliseconds(B.appSw ? 2 : 10);
+    if (auto dst = acquire_slot(g_streams[kHud], hudWait)) {
       compose(cmd, dst, {2}, kZoneComposeHud);
     }
   }
@@ -5078,6 +5665,24 @@ wgpu::Texture begin_frame(uint32_t width, uint32_t height) noexcept {
     mvLayout.sampleCount = g_xrSamples;
     gfx::detail::finalize_render_target_layout(mvLayout);
     gfx::set_xr_multiview_layout(mvLayout);
+    if (B.appSw) {
+      // ... and, the opaque ones, their SpaceWarp motion twins.
+      gfx::RenderTargetLayout motion{};
+      motion.colorAttachmentCount = 1;
+      motion.colorAttachments[gfx::SceneColorAttachmentIndex] = {
+          .semantic = gfx::ColorAttachmentSemantic::SceneColor,
+          .format = wgpu::TextureFormat::RGBA16Float,
+          .width = g_streams[kMotion].width,
+          .height = g_streams[kMotion].height,
+      };
+      motion.depthStencilFormat = g_streams[kMotionDepth].format == VK_FORMAT_D24_UNORM_S8_UINT
+                                      ? wgpu::TextureFormat::Depth24PlusStencil8
+                                      : wgpu::TextureFormat::Depth32Float;
+      motion.viewCount = 2;
+      motion.xrMotion = 1;
+      gfx::detail::finalize_render_target_layout(motion);
+      gfx::set_xr_motion_layout(motion);
+    }
   }
   auto& screen = g_streams[kScreen];
   if (width != screen.width || height != screen.height) {
@@ -5103,6 +5708,7 @@ void end_frame() noexcept {
   map_timing();
   release_slot(g_streams[kScreen], nullptr);
   release_slot(g_streams[kStereo], R.renderedStereo ? &R.renderedViews : nullptr, R.renderedRect, R.renderedTick);
+  release_motion(R.renderedTick);
   R.renderedStereo = false;
   release_slot(g_streams[kHud], nullptr, {}, R.renderedTick);
 }

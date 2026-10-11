@@ -15,6 +15,8 @@ struct RecordedFrame {
 };
 
 void begin_recording(FramePacket& packet, size_t frameSlot);
+// Frames begun so far (recording thread): a new value starts a new frame.
+uint64_t recording_seq() noexcept;
 RecordedFrame end_recording();
 void shutdown_recording();
 void increment_merged_draw_count() noexcept;
@@ -147,6 +149,12 @@ const XrClipCamera* xr_clip_camera() noexcept;
 // published once from the render worker and read by the FIFO thread.
 void set_xr_multiview_layout(const RenderTargetLayout& layout) noexcept;
 const RenderTargetLayout* xr_multiview_layout() noexcept;
+// The layout lib/xr replays opaque world draws into for Application
+// SpaceWarp's motion vectors (null = none), published like the above.
+void set_xr_motion_layout(const RenderTargetLayout& layout) noexcept;
+const RenderTargetLayout* xr_motion_layout() noexcept;
 // Render worker: encode_xr_replay is replaying with a view mask.
 bool xr_multiview_replay() noexcept;
+// Render worker: ... and into the motion vectors (gx::DrawData::xrMotionPipeline).
+bool xr_motion_replay() noexcept;
 } // namespace aurora::gfx

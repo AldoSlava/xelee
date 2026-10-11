@@ -1,3 +1,5 @@
+#include <cctype>
+
 #include "../gfx/hash.hpp"
 #include "../gfx/types.hpp"
 
@@ -872,7 +874,7 @@ absl::flat_hash_set<gfx::ShaderRef> s_seenShaders;
 } // namespace
 
 std::string build_shader_source(const ShaderConfig& config, uint32_t normalAttachment, uint32_t viewCount,
-                                bool softClip) noexcept {
+                                bool softClip, bool motion) noexcept {
   ZoneScoped;
   const auto hash = xxh3_hash(normalAttachment, xxh3_hash(config));
   const auto info = build_shader_info(config);
@@ -2111,7 +2113,7 @@ struct Immediate {{
     vtx_start: u32,
     current_pnmtx: u32,
     fog_range_base: u32,
-    _pad: u32,
+    xr_prev_mtx: u32,
     array_start0: vec4u,
     array_start1: vec4u,
     array_start2: vec4u,
@@ -2164,10 +2166,11 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
     const std::string anchor = "var<uniform> ubuf: Uniform;";
     if (auto at = shaderSource.find(anchor); at != std::string::npos) {
       shaderSource.insert(at + anchor.size(),
-                          multiview ? fmt::format("\nstruct XrEye {{ m: array<mat4x4f, {}>, enabled: vec4u, clip: array<vec4f, 8>, fade: array<vec4f, 2> }};"
+                          multiview ? fmt::format("\nstruct XrEye {{ m: array<mat4x4f, {0}>, enabled: vec4u, clip: array<vec4f, 8>, fade: array<vec4f, 2>, prev: array<mat4x4f, {0}>, prev_m: array<mat4x4f, {0}> }};"
                                                   "\n@group(3) @binding(0)\nvar<uniform> xr: XrEye;"
                                                   "\nvar<private> xr_view: u32;"
                                                   "\nvar<private> xr_cam: vec3f;"
+                                                  "\nvar<private> xr_prev: vec4f;"
                                                   "\nfn gx_proj(p: vec3f) -> vec4f {{"
                                                   "\n    xr_cam = p;"
                                                   "\n    return vec4f(p, 1.0) * xr.m[xr_view];"
@@ -2237,7 +2240,79 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
                                   "    return (f32(m) + 0.5) / 16.0;\n}\n\n");
         }
       }
-
+      // Application SpaceWarp motion vectors: the position as last frame's
+      // matrices put it next to this frame's, both clip space, divided per
+      // fragment; the fragment stage is replaced by one that writes their
+      // NDC difference. Only plain opaque draws get this variant
+      // (command_processor: xr_motion_pipeline).
+      if (motion) {
+        const std::string vsHead = "struct VertexOutput {";
+        const auto v0 = shaderSource.find(vsHead);
+        const auto v1 = v0 == std::string::npos ? v0 : shaderSource.find("};", v0);
+        const auto vsAt = shaderSource.find("fn vs_main(");
+        const auto retAt = vsAt == std::string::npos ? vsAt : shaderSource.find("return out;", vsAt);
+        const auto fsAt = shaderSource.rfind("@fragment");
+        if (v1 == std::string::npos || retAt == std::string::npos || fsAt == std::string::npos || fsAt < retAt) {
+          Log.warn("XR motion shader variant: anchors missing");
+        } else {
+          // Edits from the end back, so earlier anchors stay put.
+          shaderSource.erase(fsAt);
+          shaderSource += "@fragment\n"
+                          "fn fs_main(in: VertexOutput) -> @location(0) vec4f {\n"
+                          "    if (in.xr_prv.w <= 1e-5) { return vec4f(0.0); }\n"
+                          "    return vec4f(in.xr_cur.xyz / in.xr_cur.w - in.xr_prv.xyz / in.xr_prv.w, 0.0);\n"
+                          "}\n";
+          // Only the positions leave the vertex stage: the GX outputs stay in
+          // a local struct nobody reads, so their lighting and texgen are
+          // dead code the driver drops (Brinstar's pass: 4.8 ms with them).
+          shaderSource.replace(retAt, std::string_view{"return out;"}.size(),
+                               "return VertexOutput(out.pos, out.pos, xr_prev);");
+          // Last frame's position: by the draw's own matrices then
+          // (imm.xr_prev_mtx, in last frame's game camera space, so last
+          // frame's eye matrices), or else as a point fixed in the game
+          // world (this frame's camera space, xr.prev).
+          const std::string mvHead = "let mv_pos = vec4f(";
+          const std::string mvTail = ", 1.0) * ubuf.postex_mtx[in_pnmtxidx];";
+          const auto m0 = shaderSource.find(mvHead, vsAt);
+          const auto m1 = m0 == std::string::npos ? m0 : shaderSource.find(mvTail, m0);
+          if (m1 == std::string::npos || m1 > retAt) {
+            shaderSource.insert(retAt, "xr_prev = vec4f(mv_pos, 1.0) * xr.prev[xr_view];\n    ");
+          } else {
+            const std::string pos = shaderSource.substr(m0 + mvHead.size(), m1 - m0 - mvHead.size());
+            shaderSource.insert(
+                m1 + mvTail.size(),
+                fmt::format("\n    xr_prev = vec4f(mv_pos, 1.0) * xr.prev[xr_view];"
+                            "\n    if (imm.xr_prev_mtx != 0u) {{"
+                            "\n        let xr_b = imm.xr_prev_mtx - 1u + in_pnmtxidx * 12u;"
+                            "\n        let xr_m = mat3x4f("
+                            "bitcast<vec4f>(vec4u(abuf[xr_b], abuf[xr_b + 1u], abuf[xr_b + 2u], abuf[xr_b + 3u])), "
+                            "bitcast<vec4f>(vec4u(abuf[xr_b + 4u], abuf[xr_b + 5u], abuf[xr_b + 6u], abuf[xr_b + 7u])), "
+                            "bitcast<vec4f>(vec4u(abuf[xr_b + 8u], abuf[xr_b + 9u], abuf[xr_b + 10u], abuf[xr_b + 11u])));"
+                            "\n        xr_prev = vec4f(vec4f({}, 1.0) * xr_m, 1.0) * xr.prev_m[xr_view];"
+                            "\n    }}",
+                            pos));
+          }
+          const std::string outDecl = "var out: VertexOutput;";
+          if (const auto d = shaderSource.find(outDecl, vsAt); d != std::string::npos)
+            shaderSource.replace(d, outDecl.size(), "var out: XrGxOut;");
+          // The GX outputs' struct, without its stage attributes.
+          std::string members = shaderSource.substr(v0 + vsHead.size(), v1 - v0 - vsHead.size());
+          for (size_t a = members.find('@'); a != std::string::npos; a = members.find('@', a)) {
+            size_t e = a + 1;
+            while (e < members.size() && (std::isalnum(static_cast<unsigned char>(members[e])) || members[e] == '_'))
+              ++e;
+            if (e < members.size() && members[e] == '(')
+              e = members.find(')', e) + 1;
+            while (e < members.size() && members[e] == ' ')
+              ++e;
+            members.erase(a, e - a);
+          }
+          shaderSource.replace(v0, v1 + 2 - v0,
+                               "struct XrGxOut {" + members +
+                                   "};\n\nstruct VertexOutput {\n    @builtin(position) pos: vec4f,\n"
+                                   "    @location(0) xr_cur: vec4f,\n    @location(1) xr_prv: vec4f,\n};");
+        }
+      }
     }
     for (const std::string_view var : {"mv_pos_a", "mv_pos_b", "mv_pos"}) {
       const std::string from = fmt::format("vec4f({}, 1.0) * ubuf.proj", var);
@@ -2266,7 +2341,7 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
     }
   }
   const auto hash = layout.viewCount > 1
-                        ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8),
+                        ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8) + (layout.xrMotion << 9),
                                     xxh3_hash(normalAttachment, xxh3_hash(config)))
                         : xxh3_hash(normalAttachment, xxh3_hash(config));
 #ifdef __EMSCRIPTEN__
@@ -2277,7 +2352,8 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
   if (device != webgpu::g_device.Get()) { modules.clear(); device = webgpu::g_device.Get(); }
   if (auto it = modules.find(hash); it != modules.end()) return it->second;
 #endif
-  const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip != 0);
+  const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip != 0,
+                                                 layout.xrMotion != 0);
   wgpu::ShaderSourceWGSL wgslDescriptor{};
   wgslDescriptor.code = shaderSource.c_str();
   const auto label = fmt::format("GX Shader {:x}", hash);

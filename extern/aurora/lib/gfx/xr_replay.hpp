@@ -51,6 +51,11 @@ struct XrReplayTarget {
   uint32_t viewMask = 0;
   // The passes to replay (null: all the frame's sealed passes).
   const std::vector<const detail::RenderPass*>* passes = nullptr;
+  // Application SpaceWarp: replay the opaque world draws' motion twins
+  // (gx::DrawData::xrMotionPipeline) into `layout`, a motion layout; the
+  // frame's passes are matched against `sourceLayout` instead.
+  bool motion = false;
+  const RenderTargetLayout* sourceLayout = nullptr;
 };
 
 // XR early eyes: when a frame's world ends (the first switch from world or

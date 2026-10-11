@@ -81,7 +81,10 @@ struct DrawImmediateData {
   u32 vtxStart = 0;
   u32 currentPnMtx = 0;
   u32 fogRangeBase = 0;
-  u32 _pad = 0;
+  // XR SpaceWarp motion pipelines: the word offset, in the storage buffer,
+  // of the draw's position matrices last frame, plus one (0: none, as if
+  // fixed in the game world).
+  u32 xrPrevMtx = 0;
   std::array<u32, MaxIndexAttr> arrayStart{};
 };
 static_assert(std::has_unique_object_representations_v<DrawImmediateData>);
@@ -599,7 +602,8 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
 bool take_browser_pipeline(gfx::PipelineRef ref, wgpu::RenderPipeline& pipeline);
 #endif
 std::string build_shader_source(const ShaderConfig& config, uint32_t normalAttachment = UINT32_MAX,
-                                uint32_t viewCount = 1, bool softClip = false) noexcept;
+                                uint32_t viewCount = 1, bool softClip = false,
+                                bool motion = false) noexcept;
 wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTargetLayout& layout) noexcept;
 GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept;
 

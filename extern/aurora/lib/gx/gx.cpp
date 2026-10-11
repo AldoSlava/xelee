@@ -448,6 +448,11 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
   }
   colorTargets[gfx::SceneColorAttachmentIndex].blend = &blendState;
   colorTargets[gfx::SceneColorAttachmentIndex].writeMask = to_write_mask(config.colorUpdate, config.alphaUpdate);
+  if (layout.xrMotion != 0) {
+    // Motion vectors: written whole, never blended.
+    colorTargets[gfx::SceneColorAttachmentIndex].blend = nullptr;
+    colorTargets[gfx::SceneColorAttachmentIndex].writeMask = wgpu::ColorWriteMask::All;
+  }
   const wgpu::FragmentState fragmentState{
       .module = shader,
       .entryPoint = "fs_main",
