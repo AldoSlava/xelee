@@ -135,8 +135,8 @@ vectors is, in effect, positional timewarp we control.
   4. Chain the synthesis info on each projection view: the motion-vector
      and depth sub-images (rects following dynamic resolution),
      `appSpaceDeltaPose` identity, `minDepth` 0, `maxDepth` 1, and for our
-     reversed infinite depth `nearZ = +inf`, `farZ = 0.05` (the near
-     plane), nearZ > farZ meaning reversed.
+     reversed infinite depth `nearZ = +inf`, `farZ` = our near
+     plane in meters), nearZ > farZ meaning reversed.
   5. Pacing: check that the runtime halves the app's rate
      (`predictedDisplayPeriod` doubling in `xrWaitFrame`). Lock-step then
      runs at one display frame per game frame; fixed-latency presentation
