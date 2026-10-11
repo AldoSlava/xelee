@@ -1,6 +1,55 @@
 # XR frame rate: getting off 60-on-120
 
-Status: plan (2026-10-11). Nothing here is built yet.
+Status: Option A (Application SpaceWarp with real motion vectors) is built
+and on the headset, opt-in with `AURORA_XR_APPSW=1` (2026-10-11). See
+"What's built" below; the rest of this document is the plan as written.
+
+## What's built (2026-10-11)
+
+How it ended up, and where it left the A2 design below:
+
+- **Swapchains and layer:** RGBA16F motion vectors and D32 depth at the
+  runtime's recommended size (420x440 per eye on a Quest 3), chained to
+  each projection view (`XrCompositionLayerSpaceWarpInfoFB`, reversed
+  infinite depth: `nearZ` +inf, `farZ` 0.05, identity
+  `appSpaceDeltaPose`). Needed the Dawn fork to import depth images as
+  render attachments.
+- **Draw identity, not by dobj:** each opaque world draw is keyed by a
+  hash of its vertex bytes and position-array pointer, plus how many draws
+  with the same key came before it in the frame. Display lists are copied
+  into the FIFO, so the bytes are stable where their address isn't. Every
+  draw paired on Battlefield. No FIFO command was needed.
+- **Last frame's matrices:** pushed to the storage buffer (pushed before
+  the draw's decoded positions, or draw merging breaks); the draw's spare
+  immediate word (`xr_prev_mtx`) points at them. Unpaired draws and jumps
+  over 40 units are taken as fixed in the game world (last frame's eye
+  chain on this frame's camera-space position).
+- **The pass:** a multiview replay of the opaque draws with motion-twin
+  pipelines: only positions leave the vertex stage, the fragment writes
+  current minus previous NDC. A twin's config keeps only the vertex format
+  and depth state, so draws share a handful of pipelines: four-CPU
+  Brinstar's pass went from 4.2-4.6 ms to 2.1-2.7. The pass is
+  geometry-bound (the eye pass is too: 7.0 ms at 0.3x resolution against
+  9.8 at 1.0), so taking depth from the eye pass would save little.
+- **Pacing at SpaceWarp's 60 Hz loop:** latency converted when the loop
+  period changes and capped at ~33 ms; the image deadline kept in time;
+  frames that start over a loop late are dropped for SpaceWarp to fill.
+- **Staged images (with SpaceWarp only):** the eyes, HUD and SpaceWarp
+  images render into a ring of our own, and the XR thread copies each
+  into a swapchain image when it hands it over. Images free only at loop
+  boundaries at 60 Hz; waiting for them, one late frame held up the next
+  and four-CPU Brinstar stuck at 33 3D frames a second.
+- **Adaptive:** a fight missing over 6 3D frames in each of two 2 s windows
+  turns SpaceWarp off until the next fight (the loop goes back to 120 Hz).
+
+Measured: two-CPU Battlefield holds 60 with SpaceWarp, at dynamic
+resolution's 1.30 ceiling. Four-CPU Battlefield and Brinstar's heavy
+phases (eyes 10-11.5 ms) can't fit eyes, motion pass and the compositor's
+~4.7 ms in 16.7, and fall back.
+
+Open: the motion vectors' vertical sign needs a check in the headset
+(moving objects jitter the wrong way if it's flipped); the first launch
+after these shader changes recompiles pipelines for about two minutes.
 
 ## The problem
 
