@@ -1356,6 +1356,10 @@ static const ParticleRule s_particles[] = {
     /* Kongo Jungle: the river's splashes (bank 30 is the stage's own), left
      * floating once the river is hidden. */
     {0x04, 30, -1},
+    /* Battlefield and Final Destination: the background's drifting sparks
+     * and streaks, ~3600 behind the stage (MELEE_XR_PTCL_LOG). */
+    {0x24, 30, -1},
+    {0x25, 30, -1},
 };
 #define PARTICLE_COUNT ((int)(sizeof s_particles / sizeof s_particles[0]))
 

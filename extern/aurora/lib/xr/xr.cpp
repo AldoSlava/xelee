@@ -304,6 +304,7 @@ std::condition_variable g_paceCv;
 uint64_t g_paceTick = 0;
 std::atomic<int> g_displayPerGameFrame{0};
 std::atomic<float> g_displayHz{0.f}; // the display's refresh rate (0: unknown)
+std::atomic<float> g_refreshHz{0.f}; // the display's own, also with SpaceWarp's loop at half of it
 // The compositor's GPU time per display frame (ms, XR_META_performance_metrics;
 // negative: unknown), polled by the XR thread for dynamic resolution.
 std::atomic<float> g_compositorGpuMs{-1.f};
@@ -1721,6 +1722,13 @@ void note_ready_latency(uint64_t lat) {
       break;
   }
   k = std::min(k, latency_cap());
+  // SpaceWarp: two loop frames (33 ms), always. Staged frames often finish
+  // within one, and latency 1 then held them to it: dynamic resolution cut
+  // the scale to keep it, the latency went back to 2, the scale rose, and so
+  // on (0.8 to 1.3 and back on two-CPU Battlefield). The runtime covers the
+  // head's latency anyway.
+  if (appsw_on())
+    k = std::max(k, std::min(2, latency_cap()));
   if (k > p.latency) {
     p.latency = k;
     p.steadyLower = 0;
@@ -2160,6 +2168,7 @@ void update_pacing() {
   float rate = 0.f;
   if (B.getRefreshRate)
     B.getRefreshRate(B.session, &rate);
+  g_refreshHz = rate;
   // SpaceWarp: the loop runs at what xrWaitFrame paces it to, and the game
   // ticks on that.
   if (g_loopPeriodNs > 0)
@@ -3649,9 +3658,9 @@ bool render_xr_frame() {
           {x, 0}, {part ? stereo.shownRect[0] : eyeW, part ? stereo.shownRect[1] : static_cast<int32_t>(stereo.height)}};
       projViews[i].subImage.imageArrayIndex = stereo.layers > 1 ? static_cast<uint32_t>(i) : 0;
       // Application SpaceWarp: this image's motion vectors and depth (handed
-      // over with it). Motion includes head motion (the previous frame's
-      // eye matrices, as Meta's XrSpaceWarp sample does); the app's space
-      // never moves, so its delta is identity. Depth is reversed with an
+      // over with it). Motion leaves out the head's (render_eyes: this
+      // frame's eye matrices on both positions); the app's space never
+      // moves, so its delta is identity. Depth is reversed with an
       // infinite far plane: 0 is infinitely far, 1 at the 0.05 m near plane.
       const auto& mvs = g_streams[kMotion];
       const auto& mds = g_streams[kMotionDepth];
@@ -4422,11 +4431,10 @@ struct Renderer3D {
   wgpu::RenderPipeline coverClear, coverSet;
   uint64_t directKey = 0;
   bool loggedPath = false;
-  // SpaceWarp: the last frame's world-to-clip matrix per eye, per world
-  // transform (C without V_game⁻¹), for the motion vectors' previous
-  // positions; prevCount 0: none yet.
-  std::array<std::array<Mat4, 2>, gfx::XrMaxTransforms> prevWorldToClip{};
-  std::array<std::array<Mat4, 2>, gfx::XrMaxTransforms> prevM{}; // last frame's C
+  // SpaceWarp: per world transform, last frame's game world -> room matrix
+  // (A · T) and game camera -> room (A · T · V_game⁻¹), for the motion
+  // vectors' previous positions; prevCount 0: none yet.
+  std::array<Mat4, gfx::XrMaxTransforms> prevWorldToRoom{}, prevCameraToRoom{};
   size_t prevCount = 0;
   // SpaceWarp, early eyes: the motion pass goes to the GPU before the eyes
   // wait for their image, into these, copied into the SpaceWarp images after.
@@ -4967,6 +4975,16 @@ void update_dynamic_resolution(bool missed) {
       const double span = dr.emaNs > 0 ? dr.emaNs : dr.spanNs;
       if (dr.haveMargin && span > 0) {
         dr.targetNs = std::clamp(span + dr.marginNs - dr.wantMarginNs, 3.0e6, 20.0e6);
+        // SpaceWarp: a staged frame finishing early says nothing about how
+        // much GPU a game frame has. The budget is the frame less the
+        // compositor's two display frames: margins of 18 ms had the target
+        // at 20 and the scale climbing until frames missed.
+        if (appsw_on()) {
+          const float refresh = g_refreshHz > 0.f ? g_refreshHz.load() : 120.f;
+          const float compositorMs = g_compositorGpuMs > 0.f ? g_compositorGpuMs.load() : 2.4f;
+          const double budget = 1.0e9 / 60.0 - compositorMs * 1.0e6 * refresh / 60.0 - dr.headroomNs;
+          dr.targetNs = std::clamp(std::min(dr.targetNs, budget), 3.0e6, 20.0e6);
+        }
       } else if (dr.spanNs == 0) {
         // Until margins come in: what a game frame leaves us on the GPU.
         const float hz = g_displayHz > 0.f ? g_displayHz.load() : 120.f;
@@ -5328,7 +5346,7 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
     std::array<Mat4, 2> prev, prevM;
   } mv[gfx::XrMaxTransforms]{};
   static_assert(sizeof(mv[0]) == kMultiviewEyeSize);
-  std::array<std::array<Mat4, 2>, gfx::XrMaxTransforms> worldToClip{};
+  std::array<Mat4, gfx::XrMaxTransforms> worldToRoom{}, cameraToRoom{};
   for (int eye = 0; eye < 2; ++eye) {
     const Mat4 eyeToClip = mul(projection(views[eye].fov, 0.05f), view_from_pose(views[eye].pose));
     for (size_t t = 0; t < transforms; ++t) {
@@ -5357,11 +5375,19 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       static_assert(sizeof(u) == gx::XrEyeUniformSize);
       if (g_multiview) {
         mv[t].m[eye] = u.m;
-        // The previous position of a point fixed in the game world (game
-        // camera motion cancels: V_game⁻¹ is this frame's on both sides).
-        worldToClip[t][eye] = mul(mul(eyeToClip, arena), place);
-        mv[t].prev[eye] = mul(t < R.prevCount ? R.prevWorldToClip[t][eye] : worldToClip[t][eye], cameraToWorld);
-        mv[t].prevM[eye] = t < R.prevCount ? R.prevM[t][eye] : u.m;
+        // Previous positions in the room, seen with this frame's eyes: the
+        // runtime reprojects head motion itself (from depth and its own
+        // pose), so motion vectors carry only the scene's own motion.
+        // Including the head's (last frame's eye matrices, as Meta's
+        // XrSpaceWarp sample does for its moving camera) applied it twice:
+        // turning the head smeared everything. prev: a point fixed in the
+        // game world (V_game⁻¹ this frame's on both sides); prevM: one at
+        // last frame's game camera space (a draw's own last matrices).
+        worldToRoom[t] = mul(arena, place);
+        cameraToRoom[t] = mul(arena, world);
+        mv[t].prev[eye] =
+            mul(eyeToClip, mul(t < R.prevCount ? R.prevWorldToRoom[t] : worldToRoom[t], cameraToWorld));
+        mv[t].prevM[eye] = mul(eyeToClip, t < R.prevCount ? R.prevCameraToRoom[t] : cameraToRoom[t]);
         mv[t].enabled[0] = 1;
         // The clipped geometry's dissolve, as 1 - opacity (0: solid).
         // The entry's layout: move 3x4, planes, fades, opacity.
@@ -5379,9 +5405,8 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
   if (g_multiview) {
     for (size_t t = 0; t < transforms; ++t)
       webgpu::g_queue.WriteBuffer(R.mvUniforms[t], 0, &mv[t], sizeof(mv[t]));
-    R.prevWorldToClip = worldToClip;
-    for (size_t t = 0; t < transforms; ++t)
-      R.prevM[t] = mv[t].m;
+    R.prevWorldToRoom = worldToRoom;
+    R.prevCameraToRoom = cameraToRoom;
     R.prevCount = transforms;
   }
 
