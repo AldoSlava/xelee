@@ -432,11 +432,15 @@ typedef struct {
     float ease;
     /* While the game's camera is locked on a stretch of the course
      * (Camera_80030AF8 false: the Underground Maze's platform fights), the
-     * window sits on the camera's target instead and zooms by lock_zoom,
-     * its box shrunk to match so its footprint stays. 0: never. */
+     * window sits on the camera's target instead, zooms by lock_zoom, and
+     * its box is the stage's blast zones (the fight's own bounds). 0:
+     * never. */
     float lock_zoom;
     bool hud_on_top; /* scenery reaches the HUD's height (aurora_xr_set_hud_on_top) */
-    float drop;      /* the window's center this far below where it follows (not when locked) */
+    /* Follows player one's fighter rather than the camera's focus: the
+     * Underground Maze's camera holds still for a second while the player
+     * is hit, and the player could walk out of the window. */
+    bool follow_player;
 } FollowRule;
 
 static const FollowRule s_follows[] = {
@@ -445,11 +449,9 @@ static const FollowRule s_follows[] = {
     /* Adventure's courses, whose camera follows player one through them. */
     {.grkind = 0x1F, /* Mushroom Kingdom */
      .half = {160.f, 110.f, 80.f}, .slack = {60.f, 35.f}, .fade = {25.f, 25.f, 25.f}, .ease = 0.35f},
-    {.grkind = 0x20, /* Underground Maze: the scenery reaches the HUD. Low,
-                      * and cut close top and bottom, so no sliver of the
-                      * corridor above floats over this one. */
-     .half = {160.f, 65.f, 80.f}, .slack = {40.f, 30.f}, .fade = {25.f, 10.f, 25.f}, .ease = 0.3f, .drop = 20.f,
-     .lock_zoom = 1.4f, .hud_on_top = true},
+    {.grkind = 0x20, /* Underground Maze: the scenery reaches the HUD */
+     .half = {160.f, 110.f, 80.f}, .slack = {40.f, 30.f}, .fade = {25.f, 25.f, 25.f}, .ease = 0.3f,
+     .lock_zoom = 1.4f, .hud_on_top = true, .follow_player = true},
     {.grkind = 0x21, /* Escape from Brinstar */
      .half = {160.f, 110.f, 80.f}, .slack = {40.f, 30.f}, .fade = {25.f, 25.f, 25.f}, .ease = 0.25f},
     {.grkind = 0x22, /* F-Zero Grand Prix */
@@ -691,6 +693,7 @@ static bool s_follow_placed;
 static bool s_follow_released; /* a held window has started following (follow_released) */
 static float s_follow_target[2]; /* where the slack (or a locked camera) puts the center; it eases there */
 static float s_follow_zoom = 1.f;
+static bool s_follow_locked; /* the game's camera is locked on a stretch (lock_zoom) */
 /* The platform a held window starts on: the x span of the floors at the
  * stage's top floor height (stage_top), NAN until measured. */
 static float s_platform_left = NAN, s_platform_right = NAN;
@@ -701,6 +704,7 @@ static void follow_stage(int grkind) {
     s_follow_placed = false;
     s_follow_released = false;
     s_follow_zoom = 1.f;
+    s_follow_locked = false;
     s_platform_left = s_platform_right = NAN;
     for (int i = 0; i < FOLLOW_COUNT; i++) {
         if (s_follows[i].grkind == grkind) {
@@ -722,12 +726,20 @@ static void follow_stage(int grkind) {
 /* The window's box: kept inside all six planes (game world). */
 static int follow_planes(float planes[][4], float fades[]) {
     const float* c = s_follow_center;
-    const float h[3] = {s_follow->half[0] / s_follow_zoom, s_follow->half[1] / s_follow_zoom,
-                        s_follow->half[2] / s_follow_zoom};
+    const float* h = s_follow->half;
+    /* Locked on a fight: the fight's own bounds, its blast zones. */
+    float lo[3] = {c[0] - h[0], c[1] - h[1], c[2] - h[2]};
+    float hi[3] = {c[0] + h[0], c[1] + h[1], c[2] + h[2]};
+    if (s_follow_locked) {
+        lo[0] = Stage_GetBlastZoneLeftOffset();
+        hi[0] = Stage_GetBlastZoneRightOffset();
+        lo[1] = Stage_GetBlastZoneBottomOffset();
+        hi[1] = Stage_GetBlastZoneTopOffset();
+    }
     const float box[6][4] = {
-        {1.f, 0.f, 0.f, -(c[0] - h[0])}, {-1.f, 0.f, 0.f, c[0] + h[0]},
-        {0.f, 1.f, 0.f, -(c[1] - h[1])}, {0.f, -1.f, 0.f, c[1] + h[1]},
-        {0.f, 0.f, 1.f, -(c[2] - h[2])}, {0.f, 0.f, -1.f, c[2] + h[2]},
+        {1.f, 0.f, 0.f, -lo[0]}, {-1.f, 0.f, 0.f, hi[0]},
+        {0.f, 1.f, 0.f, -lo[1]}, {0.f, -1.f, 0.f, hi[1]},
+        {0.f, 0.f, 1.f, -lo[2]}, {0.f, 0.f, -1.f, hi[2]},
     };
     int n = 0;
     for (int i = 0; i < 6; i++) {
@@ -821,6 +833,20 @@ static void follow_update(void) {
         return;
     }
     const bool locked = s_follow->lock_zoom > 0.f && !Camera_80030AF8();
+    if (locked != s_follow_locked) {
+        pc_log_line("xr: camera %s; blast zones x %.0f to %.0f, y %.0f to %.0f", locked ? "locked" : "free",
+                    Stage_GetBlastZoneLeftOffset(), Stage_GetBlastZoneRightOffset(), Stage_GetBlastZoneBottomOffset(),
+                    Stage_GetBlastZoneTopOffset());
+        s_follow_locked = locked;
+    }
+    float focus[2] = {s_focus[0], s_focus[1]};
+    HSD_GObj* player = s_follow->follow_player ? Player_GetEntity(0) : NULL;
+    if (player != NULL) {
+        Vec3 pos;
+        ftLib_GetPos(player, &pos);
+        focus[0] = pos.x;
+        focus[1] = pos.y + 10.f; /* about the body's middle */
+    }
     if (locked) {
         Vec3 t;
         Stage_UnkSetVec3TCam_Offset(&t);
@@ -828,23 +854,22 @@ static void follow_update(void) {
         s_follow_target[1] = t.y;
     } else {
         for (int k = 0; k < 2; k++) {
-            const float d = s_focus[k] - s_follow_target[k];
+            const float d = focus[k] - s_follow_target[k];
             const float slack = s_follow->slack[k];
             if (slack < 0.f) {
                 continue; /* this axis stays put */
             }
             if (d > slack) {
-                s_follow_target[k] = s_focus[k] - slack;
+                s_follow_target[k] = focus[k] - slack;
             } else if (d < -slack) {
-                s_follow_target[k] = s_focus[k] + slack;
+                s_follow_target[k] = focus[k] + slack;
             }
         }
     }
     /* Eased toward the target, at 60 frames a second. */
     const float step = s_follow->ease > 0.f ? 1.f - expf(-1.f / (60.f * s_follow->ease)) : 1.f;
-    const float goal[2] = {s_follow_target[0], s_follow_target[1] - (locked ? 0.f : s_follow->drop)};
     for (int k = 0; k < 2; k++) {
-        s_follow_center[k] += (goal[k] - s_follow_center[k]) * step;
+        s_follow_center[k] += (s_follow_target[k] - s_follow_center[k]) * step;
     }
     const float zoom = locked ? s_follow->lock_zoom : 1.f;
     if (s_follow_zoom != zoom) {

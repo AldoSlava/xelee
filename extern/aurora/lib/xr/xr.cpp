@@ -3130,10 +3130,29 @@ bool render_xr_frame() {
     section(2 + i * 2);
     B.releasedSinceStats[i] += released ? 1 : 0;
   }
-  // A fight is on while 3D frames keep coming; otherwise the virtual screen.
+  // A fight is on while 3D frames keep coming, or until the game draws a
+  // flat frame instead: a hitch in a fight (the Underground Maze stalled
+  // 0.6 s loading mid-fight) holds the last 3D frame rather than flashing the
+  // virtual screen, which during fights holds a stale black frame.
   const auto& stereo = g_streams[kStereo];
   const auto& hud = g_streams[kHud];
-  const bool fight = stereo.haveImage && now - stereo.lastRelease < std::chrono::milliseconds(250);
+  const bool flatSince = g_streams[kScreen].haveImage && g_streams[kScreen].lastRelease > stereo.lastRelease;
+  const bool fight =
+      stereo.haveImage && (now - stereo.lastRelease < std::chrono::milliseconds(250) || !flatSince);
+  {
+    // Logged: a fight dropping to the virtual screen (no 3D image for a
+    // quarter second) and coming back, with how long the screen showed.
+    static bool wasFight = false;
+    static std::chrono::steady_clock::time_point screenSince{};
+    if (wasFight && !fight) {
+      screenSince = now;
+      Log.info("3D frames stopped: the virtual screen shows");
+    } else if (!wasFight && fight && screenSince.time_since_epoch().count() != 0) {
+      Log.info("3D frames back after {} ms on the virtual screen",
+               std::chrono::duration_cast<std::chrono::milliseconds>(now - screenSince).count());
+    }
+    wasFight = fight;
+  }
   // Paused, or held before it starts for placing the stage.
   const int placing = g_placing.load();
   const bool held = g_fightPaused || placing > 0;
@@ -3204,7 +3223,8 @@ bool render_xr_frame() {
     proj.viewCount = 2;
     proj.views = projViews.data();
     // No HUD while the stage is held for placing, cards open or not.
-    const bool showHud = hud.haveImage && now - hud.lastRelease < std::chrono::milliseconds(250) && placing == 0;
+    const bool showHud = hud.haveImage && (now - hud.lastRelease < std::chrono::milliseconds(250) || !flatSince) &&
+                         placing == 0;
     if (showHud) {
       hudQuad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
       hudQuad.space = B.space;

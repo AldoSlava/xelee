@@ -313,18 +313,26 @@ and the investigation behind it are in docs/xr-3d-plan.md.
       slack's edge, which felt stiff; the Mushroom Kingdom course also has
       more slack (60 x 35). Not the Home-Run Contest's: the bag outran the
       easing into the window's dissolving sides.
-    - **Underground Maze:** its window is low (65 units up and down,
-      fading over 10) and sits 20 units below the camera's focus while
-      following (`drop`), so no sliver of the corridor above floats over the
-      one you're in. In its
+    - **Underground Maze:** its window follows player one's fighter rather
+      than the camera's focus (`follow_player`): the maze's camera holds
+      still for a second while the player is hit, and the player could walk
+      out of view. In its
       platform fights the game locks its camera on the platform
       (`grshrineroute.c`: `Camera_80030AE0(0)` and the camera's target on
       the platform); the window then sits still on that target and zooms in
       1.4 times (`lock_zoom`, `aurora_xr_set_stage_zoom`, a zoom of the 3D
-      view only), its box shrunk to keep its footprint. The HUD stays over
+      view only), boxed by the fight's own blast zones (each room's, about
+      340 x 240 units) rather than the chase window. A cut close above the
+      corridor (and a window dropped below the focus) felt claustrophobic. The HUD stays over
       the 3D view there (`aurora_xr_set_hud_on_top`): the maze reaches its
       height. The walls the game leaves untextured black stay black. Boot into any scene with `MELEE_BOOT_SCENE=adventure
     MELEE_ADVENTURE_SCENE=<id>`.
+- **Hitches in a fight.** The 3D view stays up until the game draws a flat
+  frame instead, not just while 3D frames keep coming: a fight that stalls
+  (the Underground Maze froze 0.6 s mid-fight, loading) holds its last 3D
+  frame. Before, a quarter second without one switched to the virtual
+  screen, which during fights holds a stale black frame. The XR log notes
+  each switch to the screen during a fight and how long it lasted.
 - **Screens over an ended fight.** Stage Clear (Classic, Adventure, All-Star
   and the other 1P modes, `gm/gmregclear.c`) draws its bonus tally flat over
   the fight, which goes on drawing behind it. While it's up, the fight and
