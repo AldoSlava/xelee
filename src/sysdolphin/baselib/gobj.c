@@ -1,4 +1,21 @@
 extern unsigned int aurora_draw_tag; /* aurora: which GX link is rendering */
+#include <stdio.h>
+#include <stdlib.h>
+void GXInsertDebugMarker(const char* label);
+/* AURORA_XR_LINK_STATS: the GX link being drawn goes through the FIFO, so
+ * the XR replay can count and skip draws by link. */
+static void pc_mark_link(int link)
+{
+    static int on = -1;
+    char buf[12];
+    if (on < 0) {
+        on = getenv("AURORA_XR_LINK_STATS") != NULL;
+    }
+    if (on) {
+        snprintf(buf, sizeof(buf), "L%d", link);
+        GXInsertDebugMarker(buf);
+    }
+}
 #include "gobj.h"
 
 #include "cobj.h"
@@ -151,6 +168,7 @@ void HSD_GObj_80390ED0(HSD_GObj* gobj, u32 mask)
                 if (prios & 1) {
                     HSD_GObj* cur;
                     aurora_draw_tag = (unsigned int) j;
+                    pc_mark_link(j);
                     for (cur = HSD_GObjGXLinkHead[j]; cur != NULL;
                          cur = cur->next_gx)
                     {

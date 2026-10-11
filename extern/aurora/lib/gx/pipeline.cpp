@@ -9,11 +9,18 @@
 #include "gx_fmt.hpp"
 #include "shader_info.hpp"
 
+#include <array>
 #include <cstdlib>
+#include <string>
+
+#include "../internal.hpp"
 
 #include <tracy/Tracy.hpp>
 
 namespace aurora::gx {
+namespace {
+constexpr Module Log{"aurora::gx::pipeline"};
+} // namespace
 
 wgpu::RenderPipeline create_pipeline(const PipelineConfig& config, const gfx::RenderTargetLayout& layout) {
   ZoneScoped;
@@ -65,8 +72,59 @@ static bool env_flag(const char* name) {
   return v != nullptr && *v != '\0' && *v != '0';
 }
 
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+// AURORA_XR_LINK_STATS=1 (with the game's link markers): the eye replay's
+// draws and indices per GX link, every 20000 draws. AURORA_XR_SKIP_LINKS=a,b:
+// leave those links out of the eyes (measuring what they cost).
+static bool xr_link_filter(const DrawData& data) {
+  static const bool stats = env_flag("AURORA_XR_LINK_STATS");
+  static const uint64_t skip = [] {
+    uint64_t mask = 0;
+    if (const char* v = std::getenv("AURORA_XR_SKIP_LINKS"))
+      for (const char* p = v; *p != '\0';) {
+        char* end = nullptr;
+        const unsigned long n = std::strtoul(p, &end, 10);
+        if (end == p)
+          break;
+        if (n < 64)
+          mask |= uint64_t{1} << n;
+        p = *end == ',' ? end + 1 : end;
+      }
+    return mask;
+  }();
+  const uint32_t link = (data.tag >> 16) - 1; // UINT32_MAX: none
+  if (stats) {
+    static std::array<uint64_t, 34> draws{}, indices{};
+    static uint32_t n = 0, pipelineSwitches = 0, textureSwitches = 0;
+    static gfx::PipelineRef lastPipeline = 0;
+    static decltype(data.bindGroups.textureBindGroup) lastTextures{};
+    pipelineSwitches += data.xrPipeline != lastPipeline ? 1 : 0;
+    textureSwitches += data.bindGroups.textureBindGroup != lastTextures ? 1 : 0;
+    lastPipeline = data.xrPipeline;
+    lastTextures = data.bindGroups.textureBindGroup;
+    const size_t i = std::min<uint32_t>(link + 1, 33);
+    ++draws[i];
+    indices[i] += data.xrIndexCount != 0 ? data.xrIndexCount : data.indexCount != 0 ? data.indexCount : data.vtxCount;
+    if (++n % 20000 == 0) {
+      std::string line;
+      for (size_t k = 0; k < draws.size(); ++k)
+        if (draws[k] != 0)
+          line += fmt::format(" link {}: {} draws {} idx;", k == 0 ? -1 : static_cast<int>(k) - 1, draws[k], indices[k]);
+      Log.info("XR eye draws by GX link (last 20000):{}; pipeline changes {}, texture changes {}", line,
+               pipelineSwitches, textureSwitches);
+      draws = {};
+      indices = {};
+      pipelineSwitches = textureSwitches = 0;
+    }
+  }
+  return link < 64 && (skip >> link & 1) != 0;
+}
+#endif
+
 void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  if (gfx::xr_multiview_replay() && !gfx::xr_motion_replay() && xr_link_filter(data))
+    return;
   // A multiview replay can only bind multiview pipelines.
   if (gfx::xr_motion_replay()) {
     if (data.xrMotionPipeline == 0 || !gfx::bind_pipeline(data.xrMotionPipeline, pass))
