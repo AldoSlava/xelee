@@ -37,14 +37,14 @@ static struct loadData load_data;
 static struct leaveData leave_data;
 
 #ifdef TARGET_PC
-/* MELEE_BOOT_SCENE=<title|vs|css|classic|adventure|homerun|training|unranked|direct|ranked>: skip
+/* MELEE_BOOT_SCENE=<title|vs|css|classic|adventure|allstar|homerun|training|unranked|direct|ranked>: skip
  * the whole menu walk and boot into one scene with a fixed setup. Menu navigation here can only be
  * driven by synthetic input, which misses keypresses often enough that an
  * automated run cannot rely on it (see tools/smoke_test.py).
  *
  * vs maps to GM_DEBUG_VS because that mode already *is* a fixed direct start
  * (onEnterDebugVs in gmvsmode.c fills the StartMeleeData itself). classic,
- * adventure, homerun and training still open on a character-select state, so
+ * adventure, allstar, homerun and training still open on a character-select state, so
  * their on_load hooks seed the pick and jump past it. */
 u8 pc_boot_scene(void)
 {
@@ -66,6 +66,8 @@ u8 pc_boot_scene(void)
             scene = GM_CLASSIC;
         } else if (strcmp(want, "adventure") == 0) {
             scene = GM_ADVENTURE;
+        } else if (strcmp(want, "allstar") == 0) {
+            scene = GM_ALLSTAR;
         } else if (strcmp(want, "homerun") == 0) {
             scene = GM_HOME_RUN_CONTEST;
         } else if (strcmp(want, "training") == 0) {
@@ -81,7 +83,7 @@ u8 pc_boot_scene(void)
             gmOnline_SetKind(ONLINE_KIND_RANKED);
         } else {
             OSReport("MELEE_BOOT_SCENE: unknown scene '%s'; valid values are "
-                     "title, vs, css, classic, adventure, homerun, training, unranked, direct, ranked\n",
+                     "title, vs, css, classic, adventure, allstar, homerun, training, unranked, direct, ranked\n",
                      want);
         }
     }

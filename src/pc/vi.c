@@ -208,11 +208,13 @@ void pc_frame_boundary(void) {
             if (event->sdl.type == SDL_EVENT_KEY_DOWN &&
                 event->sdl.key.scancode == SDL_SCANCODE_F1 && !event->sdl.key.repeat)
                 pc_menu_toggle();
-            /* In XR, the gamepad's Select switches mixed reality and full
-             * VR instead of opening the port menu. */
+            /* In XR the gamepad's Select does nothing, rather than open the
+             * port menu over the game. (It switched to full VR; the first
+             * release is mixed reality only, VR waits for its own polish:
+             * MELEE_XR_MODE=vr and MELEE_XR_CONTROL still reach it.) */
             const bool xr_select = event->sdl.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
                                    event->sdl.gbutton.button == SDL_GAMEPAD_BUTTON_BACK &&
-                                   pc_xr_toggle_mode();
+                                   pc_xr_presenting();
             if (!xr_select)
                 pc_menu_event(&event->sdl);
             pc_keyboard_event(&event->sdl);

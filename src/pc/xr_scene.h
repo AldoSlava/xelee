@@ -46,9 +46,9 @@ bool pc_xr_mixed_reality(void);
 void pc_xr_stage_load(void);
 /* An XR session is presenting the game, in either mode. */
 bool pc_xr_presenting(void);
-/* Switches between mixed reality and full VR (passthrough off, stage whole);
- * the gamepad's Select does this in XR. False, doing nothing, when no XR
- * session is presenting. */
+/* Switches between mixed reality and full VR (passthrough off, stage whole),
+ * for MELEE_XR_CONTROL only: players get mixed reality. False, doing
+ * nothing, when no XR session is presenting. */
 bool pc_xr_toggle_mode(void);
 /* MELEE_XR_CONTROL=<file>: once a second, the file's first line ("mr" or
  * "vr") picks the mode when it changes, so an unattended run can switch

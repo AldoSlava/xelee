@@ -333,6 +333,16 @@ and the investigation behind it are in docs/xr-3d-plan.md.
   frame. Before, a quarter second without one switched to the virtual
   screen, which during fights holds a stale black frame. The XR log notes
   each switch to the screen during a fight and how long it lasted.
+  - **All-Star's rest area (2026-10-11):** the sky dome (part 3) is
+    hidden and the meadow (parts 0 and 1) boxed to the fight with hard cuts
+    (x ±200, z -130 to 80, from y -40), leaving the path, the heart
+    containers, the warp and the near trees. Scale 0.8. It asks for
+    placing only the first time a session (`xr_place.c`); it comes back
+    after every fight. `MELEE_BOOT_SCENE=allstar` boots Mario into it
+    (`MELEE_ALLSTAR_SCENE` picks another state: fights 0x00, 0x08, ...).
+  - **Onett and Brinstar (2026-10-11):** their boxes cut hard instead of
+    dissolving (Brinstar's acid still fades in as it rises), and Onett's
+    sides moved in (x -130 to 135) past the bus stop sign it cut in half.
 - **Screens over an ended fight.** Stage Clear (Classic, Adventure, All-Star
   and the other 1P modes, `gm/gmregclear.c`) draws its bonus tally flat over
   the fight, which goes on drawing behind it. While it's up, the fight and
@@ -356,10 +366,11 @@ and the investigation behind it are in docs/xr-3d-plan.md.
   passthrough is stopped (`xrPassthroughPauseFB`, not just a missing layer).
   Per-stage centering applies in both. Full VR has had no work beyond every
   stage part rendering.
-  - **Switching:** a gamepad's Select (SDL Back) switches between them at
-    any time while XR is presenting (`pc_xr_toggle_mode`), instead of
-    opening the port menu. That's handy for comparing a pruned stage with
-    the original. `MELEE_XR_MODE=vr` starts in full VR.
+  - **Switching:** the first release is mixed reality only (2026-10-11):
+    full VR waits for its own polish. Only developers reach it,
+    `MELEE_XR_MODE=vr` at start or `MELEE_XR_CONTROL` during a run. A
+    gamepad's Select did switch; in XR it now does nothing (rather than
+    open the port menu over the game).
 - **Clip planes.** `aurora_xr_world_clips4` cuts the following world draws
   in the 3D view, keeping what's on the inside of up to eight game-space
   planes (`AURORA_XR_MAX_CLIPS`; four until 2026-10-09). Their distances
@@ -1083,6 +1094,11 @@ session, not across launches. Each is logged when you let go (`Arena for
 stage N placed at x,y,z, yaw, scale`, the scale without the stage's own),
 which is handy for tuning every stage's default with `AURORA_XR_ARENA_POS`
 and `AURORA_XR_ARENA_SCALE` in `melee-env.txt`.
+
+A stage not yet placed this session starts in front of where your head is
+and looks when it's set, like the placing cards, at the default height
+(2026-10-11). Before, the default was measured from the tracking origin,
+wherever you last recentered.
 
 #### Before every fight
 

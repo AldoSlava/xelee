@@ -3100,7 +3100,10 @@ bool render_xr_frame() {
     const float yaw = std::atan2(-fwd.x, -fwd.z); // rot_y's sense
     std::lock_guard lock{g_arenaMutex};
     g_arena.yaw = g_defaultArena.yaw + yaw;
-    g_arena.pos = XrVector3f{B.head.x, B.head.y, B.head.z} + rot_y(g_defaultArena.pos, yaw);
+    // From the head's spot on the floor, at the default height; unattended
+    // runs (AURORA_XR_ARENA_AT_HEAD) from the head itself, wherever it lies.
+    static const bool atHead = env_flag("AURORA_XR_ARENA_AT_HEAD", false);
+    g_arena.pos = XrVector3f{B.head.x, atHead ? B.head.y : 0.f, B.head.z} + rot_y(g_defaultArena.pos, yaw);
     Log.info("Arena placed at the head: {:.2f},{:.2f},{:.2f}, yaw {:.0f} deg", g_arena.pos.x, g_arena.pos.y,
              g_arena.pos.z, g_arena.yaw * 57.2958f);
   }
@@ -5229,8 +5232,12 @@ extern "C" void aurora_xr_set_stage(int stage, float x, float y, float z, float 
   if (const auto it = g_stageArenas.find(stage); it != g_stageArenas.end()) {
     g_arena = it->second;
   } else {
+    // Not placed yet this session: in front of where the head is and looks,
+    // like the placing cards, not of the tracking origin (which is wherever
+    // the player last recentered).
     g_arena = g_defaultArena;
     g_arena.scale *= g_stageScale;
+    g_arenaToHead = true;
   }
   static const bool atHead = env_flag("AURORA_XR_ARENA_AT_HEAD", false);
   if (atHead)

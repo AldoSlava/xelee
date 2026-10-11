@@ -177,6 +177,9 @@ static const PartRule s_builtin_rules[] = {
     /* Adventure's Underground Maze: the maze itself is part 4, on the far
      * layer; shown, and cut to the window (s_follows). */
     {0x20, 4, -1, -1, true},
+    /* All-Star's rest area: the sky dome (part 3). The meadow, its hills
+     * and trees reach far behind; boxed to the fight (s_clips). */
+    {0x42, 3, -1, -1, false},
     /* Home-Run Contest: the stands and sky (part 3, four copies the stage
      * slides along after the camera). The field streams through a window
      * that holds on the platform until the bag leaves it (s_follows). */
@@ -257,10 +260,10 @@ static const ClipRule s_clips[] = {
     /* Onett: the block you fight on, with its lot, the clothesline between
      * the poles over the right house (it has collision) and the road in
      * front, cut out of the town. */
-    CLIP_LEFT(0x14, 5, -140.f, 6.f),
-    CLIP_RIGHT(0x14, 5, 150.f, 6.f),
-    CLIP_BEHIND(0x14, 5, -70.f, 6.f),
-    CLIP_FRONT(0x14, 5, 70.f, 6.f),
+    CLIP_LEFT(0x14, 5, -130.f, 0.f),
+    CLIP_RIGHT(0x14, 5, 135.f, 0.f), /* short of the bus stop sign, which was cut in half */
+    CLIP_BEHIND(0x14, 5, -70.f, 0.f),
+    CLIP_FRONT(0x14, 5, 70.f, 0.f),
     CLIP_BELOW(0x18, 3, -40.f, 15.f), /* Mushroom Kingdom: the ground's deep blocks */
     /* Mushroom Kingdom II: the cliffs, cut at the blast zones and below,
      * with the waterfall and the pillars under the bridge. */
@@ -307,10 +310,16 @@ static const ClipRule s_clips[] = {
 #undef RC_BOX
     /* Brinstar: only the stretch of the acid's river around the stage (it
      * runs the length of the cave). LevelRule hides it while it is low. */
-    CLIP_LEFT(0x08, 8, -120.f, 12.f),
-    CLIP_RIGHT(0x08, 8, 125.f, 12.f),
-    CLIP_FRONT(0x08, 8, 70.f, 15.f),
-    CLIP_BEHIND(0x08, 8, -90.f, 15.f),
+    CLIP_LEFT(0x08, 8, -120.f, 0.f),
+    CLIP_RIGHT(0x08, 8, 125.f, 0.f),
+    CLIP_FRONT(0x08, 8, 70.f, 0.f),
+    CLIP_BEHIND(0x08, 8, -90.f, 0.f),
+    /* All-Star's rest area: the meadow (parts 0 and 1) boxed to the fight,
+     * about its blast zones across, cut hard. */
+    CLIP_LEFT(0x42, 0, -200.f, 0.f), CLIP_RIGHT(0x42, 0, 200.f, 0.f), CLIP_BEHIND(0x42, 0, -130.f, 0.f),
+    CLIP_FRONT(0x42, 0, 80.f, 0.f), CLIP_BELOW(0x42, 0, -40.f, 0.f),
+    CLIP_LEFT(0x42, 1, -200.f, 0.f), CLIP_RIGHT(0x42, 1, 200.f, 0.f), CLIP_BEHIND(0x42, 1, -130.f, 0.f),
+    CLIP_FRONT(0x42, 1, 80.f, 0.f), CLIP_BELOW(0x42, 1, -40.f, 0.f),
     /* Brinstar Depths: Kraid (parts 1 and 4) rises from far below; cut
      * just under the bottom blast zone (-128), fading. */
     CLIP_BELOW(0x09, 1, -150.f, 40.f),
@@ -396,6 +405,7 @@ static const StagePlacement s_placements[] = {
     {0x21, 0.f, 0.f, 0.f, 0.8f},     /* Adventure: Escape from Brinstar, its window */
     {0x22, 0.f, 0.f, 0.f, 0.8f},     /* Adventure: F-Zero Grand Prix, its window */
     {0x43, 0.f, 0.f, 0.f, 1.f},      /* Home-Run Contest: its window (s_follows) */
+    {0x42, 0.f, 0.f, 0.f, 0.8f},     /* All-Star's rest area: floors x -198 to 198 */
     {0x25, 0.f, 0.f, 0.f, 1.f},      /* Final Destination */
 };
 #define PLACEMENT_COUNT ((int)(sizeof s_placements / sizeof s_placements[0]))

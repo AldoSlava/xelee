@@ -171,6 +171,15 @@ bool pc_xr_place_hold(void) {
         if (!enabled() || !aurora_xr_active() || pc_net_active()) {
             return false;
         }
+        /* All-Star's rest area comes back after every fight: placed once a
+         * session, it keeps that. */
+        static bool rest_area_placed;
+        if (grkind == 0x42) { /* Gr_Kind_Heal */
+            if (rest_area_placed) {
+                return false;
+            }
+            rest_area_placed = true;
+        }
         static bool loaded;
         if (!loaded) {
             loaded = true;

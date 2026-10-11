@@ -1,6 +1,7 @@
 #include "gmallstar.h"
 
 #include "gm_18A1.h"
+#include "gmboot.h"
 #include "gm_unsplit.h"
 #include "gmmain_lib.h"
 #include "gmregcommon.h"
@@ -10,6 +11,9 @@
 #include <melee/lb/lbbgflash.h>
 #include <melee/lb/lbdvd.h>
 #include <sysdolphin/baselib/random.h>
+#ifdef TARGET_PC
+#include <stdlib.h>
+#endif
 
 typedef struct AllStarOpponent {
     /* +0 */ u8 stages[2];
@@ -807,6 +811,30 @@ void gm_Mode_AllStar_OnLoad(void)
     }
 
     gm_SetGameModeStateId(0x70U);
+#ifdef TARGET_PC
+    /* MELEE_BOOT_SCENE=allstar: state 0x70 is All-Star's character select,
+     * which needs stick + Start. Do what its on_exit (gm_801B5FB4) does for
+     * a fixed Mario pick and go to a state instead: MELEE_ALLSTAR_SCENE=<id>
+     * (fights 0x00, 0x08, ...; the rest area after each is the next id),
+     * default 0x01, the first rest area. */
+    if (pc_boot_scene() == GM_ALLSTAR) {
+        struct gmm_x0_528_t* settings = gmMainLib_8015CDE0();
+        const char* scene_env = getenv("MELEE_ALLSTAR_SCENE");
+        const int scene_id = scene_env != NULL ? (int) strtol(scene_env, NULL, 0) : 0x01;
+        settings->c_kind = CKind_Mario;
+        settings->color = 0;
+        settings->stocks = 1;
+        settings->cpu_level = 0;
+        settings->nametag = GM_NAMETAG_COUNT;
+        data->x0.x0.ckind = settings->c_kind;
+        data->x0.x0.color = settings->color;
+        data->x0.x0.cpu_level = settings->cpu_level;
+        data->x0.x0.stocks = settings->stocks;
+        data->x0.x0.nametag = settings->nametag;
+        gm_SetGameModeStateId((u8) (scene_id >= 0 && scene_id < 0x70 ? scene_id : 0x01));
+        gm_801B5324(data, settings->x5);
+    }
+#endif
     gm_80172174();
     Ground_801C5A28();
 }
