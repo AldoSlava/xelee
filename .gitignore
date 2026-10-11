@@ -16,6 +16,7 @@ docs/*
 !docs/testing.md
 !docs/quest-xr.md
 !docs/xr-3d-plan.md
+!docs/xr-frame-rate-plan.md
 !docs/browser-mobile-findings.md
 !docs/site/
 

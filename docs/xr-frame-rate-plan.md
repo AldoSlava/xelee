@@ -1,0 +1,184 @@
+# XR frame rate: getting off 60-on-120
+
+Status: plan (2026-10-11). Nothing here is built yet.
+
+## The problem
+
+The Quest build shows the game at 120 Hz with lock-step pacing: each game
+frame starts on a tick and its 3D image is shown for exactly two display
+frames. Head motion between those two display frames is covered only by
+the runtime's rotational timewarp. With the system's experimental
+Positional TimeWarp (Horizon OS v83, a setting players have to turn on) it
+feels fine; without it, every other display frame is positionally stale,
+which reads as judder whenever the head translates. We can't count on
+players turning that setting on.
+
+Two things are mixed together in "60 on 120":
+
+1. **Head-motion staleness:** the eyes are drawn from a head pose 8 ms old
+   on every second display frame. This is the bad feeling.
+2. **Object-motion rate:** fighters move 60 times a second. Even at 2:2
+   cadence that is smooth enough; it's what the game does on a TV.
+
+Anything that fixes (1) fixes the complaint. (2) is a bonus.
+
+## Option A: Application SpaceWarp at 60 -> 120 (recommended first)
+
+Meta's Application SpaceWarp (`XR_FB_space_warp`) is built for exactly our
+shape: the app renders at half the display rate and gives the runtime each
+frame's depth and per-pixel motion vectors; the runtime synthesizes the
+in-between frames. Meta enables positional timewarp automatically for
+AppSW apps, without the system setting. So AppSW with *zero* motion
+vectors is, in effect, positional timewarp we control.
+
+- **A1: depth, zero motion vectors (days).**
+  - Check `XR_FB_space_warp` is offered on Quest 3; read
+    `XrSystemSpaceWarpPropertiesFB` for the recommended motion-vector size.
+  - A depth swapchain per eye (multiview, two layers) that the eye pass
+    renders into. Today the eye depth is our own texture with
+    `depthStore` discarded; it becomes a swapchain image imported into
+    Dawn like the color one, and stored.
+  - A motion-vector swapchain (RGBA16F, the recommended size), cleared to
+    zero each frame: no extra draws.
+  - `XrCompositionLayerSpaceWarpInfoFB` chained to each projection view:
+    the motion-vector and depth sub-images, `appSpaceDeltaPose` (identity,
+    or the arena's movement while the player drags it), depth range and
+    near/far. Our depth is reversed Z with an infinite far plane. The
+    sibling depth specs (`XR_KHR_composition_layer_depth`,
+    `XR_EXT_frame_synthesis`) allow `nearZ > farZ` for reversed depth and
+    either one infinite; confirm the FB struct takes the same.
+  - Also check whether the Quest runtime offers `XR_EXT_frame_synthesis`,
+    the cross-vendor extension for the same thing; prefer it if so.
+  - Pacing: with AppSW the runtime runs the app at half rate (60), so the
+    XR loop's `xrWaitFrame` returns at 60 and every layer (HUD, screen,
+    lasers) updates at 60. Lock-step becomes one display frame per game
+    frame from the app's side; fixed-latency presentation, the latency
+    picker and the release-order logic all simplify (the image is released
+    in the same loop it's due).
+  - **Risks to check on device first:** AppSW over passthrough with our
+    premultiplied-alpha projection layer (synthesized frames must warp
+    alpha too, or edges will halo); translucent effects with no depth
+    (holograms over the room) warp by the depth behind them; disocclusion
+    smear at the arena's edges. If AppSW misbehaves in mixed reality,
+    stop here and go to option B.
+  - Cost: the depth store (bandwidth, about 0.3-0.5 ms on the GPU at
+    scale 1.0), the motion-vector clear, the runtime's synthesis (its own
+    GPU time, which dynamic resolution's compositor allowance must take
+    in).
+- **A2: real motion vectors (weeks, optional).** Fighters and items then
+  move at 120 too. Needs each draw's previous-frame clip-space position:
+  a second color attachment on the eye pass writing
+  `clip(prev) - clip(cur)` per vertex, from the draw's previous position
+  matrices. That is the same draw-identity problem as option C (below);
+  without it, draws the matcher can't pair write zero motion and simply
+  stay at 60.
+
+## Option B: 72 Hz, eyes re-rendered every display frame
+
+What was asked for: display at 72 Hz and render 72 distinct frames a
+second. The game still simulates at 60 (it has to: game speed, netplay).
+
+- **Pacing.** 72/60 = 1.2 display frames per game frame. Two choices:
+  - The game on its own 60 Hz timer, as today for rates that aren't a
+    multiple of 60 (`update_pacing`, `per = 0`). Simple, but tick phase
+    drifts against the display.
+  - Ticks driven from the display in a 5-of-6 pattern (`aurora_xr_pace`
+    ticks on five display frames out of every six): exactly 60 a second,
+    locked to the display, so every tick's phase is known. Preferred.
+- **Eyes every display frame.** Each display frame renders the eyes from
+  the newest game frame with that display frame's head pose. One display
+  frame in six has no new game frame, so its eyes re-render the previous
+  one. That removes head-motion staleness entirely (every display frame is
+  fresh), with no runtime reprojection needed.
+- **Decoupling (the big change).** Today a frame packet's GPU data (the
+  vertex, index, uniform and storage pools, the staging buffers) is
+  recycled once the frame is submitted. Re-rendering a game frame's eyes
+  means keeping the newest packet's world passes and pools alive until the
+  next game frame's eyes are done: double-buffered pools, and a
+  "re-render the eyes" work item the XR thread queues on display frames
+  with no new game frame. The deferred-eyes path (record into an image
+  before it's free, flush when it is) carries over as is.
+- **The release-order rule still holds.** Quest's runtime marks each
+  release on the GPU, and work queued ahead of it delays it (docs/quest-xr.md,
+  "Release order"). At 72 Hz there's a release every display frame, so
+  each eye render must fit the 13.9 ms between two releases.
+- **GPU budget: the hard part.** 13.9 ms a display frame, less the
+  compositor's ~2 ms, leaves about 11.5 ms for the eyes, 72 times a second.
+  Today's heavy stages take 10-12 ms of eye pass at scale 1.0 once per game
+  frame (four-CPU Stadium rock, Mute City, Brinstar Depths). Eyes 72 times
+  a second instead of 60 is 20% more GPU, so those stages would not hold
+  1.0 at 72 Hz. Either the floor drops below 1.0 at 72 Hz, or the eye pass
+  gets about 20% cheaper first (fewer draws: merging, instancing;
+  cheaper shaders). That's the real cost of this option.
+- **CPU:** each re-render is another eye encode and Dawn translation on
+  the render worker, about 2.5 ms, on one display frame in six.
+- **Everything keyed to "display frames per game frame"** (fixed-latency
+  presentation, the latency picker, dynamic resolution's margins, the pace
+  probe) moves to a per-display-frame model. Simpler in the end: every
+  display frame renders and releases once.
+- **What it looks like:** head motion and passthrough at 72 (vs 120
+  today), objects at 60 with one repeat in six, a 12 Hz beat in fighter
+  motion. Worth judging on the headset before building it (below).
+
+## Option C: B plus sub-frame interpolation
+
+melee-unlocked keeps the simulation at 60 and fills in display frames
+between ticks from the game's own data (`port/runtime/gx/subframe.{h,cpp}`,
+`authored_pose.{h,cpp}`). Its solver pairs each draw with the previous
+tick's by identity (guarded against address reuse, same vertex count and
+primitive), takes each position matrix's delta `D = M_cur * M_prev^-1`,
+and applies a fraction of it: interpolating (exact, one tick of latency)
+or extrapolating (no latency, overshoots on direction changes). Cuts and
+implausible deltas (past 40 units or 1.2 rad) hold the latest pose;
+rebuilt particle streams blend vertices; an "authored" mode samples
+animation tracks forward instead. A lot of its code is flicker edge cases.
+
+For us:
+
+- **Hook point:** the eye replay already re-encodes recorded draws, so
+  per-draw matrix overrides fit there.
+- **Draw identity is easier for us:** `pc_xr_jobj_begin` /
+  `pc_xr_dobj_begin` already see every joint and mesh drawn; a tag through
+  the FIFO (like the world/HUD/hidden categories) gives each draw an exact
+  identity (joint, mesh index) instead of heuristic pairing.
+- **Latency:** interpolation adds a tick (16.7 ms) on top of fixed-latency
+  presentation, which already holds frames; extrapolation costs nothing
+  but overshoots.
+- **Scope:** weeks, mostly edge cases (particles, rebuilt streams, cuts,
+  hit-lag freezes).
+
+It's also what A2's motion vectors need: the same pairing gives each
+draw's previous matrices.
+
+## Recommendation
+
+1. **Feel-test 72 Hz now, for free:** `AURORA_XR_REFRESH=72` in
+   `melee-env.txt` runs the display at 72 with the game on its own timer
+   (no re-rendering: one frame in six repeats, rotationally reprojected).
+   It shows what 72 Hz passthrough and the 5:6 object cadence feel like
+   before anything is built. Option B would fix only the head staleness of
+   the repeated frame on top of that.
+2. **Prototype A1** (AppSW, zero motion vectors): it targets the actual
+   complaint, keeps 120 Hz passthrough and every bit of tonight's tuned
+   pacing, and costs little GPU. The open question is mixed reality; a
+   day's spike answers it.
+3. **If AppSW is unusable over passthrough, build B**, and plan on the eye
+   pass getting about 20% cheaper (or a floor below 1.0 at 72 Hz) for the
+   heavy stages.
+4. **C (or A2) later,** as the object-motion upgrade on whichever path
+   wins; the draw-identity work is shared.
+
+## Sources
+
+- [melee-unlocked](https://github.com/Hero88go/melee-unlocked):
+  `port/runtime/gx/subframe.h`, `authored_pose.h`.
+- [Introducing Application SpaceWarp](https://developers.meta.com/vr/blog/introducing-application-spacewarp/)
+  (Meta): positional timewarp is enabled automatically for AppSW apps.
+- [Unity: Understand Application SpaceWarp](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.15//manual/features/spacewarp/spacewarp-overview.html).
+- [Quest v83 brings System Positional TimeWarp](https://www.uploadvr.com/quest-horizon-os-v83-system-positional-timewarp-temporal-dimming/)
+  (UploadVR): the system setting is experimental and opt-in.
+- [OpenXR specification](https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html):
+  `XR_KHR_composition_layer_depth`, `XR_FB_space_warp`;
+  [XrCompositionLayerSpaceWarpInfoFB](https://registry.khronos.org/OpenXR/specs/1.1/man/html/XrCompositionLayerSpaceWarpInfoFB.html),
+  [XrCompositionLayerDepthInfoKHR](https://registry.khronos.org/OpenXR/specs/1.1/man/html/XrCompositionLayerDepthInfoKHR.html),
+  [XrFrameSynthesisInfoEXT](https://registry.khronos.org/OpenXR/specs/1.1/man/html/XrFrameSynthesisInfoEXT.html).
