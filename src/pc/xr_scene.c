@@ -452,8 +452,9 @@ static const FollowRule s_follows[] = {
     {.grkind = 0x20, /* Underground Maze: the scenery reaches the HUD */
      .half = {160.f, 110.f, 80.f}, .slack = {40.f, 30.f}, .fade = {25.f, 25.f, 25.f}, .ease = 0.3f,
      .lock_zoom = 1.4f, .hud_on_top = true, .follow_player = true},
-    {.grkind = 0x21, /* Escape from Brinstar */
-     .half = {160.f, 110.f, 80.f}, .slack = {40.f, 30.f}, .fade = {25.f, 25.f, 25.f}, .ease = 0.25f},
+    {.grkind = 0x21, /* Escape from Brinstar: the shaft reaches the HUD */
+     .half = {160.f, 110.f, 80.f}, .slack = {40.f, 30.f}, .fade = {25.f, 25.f, 25.f}, .ease = 0.25f,
+     .hud_on_top = true},
     {.grkind = 0x22, /* F-Zero Grand Prix */
      .half = {160.f, 110.f, 80.f}, .slack = {40.f, 30.f}, .fade = {25.f, 25.f, 25.f}, .ease = 0.25f},
     /* Home-Run Contest: held centered on the platform while the bag is on

@@ -63,7 +63,7 @@ and the investigation behind it are in docs/xr-3d-plan.md.
     draws the whole stage and its sky, so there the HUD stays on top.
     `AURORA_XR_HUD_ON_TOP=1` keeps it on top in mixed reality too, and a
     stage can keep it there (`aurora_xr_set_hud_on_top`; the Underground
-    Maze).
+    Maze and the escape from Brinstar).
   - **Off-screen fighters.** Past the flat camera's view, the game stops
     drawing a fighter and shows it in a magnifier bubble at the screen's
     edge. The 3D view sees the whole arena, so in XR the fighter keeps
