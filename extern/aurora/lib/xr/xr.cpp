@@ -594,6 +594,18 @@ bool create_instance() {
   XR_TRY(xrEnumerateInstanceExtensionProperties(nullptr, 0, &n, nullptr));
   std::vector<XrExtensionProperties> props(n, {XR_TYPE_EXTENSION_PROPERTIES});
   XR_TRY(xrEnumerateInstanceExtensionProperties(nullptr, n, &n, props.data()));
+  // AURORA_XR_LOG_EXTENSIONS=1: every extension the runtime offers.
+  if (env_flag("AURORA_XR_LOG_EXTENSIONS", false)) {
+    // In lines of 12: logcat cuts a long line short.
+    std::string list;
+    for (size_t i = 0; i < props.size(); ++i) {
+      list += fmt::format("{}{} v{}", list.empty() ? "" : ", ", props[i].extensionName, props[i].extensionVersion);
+      if ((i + 1) % 12 == 0 || i + 1 == props.size()) {
+        Log.info("OpenXR extensions offered: {}", list);
+        list.clear();
+      }
+    }
+  }
   bool hasVk2 = false;
   for (const auto& p : props) {
     hasVk2 |= !std::strcmp(p.extensionName, XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME);

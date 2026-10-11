@@ -22,6 +22,40 @@ Two things are mixed together in "60 on 120":
 
 Anything that fixes (1) fixes the complaint. (2) is a bonus.
 
+## Measured (2026-10-11, Quest 3, two-CPU Battlefield, mixed reality)
+
+- **Compositor GPU time per display frame** (VrApi `TW=`): 2.43 ms at
+  120 Hz, 2.34 ms at 72 Hz. It's about constant per display frame, so the
+  rate decides its share: about 292 ms of every second at 120 Hz against
+  about 168 at 72.
+- **Extensions offered** (`AURORA_XR_LOG_EXTENSIONS=1`):
+  `XR_FB_space_warp` v2, `XR_EXT_frame_synthesis` v1 (the cross-vendor
+  successor), `XR_KHR_composition_layer_depth` v6, and
+  `XR_META_temporal_pixel_synthesis` v1 (not yet looked into).
+- **72 Hz today** (`AURORA_XR_REFRESH=72`, game on its own timer, no
+  re-rendering): 4.9 stale frames a second against 0.45 at 120 Hz, as
+  expected without lock-step.
+
+## The GPU budget at 72 Hz with every display frame rendered
+
+Per second, with about 2 ms of once-per-tick work (shadows, HUD) that
+doesn't re-render:
+
+| | 60 on 120 (today) | 72 on 72 |
+|---|---|---|
+| Compositor | 120 x 2.4 = ~290 ms | 72 x 2.35 = ~170 ms |
+| Left for the app | ~710 ms | ~830 ms (+17%) |
+| Once-per-tick work | 60 x 2 = 120 ms | 60 x 2 = 120 ms |
+| Eye renders | 60 | 72 (+20%) |
+| Eye budget per render | (710 - 120) / 60 = ~9.8 ms | (830 - 120) / 72 = ~9.9 ms |
+
+The compositor time saved pays for the extra eye renders almost exactly.
+What's tighter at 72 is the rest: each render must fit between releases
+13.9 ms apart (16.7 today), and with interpolation every render is
+different, so every one needs its own encode and Dawn translation (about
+2.5 ms of render worker, 72 times a second: roughly 40% more render-worker
+work, the thread behind most spikes).
+
 ## Option A: Application SpaceWarp at 60 -> 120 (recommended first)
 
 Meta's Application SpaceWarp (`XR_FB_space_warp`) is built for exactly our
@@ -65,6 +99,52 @@ vectors is, in effect, positional timewarp we control.
     scale 1.0), the motion-vector clear, the runtime's synthesis (its own
     GPU time, which dynamic resolution's compositor allowance must take
     in).
+- **Costs A1 adds** (beyond the above):
+  - The runtime's synthesis on every synthesized display frame (half of
+    them). It's more than a timewarp; Meta presents it as cheaper than
+    rendering a frame, not free. VrApi's compositor time will show it, and
+    dynamic resolution's compositor allowance has to take it in.
+  - Storing depth: today eye depth stays in tile memory and is discarded;
+    AppSW needs it written out, two layers at up to scale 1.3, roughly
+    40 MB a frame. Guess: 0.3-1 ms of GPU.
+  - The XR loop at 60: HUD, laser pointers, hand ghosts and the screen
+    update at 60 instead of 120 (world-locked quads are reprojected, but
+    pointer responsiveness changes).
+  - Content that writes no depth (translucent effects over the room) is
+    reprojected at the depth behind it: a slight wobble in head motion.
+  - Dynamic resolution's partial render area: depth and motion-vector
+    sub-images follow `imageRect`.
+- **With zero motion vectors** the runtime treats everything as static and
+  corrects only head motion (with parallax from depth): positional
+  timewarp. Moving things (fighters, scrolling stages, follow windows) hold
+  where they were for the synthesized frame, the same 2:2 cadence as now.
+  Nothing gets worse; whether it behaves over passthrough is the thing to
+  test.
+- **A1 spike, step by step:**
+  1. Enable `XR_EXT_frame_synthesis` (else `XR_FB_space_warp`) behind
+     `AURORA_XR_APPSW`; read its system properties for the recommended
+     motion-vector image size.
+  2. Depth swapchain: the runtime's depth formats
+     (`xrEnumerateSwapchainFormats`), the stereo size, two layers,
+     `XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT`; import it into Dawn
+     as the color images are (`CreateSharedTextureMemoryFromVkImage`) and
+     make it the eye pass's depth attachment, stored instead of discarded.
+     It follows the color image through acquire, wait and release.
+  3. Motion-vector swapchain (RGBA16F, the recommended size): a render
+     pass that only clears it to zero, each frame.
+  4. Chain the synthesis info on each projection view: the motion-vector
+     and depth sub-images (rects following dynamic resolution),
+     `appSpaceDeltaPose` identity, `minDepth` 0, `maxDepth` 1, and for our
+     reversed infinite depth `nearZ = +inf`, `farZ = 0.05` (the near
+     plane), nearZ > farZ meaning reversed.
+  5. Pacing: check that the runtime halves the app's rate
+     (`predictedDisplayPeriod` doubling in `xrWaitFrame`). Lock-step then
+     runs at one display frame per game frame; fixed-latency presentation
+     and the latency picker follow `g_displayPerGameFrame`.
+  6. Measure and judge: VrApi stale and compositor time against today,
+     app GPU time, the feel of head translation (with the system PTW
+     setting off), the arena's edges over passthrough, translucent effects.
+     A/B with `AURORA_XR_APPSW=0`.
 - **A2: real motion vectors (weeks, optional).** Fighters and items then
   move at 120 too. Needs each draw's previous-frame clip-space position:
   a second color attachment on the eye pass writing
