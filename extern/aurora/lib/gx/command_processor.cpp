@@ -1078,12 +1078,48 @@ static bool xr_motion_eligible() noexcept {
          c.shaderConfig.lineMode == 0 && c.shaderConfig.zTexOp == 0;
 }
 
+// The motion twin's config: only what decides where a vertex lands and how
+// its depth tests (vertex format, depth state, culling, depth bias). The
+// fragment stage is replaced and the GX outputs are dead code, so materials,
+// lighting, texgen and blending don't matter: draws share a handful of
+// pipelines instead of one per material (fewer pipeline switches in the
+// pass, far fewer pipelines to compile).
+static PipelineConfig xr_motion_config(const PipelineConfig& from) noexcept {
+  PipelineConfig c = from;
+  const ShaderConfig& sc = from.shaderConfig;
+  c.shaderConfig = {};
+  c.shaderConfig.vtxStride = sc.vtxStride;
+  c.shaderConfig.lineMode = sc.lineMode;
+  c.shaderConfig.decodedPos = sc.decodedPos;
+  c.shaderConfig.decodedAll = sc.decodedAll;
+  c.shaderConfig.attrs = sc.attrs;
+  c.shaderConfig.tevStageCount = 1; // one stage of zeros: nothing sampled, nothing lit
+  c.blendMode = GX_BM_NONE;
+  c.blendFacSrc = GX_BL_ONE;
+  c.blendFacDst = GX_BL_ZERO;
+  c.blendOp = GX_LO_CLEAR;
+  c.dstAlpha = UINT32_MAX;
+  c.alphaUpdate = true;
+  c.colorUpdate = true;
+  return c;
+}
+
 static gfx::PipelineRef xr_motion_pipeline() noexcept {
   const auto* layout = gfx::xr_motion_layout(); // null once adaptive SpaceWarp turns it off
   if (layout == nullptr || !xr_motion_eligible())
     return 0;
   auto& cache = sDrawCache;
-  return xr_twin(*layout, cache.xrMotionRef, cache.xrMotionForPipeline, cache.xrMotionForLayout);
+  if (cache.xrMotionForPipeline != cache.pipelineRef || cache.xrMotionForLayout != layout->key) {
+    static const bool shared = [] {
+      const char* v = std::getenv("AURORA_XR_APPSW_SHARED");
+      return v == nullptr || *v != '0';
+    }();
+    cache.xrMotionRef =
+        gfx::find_pipeline(shared ? xr_motion_config(cache.config) : cache.config, *layout);
+    cache.xrMotionForPipeline = cache.pipelineRef;
+    cache.xrMotionForLayout = layout->key;
+  }
+  return cache.xrMotionRef;
 }
 
 // SpaceWarp motion vectors: each opaque world draw's position matrices are
