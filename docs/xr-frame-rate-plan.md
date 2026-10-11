@@ -166,13 +166,118 @@ vectors is, in effect, positional timewarp we control.
      app GPU time, the feel of head translation (with the system PTW
      setting off), the arena's edges over passthrough, translucent effects.
      A/B with `AURORA_XR_APPSW=0`.
-- **A2: real motion vectors (weeks, optional).** Fighters and items then
-  move at 120 too. Needs each draw's previous-frame clip-space position:
-  a second color attachment on the eye pass writing
-  `clip(prev) - clip(cur)` per vertex, from the draw's previous position
-  matrices. That is the same draw-identity problem as option C (below);
-  without it, draws the matcher can't pair write zero motion and simply
-  stay at 60.
+- **A2: real motion vectors.** Fighters, items, moving stage pieces and
+  scrolling stages then move at 120 in the synthesized frames too. Design
+  below ("Motion vectors").
+
+## Motion vectors (A2 design)
+
+A motion vector is a pixel's movement in normalized device coordinates
+from the previous app frame to this one. Meta's implementations compute it
+per vertex: the vertex shader transforms each vertex with this frame's
+matrices and with last frame's, and the fragment shader writes the
+difference. We need, for every opaque world draw, last frame's version of
+every matrix in its chain.
+
+### The chain
+
+A world vertex reaches an eye as
+
+    clip = P_eye · V_eye · A · X · V_game^-1 · M_pos · v
+
+- `M_pos`: the GX position matrix the vertex uses (per draw, or per vertex
+  through `PNMTXIDX` for skinned fighters, up to ten slots), model to game
+  view. It includes the game camera.
+- `V_game^-1`: undoes the game camera.
+- `X`: a moving piece's extra placement (`aurora_xr_world_transform`;
+  identity for most draws).
+- `A`: the arena (where the player put it, and the stage center that
+  follow windows slide).
+- `P_eye · V_eye`: the eye.
+
+`clip_prev` is the same chain with last frame's `M_pos`, `V_game`, `X`,
+`A` and eye. Head motion, arena grabs, follow-window scrolls, game camera
+moves and object motion all fall out of the one difference. (Whether
+AppSW wants head motion left in the vectors, as Meta's engines do, or
+taken out through `appSpaceDeltaPose`: to confirm against the extension's
+spec before building.)
+
+### Draw identity
+
+The hard part, as in melee-unlocked: which of last frame's draws is this
+one? Ours can be exact.
+
+- Every mesh the game draws goes through `pc_xr_dobj_begin(jobj,
+  dobj_index)` (`displayfunc.c`). It sends an identity through the FIFO, a
+  new `GX_AURORA_XR_DRAW_ID` command like the world/HUD category ones:
+  the joint's address and the mesh index.
+- One mesh can be several GX draws (its primitives): the command
+  processor numbers them per identity per frame, so each draw's id is
+  (joint, mesh, n).
+- Address reuse (a joint freed and another allocated there): pairs must
+  also agree on vertex count and primitive, as melee-unlocked requires.
+- `DrawData` gains the id (8 bytes; the record has about that much spare
+  at 192).
+- Draws without one (particles, effects, anything not drawn through
+  `HSD_JObjDisp`): zero motion. Most are translucent and stay out of the
+  pass anyway.
+
+### Last frame's matrices
+
+- The FIFO thread keeps, per id, last frame's matrices: the position
+  matrix slots the draw read (a mask of used slots), plus `V_game` and the
+  moving-piece transform index. About 600 world draws a frame; the lookup
+  can use the same next-in-order prediction as the decoded-vertex cache.
+- At each paired draw it pushes last frame's matrices into this frame's
+  uniform buffer in the same layout as the current ones, and the draw
+  records that range (`DrawData::prevUniformRange`, 8 bytes: the inline
+  payload goes from 192 to 208). No pair: the current range, which means
+  zero motion.
+- The XR side keeps last frame's arena, moving-piece transforms and eye
+  matrices for the pass's second eye uniform.
+- Cuts: a pair whose delta is implausible holds at zero motion.
+  melee-unlocked's thresholds (40 units or 1.2 rad) are a start; a fighter
+  turning around (a mirrored scale) is one too.
+
+### The pass and its shaders
+
+- Low-res multiview pass after the eyes, at the runtime's recommended
+  motion-vector size: the opaque world draws (depth writes on, no
+  blending), into the depth and motion-vector swapchains.
+- A position-only shader variant: the vertex stage is the GX position path
+  (vertex fetch, position matrices, the eye chain) done twice; no
+  lighting, no texture coordinates, no TEV. The fragment stage writes
+  `ndc - ndc_prev` (and the depth difference) to RGBA16F. Generated from
+  the same code as the GX shaders, so it's keyed only by vertex format and
+  matrix use: far fewer pipelines than the eye pass, quick to warm.
+- Cost: on the FIFO thread, the lookups and about 50 bytes of extra
+  uniforms per paired draw; on the render worker, the pass's encode and
+  translation (roughly 1-1.5 ms a game frame); on the GPU, vertex work at
+  a few pixels per triangle.
+
+### What it won't catch
+
+- Vertices the game rewrites on the CPU (rebuilt streams, shape
+  animation) without changing matrices: those parts move at 60.
+- Translucent effects: left out of the pass (AppSW moves each pixel one
+  way), so they move at 60 too, positioned by depth behind them.
+- Extrapolation overshoot: a hit, a direction change or a landing shows
+  a frame's worth of the old motion in the synthesized frame. That's
+  AppSW's nature; it's why Meta says to switch it off where it falls
+  short.
+
+### Order of work
+
+1. A1: the low-res pass and swapchains with zero motion, position-only
+   pipelines included. Feel-test head motion over passthrough.
+2. Identity: the FIFO command, per-draw ids, a desktop log of pairing
+   rates (paired, unpaired, cut) per stage.
+3. Last frame's matrices and the two-chain shader: real vectors.
+4. Debugging: a desktop dump of the motion-vector image as color, and
+   Meta's overlays (`debug.oculus.spaceWarpDebug`,
+   `debug.oculus.MVOverlay`) on the headset.
+5. Tuning: cut thresholds, which draws go in the pass, per-stage checks
+   (scrolling stages, follow windows, Pokémon Stadium's transformations).
 
 ## Option B: 72 Hz, eyes re-rendered every display frame
 
