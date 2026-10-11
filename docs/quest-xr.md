@@ -397,6 +397,19 @@ and the investigation behind it are in docs/xr-3d-plan.md.
     Jungle, Jungle Japes, Great Bay, Yoshi's Story, Fountain of Dreams, Mute
     City, Big Blue, Onett, Mushroom Kingdom I and II and Rainbow Cruise all
     hold scale 1.30 at 59.6 to 60 game fps, frame GPU 8.3 to 9.3 ms.
+  - **Solid triangles split off (2026-10-11):** a straddling draw's
+    triangles wholly inside the solid region (every vertex inside each
+    plane's fade, the region being convex) go in a second eye draw with
+    the plain pipeline, so only those crossing a plane discard
+    (`DrawData::xrSolid*`; `AURORA_XR_CLIP_SPLIT=0` turns it off; the
+    draw record's inline payload grew from 160 to 192 bytes). Every
+    visible draw of Brinstar's acid straddled its box, so all of it
+    discarded. Four CPUs on Brinstar, 90 s each: frame GPU 0.2-0.6 ms
+    lower with the acid up and 20 frames late against 59, stale frames the
+    same (0.79 and 0.81 a second). No change on Brinstar Depths: Kraid's
+    cost (about 1 ms of eye pass) is his geometry. The acid adds about
+    1-1.5 ms of eye pass; Brinstar now runs about as the other heavy
+    stages do, at latency 3 or 4.
 - **Soft clips.** A plane with a fade (`aurora_xr_world_clip_soft`, or a
   `ClipRule` fade above 0) dissolves geometry across a band inside the plane
   with a 4x4 ordered dither instead of cutting it. Passthrough shows through
@@ -825,6 +838,12 @@ waited for the held image, and 3D dropped to 56-58 fps.
 
 What changed instead:
 
+- **Dynamic resolution's span from the eyes (2026-10-11):** its frame GPU
+  time ran from the frame's first pass, so with the shadows submitted
+  first it took in the GPU's wait for the eyes' image: 5.5-6.5 ms "outside
+  the eyes" against 0.4-1.1 measured from the eye pass, which it now is.
+  The deadline margin, not that figure, bounds the scale on heavy stages,
+  so scales barely moved.
 - **Shadows first** (`AURORA_XR_PRESUBMIT`, on): the early-eyes item
   submits what comes before the eyes (the staging copies and the fighters'
   shadow passes) before waiting for the image, so the GPU runs them in the

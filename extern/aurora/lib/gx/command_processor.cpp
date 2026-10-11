@@ -821,7 +821,7 @@ constexpr float kXrClipEps = 1e-2f;
 // (bit per plane), for culling a straddling draw's triangles; set only when
 // the vertices were read (`*masked`).
 static XrClipClass classify_xr_clip(const ShaderConfig& config, const u8* raw, u16 vtxCount, u8* outside = nullptr,
-                                    bool* masked = nullptr) noexcept {
+                                    bool* masked = nullptr, u8* unsolid = nullptr) noexcept {
   static const bool enabled = [] {
     const char* v = std::getenv("AURORA_XR_CLIP_CLASSIFY");
     return v == nullptr || *v != '0';
@@ -948,16 +948,19 @@ static XrClipClass classify_xr_clip(const ShaderConfig& config, const u8* raw, u
       box.lo[j] = std::min(box.lo[j], p[j]);
       box.hi[j] = std::max(box.hi[j], p[j]);
     }
-    u8 past = 0;
+    u8 past = 0, soft = 0;
     for (int n = 0; n < planeCount; ++n) {
       const float* q = model[mtx][n];
       const float d = q[0] * p[0] + q[1] * p[1] + q[2] * p[2] + q[3];
       lo[n] = std::min(lo[n], d);
       hi[n] = std::max(hi[n], d);
       past |= d < -kXrClipEps ? u8(1u << n) : u8(0);
+      soft |= d <= clip->fades[planes[n]] + kXrClipEps ? u8(1u << n) : u8(0);
     }
     if (outside != nullptr)
       outside[v] = past;
+    if (unsolid != nullptr)
+      unsolid[v] = soft;
   }
   if (masked != nullptr)
     *masked = outside != nullptr;
@@ -1015,7 +1018,8 @@ static gfx::PipelineRef xr_soft_twin(const gfx::RenderTargetLayout& mv) noexcept
 // `cls`, when given: how the draw lies against the clip (Inside without
 // one); `outside`/`masked` as for classify_xr_clip.
 static gfx::PipelineRef xr_world_pipeline(const u8* raw, u16 vtxCount, XrClipClass* clsOut = nullptr,
-                                          u8* outside = nullptr, bool* masked = nullptr) noexcept {
+                                          u8* outside = nullptr, bool* masked = nullptr,
+                                          u8* unsolid = nullptr) noexcept {
   if (clsOut != nullptr)
     *clsOut = XrClipClass::Inside;
   if (masked != nullptr)
@@ -1029,7 +1033,7 @@ static gfx::PipelineRef xr_world_pipeline(const u8* raw, u16 vtxCount, XrClipCla
   }
   auto& cache = sDrawCache;
   if (gfx::xr_soft_clip_active()) {
-    const auto cls = classify_xr_clip(cache.config.shaderConfig, raw, vtxCount, outside, masked);
+    const auto cls = classify_xr_clip(cache.config.shaderConfig, raw, vtxCount, outside, masked, unsolid);
     if (clsOut != nullptr)
       *clsOut = cls;
     // AURORA_XR_CLIP_STATS=1: how clipped draws were classed, every 20000.
@@ -1053,6 +1057,16 @@ static gfx::PipelineRef xr_world_pipeline(const u8* raw, u16 vtxCount, XrClipCla
       break;
     }
   }
+  return xr_twin(*mv, cache.xrPipelineRef, cache.xrForPipeline, cache.xrForLayout);
+}
+
+// The eye pipeline without the clip's discard, for a straddling draw's
+// triangles wholly inside the solid region.
+static gfx::PipelineRef xr_solid_pipeline() noexcept {
+  const auto* mv = gfx::xr_multiview_layout();
+  if (mv == nullptr)
+    return 0;
+  auto& cache = sDrawCache;
   return xr_twin(*mv, cache.xrPipelineRef, cache.xrForPipeline, cache.xrForLayout);
 }
 #endif
@@ -1224,15 +1238,19 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
   gfx::PipelineRef xrPipeline = 0;
   gfx::Range xrIdxRange{};
   u32 xrIndexCount = 0;
+  gfx::PipelineRef xrSolidPipeline = 0;
+  gfx::Range xrSolidIdxRange{};
+  u32 xrSolidIndexCount = 0;
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
   // Clipped stage parts: only draws that straddle a clip use the dithering
   // variant; the rest keep early depth (no discard) or are dropped.
   {
-    static std::vector<u8> outside;
+    static std::vector<u8> outside, unsolid;
     outside.resize(vtxCount);
+    unsolid.resize(vtxCount);
     XrClipClass cls;
     bool masked;
-    xrPipeline = xr_world_pipeline(raw, vtxCount, &cls, outside.data(), &masked);
+    xrPipeline = xr_world_pipeline(raw, vtxCount, &cls, outside.data(), &masked, unsolid.data());
     // A straddling draw's triangles wholly past one plane are left out of
     // the eyes (their own index list; the flat frame keeps every one). On
     // the Quest the dithering pipeline's discard costs early depth for the
@@ -1241,17 +1259,44 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     if (xrPipeline != 0 && cls == XrClipClass::Straddle && masked &&
         (prim == GX_TRIANGLES || prim == GX_TRIANGLESTRIP || prim == GX_TRIANGLEFAN || prim == GX_QUADS)) {
       static ByteBuffer all;
-      static std::vector<u16> kept;
+      static std::vector<u16> kept, solid;
       const u32 n = prepare_idx_buffer(all, prim, 0, vtxCount);
       const u16* tri = reinterpret_cast<const u16*>(all.data());
+      // Triangles wholly inside the solid region (every vertex inside each
+      // plane's fade; the region is convex) need no discard: drawn with the
+      // plain pipeline, they keep early depth. Brinstar's acid had every
+      // one of its draws straddle the box, so all of it discarded.
+      static const bool split = [] {
+        const char* v = std::getenv("AURORA_XR_CLIP_SPLIT");
+        return v == nullptr || *v != '0';
+      }();
+      const auto* clip = gfx::xr_clip_camera();
+      const bool splitting = split && clip != nullptr && clip->opacity >= 1.f;
       kept.clear();
+      solid.clear();
       for (u32 i = 0; i + 2 < n; i += 3) {
-        if ((outside[tri[i]] & outside[tri[i + 1]] & outside[tri[i + 2]]) == 0) {
+        if ((outside[tri[i]] & outside[tri[i + 1]] & outside[tri[i + 2]]) != 0)
+          continue;
+        if (splitting && (unsolid[tri[i]] | unsolid[tri[i + 1]] | unsolid[tri[i + 2]]) == 0)
+          solid.insert(solid.end(), {tri[i], tri[i + 1], tri[i + 2]});
+        else
           kept.insert(kept.end(), {tri[i], tri[i + 1], tri[i + 2]});
-        }
       }
       all.clear();
-      if (kept.empty()) {
+      if (!solid.empty() && (xrSolidPipeline = xr_solid_pipeline()) != 0) {
+        xrSolidIdxRange = gfx::push_indices(reinterpret_cast<const u8*>(solid.data()), solid.size() * sizeof(u16), 4);
+        xrSolidIndexCount = static_cast<u32>(solid.size());
+      } else {
+        kept.insert(kept.end(), solid.begin(), solid.end());
+      }
+      if (kept.empty() && xrSolidIndexCount != 0) {
+        // All of it solid: one plain draw.
+        xrPipeline = xrSolidPipeline;
+        xrIdxRange = xrSolidIdxRange;
+        xrIndexCount = xrSolidIndexCount;
+        xrSolidPipeline = 0;
+        xrSolidIndexCount = 0;
+      } else if (kept.empty()) {
         xrPipeline = 0;
       } else if (kept.size() < n) {
         xrIdxRange = gfx::push_indices(reinterpret_cast<const u8*>(kept.data()), kept.size() * sizeof(u16), 4);
@@ -1279,6 +1324,9 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
       .tag = sMarkerTag,
       .xrIdxRange = xrIdxRange,
       .xrIndexCount = xrIndexCount,
+      .xrSolidPipeline = xrSolidPipeline,
+      .xrSolidIdxRange = xrSolidIdxRange,
+      .xrSolidIndexCount = xrSolidIndexCount,
   });
 }
 

@@ -4005,8 +4005,17 @@ void map_timing() {
             for (uint32_t z = 0; z < kZoneCount; ++z)
               if (z != kZoneFrame && (rb.zones & (1u << z)))
                 end = std::max(end, ts[z * 2 + 1]);
-            if (end > ts[kZoneFrame * 2]) {
-              t.lastFrameNs = static_cast<double>(end - ts[kZoneFrame * 2]);
+            // From the eye pass when there is one: the passes before it
+            // (the fighters' shadows, AURORA_XR_PRESUBMIT) run while the GPU
+            // would idle waiting for the eyes' image, and counting that wait
+            // made every frame look 3-4 ms dearer (four-CPU Brinstar and
+            // Brinstar Depths: 5.5-6.5 ms "outside the eyes", 2.5 without
+            // the wait), so dynamic resolution sat at its floor.
+            const uint64_t begin = (rb.zones & (1u << kZone3D)) && ts[kZone3D * 2] > ts[kZoneFrame * 2]
+                                       ? ts[kZone3D * 2]
+                                       : ts[kZoneFrame * 2];
+            if (end > begin) {
+              t.lastFrameNs = static_cast<double>(end - begin);
               ++t.frameSeq;
             }
           }

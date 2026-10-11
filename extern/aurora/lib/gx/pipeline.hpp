@@ -30,6 +30,12 @@ struct DrawData {
   // leaves some out (count 0: all of them, as idxRange/indexCount).
   gfx::Range xrIdxRange{};
   uint32_t xrIndexCount = 0;
+  // XR multiview replay only: a clipped draw's triangles wholly inside the
+  // clip's solid region, drawn after the rest with this pipeline (no
+  // discard); count 0: none.
+  gfx::PipelineRef xrSolidPipeline = 0;
+  gfx::Range xrSolidIdxRange{};
+  uint32_t xrSolidIndexCount = 0;
 };
 
 #ifdef __EMSCRIPTEN__

@@ -169,6 +169,20 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
   } else {
     pass.DrawIndexed(data.indexCount, data.instanceCount);
   }
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  // The same draw's triangles inside the clip's solid region, without the
+  // discard (same bind groups and buffers; the pipelines share a layout).
+  if (gfx::xr_multiview_replay() && data.xrSolidIndexCount != 0 && gfx::bind_pipeline(data.xrSolidPipeline, pass)) {
+    pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
+    if (data.dstAlpha != UINT32_MAX) {
+      const wgpu::Color color{0.f, 0.f, 0.f, data.dstAlpha / 255.f};
+      pass.SetBlendConstant(&color);
+    }
+    pass.SetIndexBuffer(resources.indexBuffer, wgpu::IndexFormat::Uint16, data.xrSolidIdxRange.offset,
+                        data.xrSolidIdxRange.size);
+    pass.DrawIndexed(data.xrSolidIndexCount, data.instanceCount);
+  }
+#endif
 }
 
 } // namespace aurora::gx
