@@ -65,15 +65,30 @@ in-between frames. Meta enables positional timewarp automatically for
 AppSW apps, without the system setting. So AppSW with *zero* motion
 vectors is, in effect, positional timewarp we control.
 
-- **A1: depth, zero motion vectors (days).**
+- **Meta's guidance** ([Application SpaceWarp, Unity docs](https://developers.meta.com/vr/documentation/unity/os-app-spacewarp/)):
+  motion vectors *and the depth AppSW uses* come from a separate low-res
+  pass, not the eye buffer: "We also collect the depth buffer of the
+  motion vector pass, which is the same resolution as the motion vectors"
+  (368x400 by default against Quest 2's 1440x1584 eyes; "a full-res MV
+  buffer would cause an order of magnitude more GPU"). Opaque draws only:
+  AppSW "only supports each pixel moving in one direction", so translucent
+  objects stay out (distant particles are fine). About 18 MB on Quest 3.
+  Synthesis is extrapolation, then positional timewarp from that depth;
+  Phase Sync turns on automatically. Logcat shows `ASW=..., Type=App`
+  while it's active; `debug.oculus.spaceWarpDebug` and
+  `debug.oculus.MVOverlay` show draws with wrong motion vectors. Controller
+  input latency can be higher. Mixed reality isn't covered.
+- **A1: a low-res depth and motion-vector pass, zero motion vectors (days).**
   - Check `XR_FB_space_warp` is offered on Quest 3; read
     `XrSystemSpaceWarpPropertiesFB` for the recommended motion-vector size.
-  - A depth swapchain per eye (multiview, two layers) that the eye pass
-    renders into. Today the eye depth is our own texture with
-    `depthStore` discarded; it becomes a swapchain image imported into
-    Dawn like the color one, and stored.
-  - A motion-vector swapchain (RGBA16F, the recommended size), cleared to
-    zero each frame: no extra draws.
+  - Depth and motion-vector swapchains at the runtime's recommended
+    motion-vector size (multiview, two layers), imported into Dawn like
+    the color images.
+  - A low-res pass after the eyes: the frame's opaque world draws (depth
+    writes on) replayed once more with the eye views into that depth and
+    motion-vector pair, writing zero motion. Same replay machinery as the
+    eyes; the pixels are trivial at that size, the vertex work about the
+    eye pass's vertex share. The eye pass's own depth stays discarded.
   - `XrCompositionLayerSpaceWarpInfoFB` chained to each projection view:
     the motion-vector and depth sub-images, `appSpaceDeltaPose` (identity,
     or the arena's movement while the player drags it), depth range and
@@ -104,9 +119,11 @@ vectors is, in effect, positional timewarp we control.
     them). It's more than a timewarp; Meta presents it as cheaper than
     rendering a frame, not free. VrApi's compositor time will show it, and
     dynamic resolution's compositor allowance has to take it in.
-  - Storing depth: today eye depth stays in tile memory and is discarded;
-    AppSW needs it written out, two layers at up to scale 1.3, roughly
-    40 MB a frame. Guess: 0.3-1 ms of GPU.
+  - The low-res pass: one more replay of the opaque world draws, on the
+    GPU mostly vertex work, and on the render worker another encode and
+    Dawn translation (roughly 1-1.5 ms a game frame), the thread behind
+    most spikes. Recording it in the same encoder as the eyes, right
+    after them, keeps it to one submit.
   - The XR loop at 60: HUD, laser pointers, hand ghosts and the screen
     update at 60 instead of 120 (world-locked quads are reprojected, but
     pointer responsiveness changes).
@@ -124,16 +141,19 @@ vectors is, in effect, positional timewarp we control.
   1. Enable `XR_EXT_frame_synthesis` (else `XR_FB_space_warp`) behind
      `AURORA_XR_APPSW`; read its system properties for the recommended
      motion-vector image size.
-  2. Depth swapchain: the runtime's depth formats
-     (`xrEnumerateSwapchainFormats`), the stereo size, two layers,
-     `XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT`; import it into Dawn
-     as the color images are (`CreateSharedTextureMemoryFromVkImage`) and
-     make it the eye pass's depth attachment, stored instead of discarded.
-     It follows the color image through acquire, wait and release.
-  3. Motion-vector swapchain (RGBA16F, the recommended size): a render
-     pass that only clears it to zero, each frame.
+  2. Swapchains at the recommended motion-vector size, two layers each:
+     depth (one of the runtime's depth formats from
+     `xrEnumerateSwapchainFormats`,
+     `XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT`) and motion vectors
+     (RGBA16F). Imported into Dawn as the color images are
+     (`CreateSharedTextureMemoryFromVkImage`); they follow the color image
+     through acquire, wait and release.
+  3. The low-res pass, recorded right after the eyes: the opaque world
+     draws (depth writes on) replayed with the eye views, writing depth and
+     zero motion. Multiview pipeline variants for this target layout (one
+     more set to build and warm).
   4. Chain the synthesis info on each projection view: the motion-vector
-     and depth sub-images (rects following dynamic resolution),
+     and depth sub-images (their rects scaled with dynamic resolution's),
      `appSpaceDeltaPose` identity, `minDepth` 0, `maxDepth` 1, and for our
      reversed infinite depth `nearZ = +inf`, `farZ` = our near
      plane in meters), nearZ > farZ meaning reversed.
@@ -141,7 +161,8 @@ vectors is, in effect, positional timewarp we control.
      (`predictedDisplayPeriod` doubling in `xrWaitFrame`). Lock-step then
      runs at one display frame per game frame; fixed-latency presentation
      and the latency picker follow `g_displayPerGameFrame`.
-  6. Measure and judge: VrApi stale and compositor time against today,
+  6. Measure and judge (logcat's `ASW=120, Type=App` confirms it's on):
+     VrApi stale and compositor time against today,
      app GPU time, the feel of head translation (with the system PTW
      setting off), the arena's edges over passthrough, translucent effects.
      A/B with `AURORA_XR_APPSW=0`.
