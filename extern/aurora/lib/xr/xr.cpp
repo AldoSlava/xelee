@@ -132,8 +132,8 @@ struct Slot {
 };
 
 // kMotion and kMotionDepth: Application SpaceWarp's low-res motion vectors
-// and depth for the 3D image (XR_FB_space_warp; only with AURORA_XR_APPSW,
-// else empty). Released with the 3D image of the same frame.
+// and depth for the 3D image (XR_FB_space_warp, when the runtime has it;
+// AURORA_XR_APPSW=0 leaves them empty). Released with the 3D image of the same frame.
 enum StreamId : int { kScreen = 0, kStereo = 1, kHud = 2, kMotion = 3, kMotionDepth = 4, kStreamCount = 5 };
 
 struct Stream {
@@ -664,8 +664,9 @@ bool create_instance() {
   if (B.hasPerfMetricsExt)
     exts.push_back(XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
 #endif
-  // Multiview is decided later (with Dawn's device): size_stereo_stream.
-  B.hasSpaceWarpExt &= env_flag("AURORA_XR_APPSW", false);
+  // On wherever the runtime offers it (AURORA_XR_APPSW=0: off). Multiview is
+  // decided later (with Dawn's device): size_stereo_stream.
+  B.hasSpaceWarpExt &= env_flag("AURORA_XR_APPSW", true);
   if (B.hasSpaceWarpExt)
     exts.push_back(XR_FB_SPACE_WARP_EXTENSION_NAME);
   // AURORA_XR_HANDS=0 leaves hand tracking off, for measuring what it costs.
@@ -1483,13 +1484,7 @@ std::atomic<uint32_t> g_appSwDropped{0};
 // Staged frames retired unshown, a later one being due too (release_staged),
 // and hand-overs that found no swapchain image even after waiting for one.
 std::atomic<uint32_t> g_stagedStale{0}, g_stagedNoImage{0};
-// ... and all frames without a 3D image since the start (late or none
-// free), for adaptive SpaceWarp.
-std::atomic<uint32_t> g_appSwMissed{0};
-// Adaptive SpaceWarp (adapt_space_warp): off for the rest of a fight the GPU
-// can't keep at 60 with it.
-std::atomic<bool> g_appSwOn{true};
-bool appsw_on() { return B.appSw && g_appSwOn.load(std::memory_order_relaxed); }
+bool appsw_on() { return B.appSw; }
 // 3D frames done over 1 ms after the slot they're released in, so far
 // (pacing probe; dynamic resolution's brake).
 std::atomic<uint32_t> g_lateFrames{0};
@@ -3472,58 +3467,6 @@ void sync_boundary() {
 #endif
 }
 
-// Adaptive SpaceWarp (AURORA_XR_APPSW_ADAPT, on): a fight that misses over
-// 6 3D frames in each of two 2 s windows running with it, past its first 5 s
-// and not while pipelines compile, turns it off until the next fight (one window: a
-// hitch on Battlefield missed 8); the runtime then runs the loop at the
-// display's rate again, and the motion pass and draw matching stop. Four-CPU
-// Brinstar, GPU-bound with it (eyes 8.8 ms, motion 4.2), lost 16 a second.
-void adapt_space_warp(bool fight, bool held, std::chrono::steady_clock::time_point now) {
-  if (!B.appSw)
-    return;
-  static const bool adapt = env_flag("AURORA_XR_APPSW_ADAPT", true);
-  static bool wasFight = false;
-  static std::chrono::steady_clock::time_point fightStart{}, windowStart{};
-  static uint32_t missedAtWindow = 0;
-  static int strikes = 0;
-  const uint32_t missed = g_appSwMissed.load(std::memory_order_relaxed);
-  if (fight && !wasFight) {
-    fightStart = windowStart = now;
-    missedAtWindow = missed;
-    strikes = 0;
-    gfx::set_xr_motion_active(true);
-    if (!g_appSwOn.exchange(true))
-      Log.info("SpaceWarp back on for a new fight");
-  }
-  wasFight = fight;
-  if (!adapt || !fight || !g_appSwOn)
-    return;
-  // Nor while pipelines compile (the first minute after launch compiles
-  // thousands; their hitches aren't the stage's cost).
-  static uint32_t pipelinesSeen = 0;
-  static std::chrono::steady_clock::time_point compiledAt{};
-  if (const uint32_t created = gfx::pipelines_created(); created != pipelinesSeen) {
-    pipelinesSeen = created;
-    compiledAt = now;
-  }
-  if (held || now - fightStart < std::chrono::seconds(5) || now - compiledAt < std::chrono::seconds(2)) {
-    windowStart = now;
-    missedAtWindow = missed;
-    strikes = 0;
-    return;
-  }
-  if (now - windowStart < std::chrono::seconds(2))
-    return;
-  strikes = missed - missedAtWindow > 6 ? strikes + 1 : 0;
-  if (strikes >= 2) {
-    g_appSwOn = false;
-    gfx::set_xr_motion_active(false);
-    Log.warn("SpaceWarp off for this fight: {} 3D frames missed in 2 s", missed - missedAtWindow);
-  }
-  windowStart = now;
-  missedAtWindow = missed;
-}
-
 bool render_xr_frame() {
   XrFrameState fs{XR_TYPE_FRAME_STATE};
   {
@@ -3653,7 +3596,6 @@ bool render_xr_frame() {
   // Paused, or held before it starts for placing the stage.
   const int placing = g_placing.load();
   const bool held = g_fightPaused || placing > 0;
-  adapt_space_warp(fight, held, now);
   {
     // Each 3D image is due for g_displayPerGameFrame display frames under
     // lock-step pacing; one shown longer is late. Counted once per image.
@@ -5647,7 +5589,6 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
     if (tickNs != 0 && monotonic_ns() - tickNs > static_cast<int64_t>(dropMs * 1e6)) {
       R.missedStereo = true;
       ++g_appSwDropped;
-      ++g_appSwMissed;
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
       return false;
     }
@@ -5714,8 +5655,6 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       // No 3D image this frame: still a fight, so don't present the flat
       // frame nobody sees (the headset keeps showing the last 3D image).
       R.missedStereo = true;
-      if (appsw_on())
-        ++g_appSwMissed;
       if (g_dynres.on)
         update_dynamic_resolution(true);
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);

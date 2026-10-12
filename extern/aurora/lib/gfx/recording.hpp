@@ -154,9 +154,7 @@ const RenderTargetLayout* xr_multiview_layout() noexcept;
 // The layout lib/xr replays opaque world draws into for Application
 // SpaceWarp's motion vectors (null = none), published like the above.
 void set_xr_motion_layout(const RenderTargetLayout& layout) noexcept;
-// The layout, while SpaceWarp is on (adaptive SpaceWarp turns it off).
 const RenderTargetLayout* xr_motion_layout() noexcept;
-void set_xr_motion_active(bool active) noexcept;
 // Render worker: encode_xr_replay is replaying with a view mask.
 bool xr_multiview_replay() noexcept;
 // Render worker: ... and into the motion vectors (gx::DrawData::xrMotionPipeline).

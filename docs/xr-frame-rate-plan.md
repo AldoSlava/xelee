@@ -1,7 +1,8 @@
 # XR frame rate: getting off 60-on-120
 
 Status: Option A (Application SpaceWarp with real motion vectors) is built
-and on the headset, opt-in with `AURORA_XR_APPSW=1` (2026-10-11). See
+and on by default wherever the runtime offers it (`AURORA_XR_APPSW=0` turns
+it off; 2026-10-11). See
 "What's built" below; the rest of this document is the plan as written.
 
 ## What's built (2026-10-11)
@@ -10,10 +11,17 @@ How it ended up, and where it left the A2 design below:
 
 - **Swapchains and layer:** RGBA16F motion vectors and D32 depth at the
   runtime's recommended size (420x440 per eye on a Quest 3), chained to
-  each projection view (`XrCompositionLayerSpaceWarpInfoFB`, reversed
-  infinite depth: `nearZ` +inf, `farZ` 0.05, identity
+  each projection view (`XrCompositionLayerSpaceWarpInfoFB`, identity
   `appSpaceDeltaPose`). Needed the Dawn fork to import depth images as
   render attachments.
+- **As Meta's XrSpaceWarp sample does it** (Meta-OpenXR-SDK): the head's
+  motion is in the vectors (last frame's eye matrices; `AURORA_XR_APPSW_HEAD`
+  blends toward this frame's), the depth image is standard (0 at the
+  0.05 m near plane, 1 infinitely far: a small pass writes 1 - our reversed
+  depth; `nearZ` 0.05, `farZ` inf), and the vectors' z is GL's NDC. Our
+  reversed depth (`nearZ` inf, `farZ` 0.05, which the spec allows) smeared
+  the image on head motion with the head's motion in the vectors and
+  doubled it without.
 - **Draw identity, not by dobj:** each opaque world draw is keyed by a
   hash of its vertex bytes and position-array pointer, plus how many draws
   with the same key came before it in the frame. Display lists are copied
@@ -39,9 +47,15 @@ How it ended up, and where it left the A2 design below:
   into a swapchain image when it hands it over. Images free only at loop
   boundaries at 60 Hz; waiting for them, one late frame held up the next
   and four-CPU Brinstar stuck at 33 3D frames a second.
-- **Adaptive:** a fight missing over 6 3D frames in each of two 2 s windows
-  turns SpaceWarp off until the next fight (the loop goes back to 120 Hz).
-  Windows while pipelines compile don't count.
+- **Clipped stage parts** are in the motion pass with the eyes' clip test
+  (hard cut or dithered fade), whole.
+- **Staged frames in step:** a hand-over with a frame due waits up to 6 ms
+  for a swapchain image, and a frame with a later one due too is retired
+  unshown. A lost loop otherwise left the 3D, HUD and SpaceWarp queues a
+  frame apart for the rest of a fight (SpaceWarp distorting more and more
+  on Temple).
+- (An adaptive switch-off, for fights the GPU couldn't keep at 60 with
+  SpaceWarp, was built and removed once four-CPU Brinstar held it.)
 - **Batching (`AURORA_XR_BATCH`, on with Android):** the eye and motion
   passes join runs of consecutive draws into one draw. A draw costs about
   6 us of GPU by itself on the Quest 3 (an extra one-triangle draw per real
@@ -57,7 +71,11 @@ How it ended up, and where it left the A2 design below:
   have reached ~36%, with coplanar decals at risk. Motion draws share
   pipelines, so most join. Four-CPU Brinstar: motion pass 3.2 -> 1.35 ms,
   eye pass 11.1 -> 10.0 ms.
-- **Resolution floor 0.8 while SpaceWarp is on** (1.0 otherwise).
+- **Resolution floor 0.8 while SpaceWarp is on** (1.0 otherwise), with
+  the latency held at two loop frames and the target capped at what a game
+  frame leaves the GPU (the frame less the compositor's two display
+  frames): margins from staged frames finishing early had the scale swinging
+  between 0.8 and 1.3.
 - **Staged images free when their copy is done:** the render worker takes
   them itself once the copy's fence signals, not on the XR thread's next
   loop (16.7 ms apart with SpaceWarp; it waited ~11 ms nearly every frame).
