@@ -5,9 +5,8 @@ implementation of Slippi's wire protocol, so this port can play against Slippi
 Dolphin and use Slippi Launcher, recon replays and the surrounding ecosystem.
 Ranked is explicitly out of scope (see §7).
 
-Status: **plan, nothing built.** This document is the request-for-decision, not
-a record of work done. `docs/netcode-plan.md` remains the description of what
-exists today.
+Status: **M1 done, M2 next.** `docs/netcode-plan.md` remains the description of
+what exists today.
 
 Branch: **`slippi-net`**, cut from `quest-xr` at `2a1ec6b` (decision 4). All
 migration work happens here; `main` stays untouched until the branch is ready.
@@ -250,12 +249,16 @@ keep working throughout.
 
 Each phase has a gate; do not start the next until the gate passes.
 
-### M1 — ENet + protocol codec (no game integration)
-Vendor ENet; write `slp_packet` and `slp_proto`. Unit-test the codec against
-recorded Slippi byte vectors (Melee Unlocked has tests we can adapt:
-`port/tests/native_slippi_bridge_test.cpp`, `slippi_ticket_test.cpp`).
-**Gate:** codec round-trips and rejects malformed/oversized packets exactly as
-`slippi_net.cpp` does.
+### M1 — ENet + protocol codec (no game integration) — **DONE** (`9459517`)
+Vendored ENet v1.3.13 (MIT) at `extern/enet`, built as `melee_enet`
+(`SEPARATE_FROM_ALL`; not linked until M2). Added `src/pc/slippi/slp_proto.h`
+(wire constants — the single source of truth, pinned `PC_SLIPPI_SEMVER`) and
+`slp_packet.{c,h}` (SFML-style big-endian codec incl. the `ok`-latch
+semantics). `tools/test_slp_packet.c` pins byte order, widths, string
+truncation and pad-payload arithmetic; registered as ctest `slp_packet`.
+**Gate met:** the codec encodes/decodes the same bytes as Slippi's `sf::Packet`
+and latches/rejects exactly as the reference does. Verified on this host with
+`cc -std=gnu11` (no cmake in PATH here; CMake wiring is in place for CI).
 
 ### M2 — Slippi P2P client over ENet
 `slp_net.c`: connect two local instances via `Direct` (no matchmaking), exchange
