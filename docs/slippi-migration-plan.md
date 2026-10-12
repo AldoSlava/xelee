@@ -12,10 +12,10 @@ exists today.
 Branch: **`slippi-net`**, cut from `quest-xr` at `2a1ec6b` (decision 4). All
 migration work happens here; `main` stays untouched until the branch is ready.
 
-Decisions resolved 2026-10-12: kill the legacy fallback in M6 (1),
-account-gated Unranked with account-free Direct (2), pin `SLIPPI_SEMVER` to a
-release and maintain it ourselves (3), work on a branch off `quest-xr` (4). See
-§8.
+Decisions resolved 2026-10-12: kill the *internet* fallback (DHT/ranked) in M6
+but keep the legacy engine for LAN (1, revised), account-gated Unranked with
+account-free Direct (2), pin `SLIPPI_SEMVER` to a release and maintain it
+ourselves (3), work on a branch off `quest-xr` (4). See §8.
 
 ## 0. The decision in one paragraph
 
@@ -288,19 +288,26 @@ returned; Direct connect succeeds between two of our instances.
 **Gate:** a recorded port-vs-Dolphin match completes with agreeing checksums and
 equal replays, the same standard Melee Unlocked met (`PORT_COMPLETION.md:135`).
 
-### M6 — Retirement (kill the fallback)
-Delete DHT/rank/custom-handshake/wire-v6-9 modules and tests; retire the Ranked
-and LAN menu entries; make Slippi the only stack and remove
-`MELEE_NET_STACK` entirely (decision 1: no permanent fallback). Delete
-`net_lan.c`, `net_dht*.c`, `net_rank*.c`, `net_reliable.c`, the custom
-handshake, and the wire-v6-9 codec. Update `docs/netcode-plan.md` (mark
+### M6 — Retirement (internet fallback only; LAN kept)
+Delete the *internet* fallback: `net_dht*.c`, `net_rank*.c`, the custom
+internet handshake and the DHT/ranked parts of `net_match.c`; retire the Ranked
+menu entry. **Keep the legacy LAN stack** (`net_lan.c` mDNS discovery + election
++ direct-IP, and the `net.c`/`net_wire.c`/`net_handshake.c`/`net_reliable.c`
+engine it runs on) as the LAN transport (decision 1, revised 2026-10-12).
+Selection becomes mode-driven, not a build switch: LAN → legacy engine,
+Unranked/Direct → Slippi. `MELEE_NET_STACK` is retained as the engine selector
+rather than removed. Update `docs/netcode-plan.md` (mark the DHT/ranked sections
 superseded) and `README.md`.
 
-### M7 — LAN folded into Direct
-**Decided (2026-10-12):** LAN is retired as its own transport. Slippi Direct
-already works over a LAN by direct endpoint, so the mDNS discovery/election code
-(`net_lan.c`) is deleted in M6 and the mDNS-discovered endpoint (if kept at all)
-is handed to `slp_match.c` Direct. No separate LAN mode remains.
+### M7 — LAN: kept on the legacy engine, not folded into Direct
+**Decided (2026-10-12, revised):** LAN play stays on the proven legacy engine
+(mDNS discovery + election + the custom transport), which needs no Slippi
+account, no `mm.slippi.gg`, and runs at delay 0. It is **not** folded into
+Slippi Direct. This is the one deliberate exception to "Slippi only": the mDNS
+path is well-tested (`README.md` LAN rows, Android phone-to-PC matches) and its
+independence from central infrastructure is a feature. Slippi Direct (endpoint)
+remains available too, so LAN players can opt into Dolphin cross-play if they
+want. Maintenance cost is accepted: two transports, selected by mode.
 
 ## 6. Rollback/snapshot reuse — is the seam real?
 
@@ -348,16 +355,18 @@ Agreed and baked in:
 | 4 | ENet vendoring on all platforms (Windows/macOS/Android/iOS) — new C dependency in a tree that currently has none. | ENet is portable C with existing Android/macOS support; add to `CMakeLists.txt` and CI matrix. |
 | 5 | Account requirement: Slippi matchmaking needs a Slippi Launcher login. | Read `user.json`; allow Direct with an arbitrary code when no account exists. |
 | 6 | Licensing/attribution for ported GPL-2.0-or-later code. | §9. |
-| 7 | We give up distinct strengths (serverless DHT, resume-after-interruption, signed rating) for interop. | Intentional per this decision. Keep the legacy stack behind the A/B switch until M6, so the choice stays reversible. |
+| 7 | We give up distinct strengths (serverless DHT, signed rating) for internet interop, while keeping LAN. | Intentional per this decision. Legacy internet modules stay behind the mode/`MELEE_NET_STACK` selector until M6; LAN keeps using them permanently. |
 | 8 | Determinism across our build and Dolphin's is not the same as determinism within our builds. | M5 is the only test that counts. Our record/replay proves our internal purity first. |
 
 ### Decisions (resolved by the user, 2026-10-12)
 
-1. **M6 end state: kill the fallback.** Once Slippi parity is proven in M5, the
-   legacy stack (DHT, ranked, custom handshake/wire, LAN/mDNS) is deleted
-   outright. `MELEE_NET_STACK` and the legacy modules go away in M6; Slippi is
-   the only netplay transport. The A/B switch exists only to keep the migration
-   reversible *until then*.
+1. **M6 end state: kill the internet fallback, keep LAN.** Once Slippi parity
+   is proven in M5, the serverless *internet* stack (DHT discovery, ranked,
+   signed rating) is deleted. **LAN play is retained on the legacy engine**
+   (decision revised 2026-10-12): mDNS discovery and the custom transport are
+   proven, account-free and independent of Slippi's servers. So the end state is
+   two transports — legacy for LAN, Slippi for Unranked/Direct — selected by
+   mode. `MELEE_NET_STACK` stays as that selector; the DHT/ranked modules do not.
 2. **Identity: account-gated Unranked is acceptable.** Unranked matchmaking
    requires a Slippi Launcher account (`user.json`); Direct must remain usable
    without one (manual endpoint / code).
