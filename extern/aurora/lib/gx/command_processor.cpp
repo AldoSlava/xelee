@@ -139,6 +139,9 @@ struct DrawCache {
   gfx::PipelineRef xrMotionRef{};
   gfx::PipelineRef xrMotionForPipeline{};
   uint64_t xrMotionForLayout = 0;
+  // ... and for draws straddling a clip.
+  gfx::PipelineRef xrMotionSoftRef{}, xrMotionSoftForPipeline{};
+  uint64_t xrMotionSoftForLayout = 0;
   // XR batching: the batched twins of the eye and motion pipelines.
   gfx::PipelineRef xrBatchRef{}, xrBatchForPipeline{};
   uint64_t xrBatchForLayout = 0;
@@ -1111,11 +1114,38 @@ static PipelineConfig xr_motion_config(const PipelineConfig& from) noexcept {
   return c;
 }
 
-static gfx::PipelineRef xr_motion_pipeline() noexcept {
-  const auto* layout = gfx::xr_motion_layout(); // null once adaptive SpaceWarp turns it off
-  if (layout == nullptr || !xr_motion_eligible())
+// `clipped`: the twin for a draw straddling a clip, with the eye's clip test
+// (a hard cut or a dithered fade), else its parts past the clip would be
+// missing from SpaceWarp's depth and motion.
+static gfx::PipelineRef xr_motion_pipeline(bool clipped = false) noexcept {
+  const auto* base = gfx::xr_motion_layout(); // null once adaptive SpaceWarp turns it off
+  if (base == nullptr || !xr_motion_eligible())
     return 0;
+  const gfx::RenderTargetLayout* layout = base;
+  if (clipped) {
+    static gfx::RenderTargetLayout soft;
+    static uint64_t softFor = 0;
+    if (softFor != base->key) {
+      softFor = base->key;
+      soft = *base;
+      soft.xrSoftClip = 1;
+      gfx::detail::finalize_render_target_layout(soft);
+    }
+    layout = &soft;
+  }
   auto& cache = sDrawCache;
+  if (clipped) {
+    if (cache.xrMotionSoftForPipeline != cache.pipelineRef || cache.xrMotionSoftForLayout != layout->key) {
+      static const bool shared = [] {
+        const char* v = std::getenv("AURORA_XR_APPSW_SHARED");
+        return v == nullptr || *v != '0';
+      }();
+      cache.xrMotionSoftRef = gfx::find_pipeline(shared ? xr_motion_config(cache.config) : cache.config, *layout);
+      cache.xrMotionSoftForPipeline = cache.pipelineRef;
+      cache.xrMotionSoftForLayout = layout->key;
+    }
+    return cache.xrMotionSoftRef;
+  }
   if (cache.xrMotionForPipeline != cache.pipelineRef || cache.xrMotionForLayout != layout->key) {
     static const bool shared = [] {
       const char* v = std::getenv("AURORA_XR_APPSW_SHARED");
@@ -1442,7 +1472,8 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     bool masked;
     xrPipeline = xr_world_pipeline(raw, vtxCount, &cls, outside.data(), &masked, unsolid.data());
     cls_inside = cls == XrClipClass::Inside;
-    if (xrPipeline != 0 && cls == XrClipClass::Inside && (xrMotionPipeline = xr_motion_pipeline()) != 0)
+    if (xrPipeline != 0 && cls != XrClipClass::Outside &&
+        (xrMotionPipeline = xr_motion_pipeline(cls == XrClipClass::Straddle)) != 0)
       immediates.xrPrevMtx = xrPrevMtx;
     // A straddling draw's triangles wholly past one plane are left out of
     // the eyes (their own index list; the flat frame keeps every one). On
@@ -1593,7 +1624,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
       .xrSolidIndexCount = xrSolidIndexCount,
       .xrMotionPipeline = xrMotionPipeline,
       .xrBatchPipeline = xrPipeline != 0 && xrSolidIndexCount == 0 && cls_inside ? xr_batch_pipeline(false) : 0,
-      .xrMotionBatchPipeline = xrMotionPipeline != 0 ? xr_batch_pipeline(true) : 0,
+      .xrMotionBatchPipeline = xrMotionPipeline != 0 && cls_inside ? xr_batch_pipeline(true) : 0,
       .uniformSharedKey = cache.uniformSharedKey,
   });
 }

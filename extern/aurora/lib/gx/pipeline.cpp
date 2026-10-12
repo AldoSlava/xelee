@@ -213,7 +213,9 @@ static void render_direct(const DrawData& data, const wgpu::RenderPassEncoder& p
     pass.SetBindGroup(2, gfx::find_bind_group(data.bindGroups.textureBindGroup));
   }
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
-  const bool xrCulled = gfx::xr_multiview_replay() && data.xrIndexCount != 0;
+  // The motion pass draws a clipped draw whole: its clip test discards what
+  // the eyes leave out, and the eyes' solid part (xrSolid*) is in it too.
+  const bool xrCulled = gfx::xr_multiview_replay() && !gfx::xr_motion_replay() && data.xrIndexCount != 0;
 #else
   constexpr bool xrCulled = false;
 #endif

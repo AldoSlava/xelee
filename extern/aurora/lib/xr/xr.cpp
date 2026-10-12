@@ -1388,7 +1388,7 @@ struct TraceSection {
 // waited image per swapchain until it is released, so the next is waited on
 // only once the last went back. The wait is short: an image the compositor
 // still holds is waited on again next display frame.
-bool acquire_ahead(Stream& st) {
+bool acquire_ahead(Stream& st, int64_t waitNs = 2'000'000) {
   int pending = -1;
   bool haveWaited = false;
   size_t held = 0;
@@ -1423,7 +1423,7 @@ bool acquire_ahead(Stream& st) {
   if (haveWaited || pending < 0)
     return true;
   XrSwapchainImageWaitInfo wi{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
-  wi.timeout = 2'000'000; // 2 ms
+  wi.timeout = waitNs; // 2 ms but for a staged frame due (release_staged)
   TraceSection trace{&st == &g_streams[kStereo] ? "Wait 3D image" : "Wait image"};
   const XrResult r = xrWaitSwapchainImage(st.swapchain, &wi);
   if (r == XR_SUCCESS && &st == &g_streams[kStereo])
@@ -1480,6 +1480,9 @@ struct Presentation {
 std::atomic<uint32_t> g_earlyEyes{0}, g_earlyResumed{0};
 // SpaceWarp: 3D frames dropped for starting too late (render_eyes), logged.
 std::atomic<uint32_t> g_appSwDropped{0};
+// Staged frames retired unshown, a later one being due too (release_staged),
+// and hand-overs that found no swapchain image even after waiting for one.
+std::atomic<uint32_t> g_stagedStale{0}, g_stagedNoImage{0};
 // ... and all frames without a 3D image since the start (late or none
 // free), for adaptive SpaceWarp.
 std::atomic<uint32_t> g_appSwMissed{0};
@@ -1993,6 +1996,7 @@ bool release_staged(Stream& st, bool& released) {
   const VkImageAspectFlags copyAspect = st.depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
   for (;;) {
     int index = -1, image = -1;
+    bool retire = false;
     PendingAccess fromDawn;
     std::array<XrView, 2> views{};
     std::array<int32_t, 2> rect{};
@@ -2006,9 +2010,64 @@ bool release_staged(Stream& st, bool& released) {
       }
       if (index < 0 || st.ring[index].state != SlotState::Ready || held_for_slot(st, st.ring[index]))
         return true;
+      // A later frame due too: this one is stale, retired unshown. The
+      // loop hands over one frame per loop, and with SpaceWarp's 60 Hz loop
+      // one comes per loop: a loop without an image to copy into left every
+      // later frame a loop late for the rest of the fight, and the 3D,
+      // HUD and SpaceWarp images, each its own queue, drifted apart (the
+      // motion vectors of one frame on the picture of another: SpaceWarp's
+      // distortion grew through a Temple fight).
+      bool newerDue = false;
+      for (int i = 0; i < static_cast<int>(st.ring.size()) && !newerDue; ++i)
+        newerDue = i != index && st.ring[i].state == SlotState::Ready &&
+                   st.ring[i].acquireSeq > st.ring[index].acquireSeq && !held_for_slot(st, st.ring[i]);
+      if (newerDue) {
+        retire = true;
+        fromDawn = std::move(st.ring[index].fromDawn);
+        st.ring[index].fromDawn = {};
+        st.ring[index].state = SlotState::Released;
+      } else {
+        for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
+          if (st.slots[i].state == SlotState::Free)
+            image = i;
+      }
+    }
+    // A frame due and no swapchain image waited yet: wait for one here, up
+    // to 6 ms, instead of letting this loop pass. acquire_ahead's 2 ms often
+    // ran out with SpaceWarp, and a lost loop left two frames due at once on
+    // the next (Temple: 3D at 52-57 a second, frames done ~20 ms after the
+    // tick against a 33 ms slot).
+    if (!retire && image < 0 && !g_stop) {
+      if (!acquire_ahead(st, 6'000'000))
+        return false;
+      std::lock_guard lock{g_mutex};
       for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
         if (st.slots[i].state == SlotState::Free)
           image = i;
+      if (image < 0)
+        ++g_stagedNoImage;
+    }
+    if (retire) {
+      // Retire: wait for Dawn's work on it, then it's free (release_staged's
+      // cleanup), with nothing copied.
+      Slot& r = st.ring[index];
+      if (!import_dawn_semaphores(fromDawn, r.waitSems))
+        return false;
+      std::vector<VkPipelineStageFlags> stages(r.waitSems.size(), VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+      VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+      si.waitSemaphoreCount = static_cast<uint32_t>(r.waitSems.size());
+      si.pWaitSemaphores = r.waitSems.data();
+      si.pWaitDstStageMask = stages.data();
+      VK_TRY(vkQueueSubmit(B.queue, 1, &si, r.fence));
+      {
+        std::lock_guard lock{g_mutex};
+        r.inFlight = true;
+      }
+      ++g_stagedStale;
+      continue;
+    }
+    {
+      std::lock_guard lock{g_mutex};
       if (image < 0)
         return true; // no swapchain image waited yet: next loop
       fromDawn = std::move(st.ring[index].fromDawn);
@@ -3658,10 +3717,10 @@ bool render_xr_frame() {
           {x, 0}, {part ? stereo.shownRect[0] : eyeW, part ? stereo.shownRect[1] : static_cast<int32_t>(stereo.height)}};
       projViews[i].subImage.imageArrayIndex = stereo.layers > 1 ? static_cast<uint32_t>(i) : 0;
       // Application SpaceWarp: this image's motion vectors and depth (handed
-      // over with it). Motion leaves out the head's (render_eyes: this
-      // frame's eye matrices on both positions); the app's space never
-      // moves, so its delta is identity. Depth is reversed with an
-      // infinite far plane: 0 is infinitely far, 1 at the 0.05 m near plane.
+      // over with it). How much of the head's motion the vectors carry:
+      // render_eyes (AURORA_XR_APPSW_HEAD); the app's space never moves, so
+      // its delta is identity. Depth is standard: 0 at the 0.05 m near
+      // plane, 1 infinitely far.
       const auto& mvs = g_streams[kMotion];
       const auto& mds = g_streams[kMotionDepth];
       if (appsw_on() && mvs.haveImage && mds.haveImage) {
@@ -3676,8 +3735,12 @@ bool render_xr_frame() {
         sw.depthSubImage.imageArrayIndex = static_cast<uint32_t>(i);
         sw.minDepth = 0.f;
         sw.maxDepth = 1.f;
-        sw.nearZ = std::numeric_limits<float>::infinity();
-        sw.farZ = 0.05f;
+        // Standard depth, as Meta's XrSpaceWarp sample has it: 0 at the
+        // near plane, 1 infinitely far (flip_motion_depth). Our reversed
+        // depth, told as nearZ = inf and farZ = 0.05 (which the spec allows),
+        // doubled the image when the head moved sideways.
+        sw.nearZ = 0.05f;
+        sw.farZ = std::numeric_limits<float>::infinity();
         projViews[i].next = &sw;
       }
     }
@@ -3795,13 +3858,14 @@ bool render_xr_frame() {
              "3D images shown 1/2/3/4+ display frames: {}/{}/{}/{}; presented {} display frames after the tick "
              "({} held, raised {} times for late frames); XR loop: wait to end {:.1f} ms at most, {} over 4 ms; gaps {:.1f} ms at most, {} over 10 ms; "
              "{:.1f} ms least before display; slow loops' sections (most ms, times largest): {}; "
-             "early eyes {} ({} redrawn, {} dropped late); image waits (most ms, over 2 ms) 3D {:.1f}/{} HUD {:.1f}/{} screen {:.1f}/{}{}",
+             "early eyes {} ({} redrawn, {} dropped late, {} staged retired stale, {} without an image); image waits (most ms, over 2 ms) 3D {:.1f}/{} HUD {:.1f}/{} screen {:.1f}/{}{}",
              B.framesShown / secs, 100.0 * B.fightFrames / std::max<uint64_t>(B.framesShown, 1),
              B.releasedSinceStats[kScreen] / secs, B.releasedSinceStats[kStereo] / secs,
              B.releasedSinceStats[kHud] / secs, B.shownHistogram[0], B.shownHistogram[1], B.shownHistogram[2],
              B.shownHistogram[3], g_present.latency, g_present.held, g_present.raisedForLate, B.loopMaxNs / 1e6, B.loopOver4,
              B.gapMaxNs / 1e6, B.gapOver10, B.leadMinNs / 1e6, sections, g_earlyEyes.exchange(0),
-             g_earlyResumed.exchange(0), g_appSwDropped.exchange(0), g_acquireWaitMaxNs[kStereo] / 1e6, g_acquireWaitsOver2[kStereo],
+             g_earlyResumed.exchange(0), g_appSwDropped.exchange(0), g_stagedStale.exchange(0), g_stagedNoImage.exchange(0),
+             g_acquireWaitMaxNs[kStereo] / 1e6, g_acquireWaitsOver2[kStereo],
              g_acquireWaitMaxNs[kHud] / 1e6, g_acquireWaitsOver2[kHud], g_acquireWaitMaxNs[kScreen] / 1e6,
              g_acquireWaitsOver2[kScreen], pace_summary());
     g_acquireWaitMaxNs = {};
@@ -4277,6 +4341,21 @@ Mat4 view_from_pose(const XrPosef& p) {
           0.f,  0.f,  0.f,  1.f};
 }
 
+// From pose a toward b by t (position lerp, orientation nlerp).
+XrPosef blend_pose(const XrPosef& a, const XrPosef& b, float t) {
+  XrQuaternionf qb = b.orientation;
+  const float d = a.orientation.x * qb.x + a.orientation.y * qb.y + a.orientation.z * qb.z + a.orientation.w * qb.w;
+  if (d < 0.f)
+    qb = {-qb.x, -qb.y, -qb.z, -qb.w};
+  XrQuaternionf q{a.orientation.x + (qb.x - a.orientation.x) * t, a.orientation.y + (qb.y - a.orientation.y) * t,
+                  a.orientation.z + (qb.z - a.orientation.z) * t, a.orientation.w + (qb.w - a.orientation.w) * t};
+  const float n = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+  if (n > 0.f)
+    q = {q.x / n, q.y / n, q.z / n, q.w / n};
+  return {q, {a.position.x + (b.position.x - a.position.x) * t, a.position.y + (b.position.y - a.position.y) * t,
+              a.position.z + (b.position.z - a.position.z) * t}};
+}
+
 // Asymmetric perspective for an OpenXR fov, reversed Z with an infinite far
 // plane (depth 1 at `near`, 0 at infinity), matching aurora's GX depth.
 Mat4 projection(const XrFovf& fov, float near) {
@@ -4436,9 +4515,16 @@ struct Renderer3D {
   // vectors' previous positions; prevCount 0: none yet.
   std::array<Mat4, gfx::XrMaxTransforms> prevWorldToRoom{}, prevCameraToRoom{};
   size_t prevCount = 0;
+  std::array<XrView, 2> prevViews{}; // last frame's eye poses (AURORA_XR_APPSW_HEAD)
   // SpaceWarp, early eyes: the motion pass goes to the GPU before the eyes
   // wait for their image, into these, copied into the SpaceWarp images after.
   wgpu::Texture motionColor, motionDepth;
+  // flip_motion_depth: the motion pass's own (reversed) depth, and the pass
+  // writing the standard one.
+  wgpu::Texture motionDepthFlip;
+  wgpu::BindGroupLayout motionDepthFlipLayout;
+  wgpu::RenderPipeline motionDepthFlipPipeline;
+  std::array<wgpu::BindGroup, 2> motionDepthFlipGroups;
   bool motionCopy = false; // this frame's motion pass is in them
 };
 Renderer3D R;
@@ -5291,6 +5377,9 @@ void render_motion_early(gfx::detail::FramePacket& frame,
   R.motionCopy = true;
 }
 
+void ensure_motion_depth_flip();
+void flip_motion_depth(const wgpu::CommandEncoder& cmd, const wgpu::Texture& dst);
+
 // The SpaceWarp images for this frame: the early pass copied in, or the
 // motion pass drawn straight into them.
 void render_motion(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& frame,
@@ -5301,7 +5390,15 @@ void render_motion(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fr
   if (!mv || !depth)
     return;
   if (!R.motionCopy) {
-    encode_motion(cmd, frame, passes, mv, depth);
+    // Standard depth for the runtime (flip_motion_depth); a 24-bit image
+    // keeps ours.
+    if (g_streams[kMotionDepth].format == VK_FORMAT_D32_SFLOAT) {
+      ensure_motion_depth_flip();
+      encode_motion(cmd, frame, passes, mv, R.motionDepthFlip);
+      flip_motion_depth(cmd, depth);
+    } else {
+      encode_motion(cmd, frame, passes, mv, depth);
+    }
     return;
   }
   const wgpu::Extent3D size{g_streams[kMotion].width, g_streams[kMotion].height, 2};
@@ -5309,6 +5406,91 @@ void render_motion(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fr
   cmd.CopyTextureToTexture(&colorSrc, &colorDst, &size);
   const wgpu::TexelCopyTextureInfo depthSrc{.texture = R.motionDepth}, depthDst{.texture = depth};
   cmd.CopyTextureToTexture(&depthSrc, &depthDst, &size);
+}
+
+// SpaceWarp's depth in the standard convention (Meta's sample: 0 at the
+// near plane, 1 infinitely far): for our reversed infinite projection that
+// is exactly 1 - ours. The motion pass draws its depth into R.motionDepthFlip,
+// and this writes 1 - it into the SpaceWarp image, a layer at a time.
+void ensure_motion_depth_flip() {
+  if (R.motionDepthFlipPipeline)
+    return;
+  auto& device = webgpu::g_device;
+  static constexpr char kSource[] = R"(
+@group(0) @binding(0) var src: texture_depth_2d;
+@vertex fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2.0 - 1.0, 0.0, 1.0);
+}
+struct Out { @builtin(frag_depth) depth: f32 };
+@fragment fn fs_main(@builtin(position) p: vec4f) -> Out {
+  var o: Out;
+  o.depth = 1.0 - textureLoad(src, vec2i(p.xy), 0);
+  return o;
+}
+)";
+  wgpu::ShaderSourceWGSL wgsl{};
+  wgsl.code = kSource;
+  const wgpu::ShaderModuleDescriptor smd{.nextInChain = &wgsl, .label = "XR SpaceWarp depth flip"};
+  const auto module = device.CreateShaderModule(&smd);
+  const wgpu::BindGroupLayoutEntry entry{
+      .binding = 0,
+      .visibility = wgpu::ShaderStage::Fragment,
+      .texture = {.sampleType = wgpu::TextureSampleType::Depth, .viewDimension = wgpu::TextureViewDimension::e2D},
+  };
+  const wgpu::BindGroupLayoutDescriptor bgld{.entryCount = 1, .entries = &entry};
+  R.motionDepthFlipLayout = device.CreateBindGroupLayout(&bgld);
+  const wgpu::PipelineLayoutDescriptor pld{.bindGroupLayoutCount = 1, .bindGroupLayouts = &R.motionDepthFlipLayout};
+  const auto pipelineLayout = device.CreatePipelineLayout(&pld);
+  const wgpu::DepthStencilState ds{
+      .format = wgpu::TextureFormat::Depth32Float,
+      .depthWriteEnabled = true,
+      .depthCompare = wgpu::CompareFunction::Always,
+  };
+  const wgpu::FragmentState fs{.module = module, .entryPoint = "fs_main", .targetCount = 0};
+  const wgpu::RenderPipelineDescriptor rpd{
+      .label = "XR SpaceWarp depth flip",
+      .layout = pipelineLayout,
+      .vertex = {.module = module, .entryPoint = "vs_main"},
+      .depthStencil = &ds,
+      .fragment = &fs,
+  };
+  R.motionDepthFlipPipeline = device.CreateRenderPipeline(&rpd);
+  const wgpu::TextureDescriptor td{
+      .label = "XR SpaceWarp depth (reversed)",
+      .usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding,
+      .size = {g_streams[kMotionDepth].width, g_streams[kMotionDepth].height, 2},
+      .format = wgpu::TextureFormat::Depth32Float};
+  R.motionDepthFlip = device.CreateTexture(&td);
+  for (uint32_t layer = 0; layer < 2; ++layer) {
+    const wgpu::TextureViewDescriptor vd{.dimension = wgpu::TextureViewDimension::e2D,
+                                         .baseArrayLayer = layer,
+                                         .arrayLayerCount = 1,
+                                         .aspect = wgpu::TextureAspect::DepthOnly};
+    const wgpu::BindGroupEntry e{.binding = 0, .textureView = R.motionDepthFlip.CreateView(&vd)};
+    const wgpu::BindGroupDescriptor bgd{.layout = R.motionDepthFlipLayout, .entryCount = 1, .entries = &e};
+    R.motionDepthFlipGroups[layer] = device.CreateBindGroup(&bgd);
+  }
+}
+
+void flip_motion_depth(const wgpu::CommandEncoder& cmd, const wgpu::Texture& dst) {
+  for (uint32_t layer = 0; layer < 2; ++layer) {
+    const wgpu::TextureViewDescriptor vd{.dimension = wgpu::TextureViewDimension::e2D,
+                                         .baseArrayLayer = layer,
+                                         .arrayLayerCount = 1};
+    const wgpu::RenderPassDepthStencilAttachment da{
+        .view = dst.CreateView(&vd),
+        .depthLoadOp = wgpu::LoadOp::Clear,
+        .depthStoreOp = wgpu::StoreOp::Store,
+        .depthClearValue = 1.f,
+    };
+    const wgpu::RenderPassDescriptor rp{.label = "XR SpaceWarp depth flip", .depthStencilAttachment = &da};
+    auto pass = cmd.BeginRenderPass(&rp);
+    pass.SetPipeline(R.motionDepthFlipPipeline);
+    pass.SetBindGroup(0, R.motionDepthFlipGroups[layer]);
+    pass.Draw(3);
+    pass.End();
+  }
 }
 
 // Hands the SpaceWarp images over with the 3D image of the same frame.
@@ -5347,8 +5529,19 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
   } mv[gfx::XrMaxTransforms]{};
   static_assert(sizeof(mv[0]) == kMultiviewEyeSize);
   std::array<Mat4, gfx::XrMaxTransforms> worldToRoom{}, cameraToRoom{};
+  // SpaceWarp: the eyes the previous positions are seen with. Meta's
+  // XrSpaceWarp sample uses last frame's (the head's motion in the
+  // vectors). AURORA_XR_APPSW_HEAD=<0..1> blends toward this frame's (0:
+  // the head's motion left out; with our reversed depth that doubled the
+  // image on sideways head motion).
+  static const float headShare = std::clamp(env_float("AURORA_XR_APPSW_HEAD", 1.f), 0.f, 1.f);
+  const bool havePrevViews = R.prevCount != 0;
   for (int eye = 0; eye < 2; ++eye) {
     const Mat4 eyeToClip = mul(projection(views[eye].fov, 0.05f), view_from_pose(views[eye].pose));
+    const Mat4 prevEyeToClip =
+        havePrevViews ? mul(projection(views[eye].fov, 0.05f),
+                            view_from_pose(blend_pose(views[eye].pose, R.prevViews[eye].pose, headShare)))
+                      : eyeToClip;
     for (size_t t = 0; t < transforms; ++t) {
       Mat4 world = cameraToWorld;
       Mat4 place{1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f}; // T
@@ -5375,19 +5568,15 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       static_assert(sizeof(u) == gx::XrEyeUniformSize);
       if (g_multiview) {
         mv[t].m[eye] = u.m;
-        // Previous positions in the room, seen with this frame's eyes: the
-        // runtime reprojects head motion itself (from depth and its own
-        // pose), so motion vectors carry only the scene's own motion.
-        // Including the head's (last frame's eye matrices, as Meta's
-        // XrSpaceWarp sample does for its moving camera) applied it twice:
-        // turning the head smeared everything. prev: a point fixed in the
-        // game world (V_game⁻¹ this frame's on both sides); prevM: one at
-        // last frame's game camera space (a draw's own last matrices).
+        // Previous positions in the room, seen with prevEyeToClip. prev: a
+        // point fixed in the game world (V_game⁻¹ this frame's on both
+        // sides); prevM: one at last frame's game camera space (a draw's own
+        // last matrices).
         worldToRoom[t] = mul(arena, place);
         cameraToRoom[t] = mul(arena, world);
         mv[t].prev[eye] =
-            mul(eyeToClip, mul(t < R.prevCount ? R.prevWorldToRoom[t] : worldToRoom[t], cameraToWorld));
-        mv[t].prevM[eye] = mul(eyeToClip, t < R.prevCount ? R.prevCameraToRoom[t] : cameraToRoom[t]);
+            mul(prevEyeToClip, mul(t < R.prevCount ? R.prevWorldToRoom[t] : worldToRoom[t], cameraToWorld));
+        mv[t].prevM[eye] = mul(prevEyeToClip, t < R.prevCount ? R.prevCameraToRoom[t] : cameraToRoom[t]);
         mv[t].enabled[0] = 1;
         // The clipped geometry's dissolve, as 1 - opacity (0: solid).
         // The entry's layout: move 3x4, planes, fades, opacity.
@@ -5407,6 +5596,7 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       webgpu::g_queue.WriteBuffer(R.mvUniforms[t], 0, &mv[t], sizeof(mv[t]));
     R.prevWorldToRoom = worldToRoom;
     R.prevCameraToRoom = cameraToRoom;
+    R.prevViews = views;
     R.prevCount = transforms;
   }
 

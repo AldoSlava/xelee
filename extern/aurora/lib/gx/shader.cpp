@@ -2258,15 +2258,25 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
           // Edits from the end back, so earlier anchors stay put.
           shaderSource.erase(fsAt);
           shaderSource += "@fragment\n"
-                          "fn fs_main(in: VertexOutput) -> @location(0) vec4f {\n"
-                          "    if (in.xr_prv.w <= 1e-5) { return vec4f(0.0); }\n"
-                          "    return vec4f(in.xr_cur.xyz / in.xr_cur.w - in.xr_prv.xyz / in.xr_prv.w, 0.0);\n"
+                          "fn fs_main(in: VertexOutput) -> @location(0) vec4f {\n";
+          // A draw straddling a clip: the eyes' clip test (softClip above).
+          if (softClip)
+            shaderSource += "    let xr_d = min(in.xr_fade_a, in.xr_fade_b);\n"
+                            "    if (xr_bayer(in.pos.xy) >= clamp(min(min(xr_d.x, xr_d.y), min(xr_d.z, xr_d.w)), 0.0, 1.0) * "
+                            "(1.0 - bitcast<f32>(xr.enabled.y))) { discard; }\n";
+          shaderSource += "    if (in.xr_prv.w <= 1e-5) { return vec4f(0.0); }\n"
+                          // z as GL's NDC (-1 near .. 1 far) like the
+                          // standard depth the runtime gets: ours is 1 at
+                          // near, 0 far, so GL z = 1 - 2 z.
+                          "    let d = in.xr_cur.xyz / in.xr_cur.w - in.xr_prv.xyz / in.xr_prv.w;\n"
+                          "    return vec4f(d.x, d.y, -2.0 * d.z, 0.0);\n"
                           "}\n";
           // Only the positions leave the vertex stage: the GX outputs stay in
           // a local struct nobody reads, so their lighting and texgen are
           // dead code the driver drops (Brinstar's pass: 4.8 ms with them).
           shaderSource.replace(retAt, std::string_view{"return out;"}.size(),
-                               "return VertexOutput(out.pos, out.pos, xr_prev);");
+                               softClip ? "return VertexOutput(out.pos, out.pos, xr_prev, out.xr_fade_a, out.xr_fade_b);"
+                                        : "return VertexOutput(out.pos, out.pos, xr_prev);");
           // Last frame's position: by the draw's own matrices then
           // (imm.xr_prev_mtx, in last frame's game camera space, so last
           // frame's eye matrices), or else as a point fixed in the game
@@ -2310,7 +2320,11 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
           shaderSource.replace(v0, v1 + 2 - v0,
                                "struct XrGxOut {" + members +
                                    "};\n\nstruct VertexOutput {\n    @builtin(position) pos: vec4f,\n"
-                                   "    @location(0) xr_cur: vec4f,\n    @location(1) xr_prv: vec4f,\n};");
+                                   "    @location(0) xr_cur: vec4f,\n    @location(1) xr_prv: vec4f,\n" +
+                                   std::string(softClip ? "    @location(2) xr_fade_a: vec4f,\n"
+                                                          "    @location(3) xr_fade_b: vec4f,\n"
+                                                        : "") +
+                                   "};");
         }
       }
     }
