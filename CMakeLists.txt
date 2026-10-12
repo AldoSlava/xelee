@@ -136,6 +136,39 @@ else ()
     endif ()
 endif ()
 
+# ---- Vendored ENet (MIT), for Slippi netplay -------------------------------
+# src/pc/slippi/ speaks Slippi's ENet protocol (docs/slippi-migration-plan.md
+# M1/M2). ENet is vendored at extern/enet (v1.3.13) because nothing on Android
+# or iOS provides it as a package. win32.c is empty off Windows and unix.c on
+# Windows, so both are listed unconditionally. SEPARATE_FROM_ALL keeps it off
+# the build until the Slippi stack actually links it (M2); the slp_packet test
+# does not use ENet.
+set(ENET_SOURCES
+        extern/enet/callbacks.c
+        extern/enet/compress.c
+        extern/enet/host.c
+        extern/enet/list.c
+        extern/enet/packet.c
+        extern/enet/peer.c
+        extern/enet/protocol.c
+        extern/enet/win32.c
+        extern/enet/unix.c)
+add_library(melee_enet STATIC ${ENET_SOURCES})
+target_include_directories(melee_enet PUBLIC extern/enet/include)
+target_compile_definitions(melee_enet PRIVATE ENET_BUILDING_LIB)
+if (WIN32)
+    target_link_libraries(melee_enet PUBLIC ws2_32 winmm)
+else ()
+    # ENet's unix.c leans on these for its POSIX path. Upstream probes them
+    # with check_function_exists/check_type_size; every target this port builds
+    # for is POSIX and has all of them, so they are set directly rather than
+    # adding the checks. (Without HAS_SOCKLEN_T, unix.c typedefs socklen_t and
+    # collides with the system one, which is how this was first noticed.)
+    target_compile_definitions(melee_enet PRIVATE
+            HAS_FCNTL=1 HAS_POLL=1 HAS_INET_PTON=1 HAS_INET_NTOP=1
+            HAS_MSGHDR_FLAGS=1 HAS_SOCKLEN_T=1)
+endif ()
+
 # ---- Game code (decomp, compiled as C) -------------------------------------
 include(cmake/GameSources.cmake)
 
@@ -198,6 +231,10 @@ set(PC_SOURCES
         src/pc/region.c
         src/pc/slp.c
         src/pc/slp_format.c
+        # Slippi netplay protocol (docs/slippi-migration-plan.md). slp_proto.h is
+        # the constants header; slp_packet.c is the wire codec (M1). The
+        # transport and matchmaking modules land here in M2/M4.
+        src/pc/slippi/slp_packet.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
         src/pc/touch.c
@@ -516,6 +553,14 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_test(NAME net_chat COMMAND net_chat_test)
         set_tests_properties(net_chat PROPERTIES LABELS melee TIMEOUT 30)
         add_dependencies(unit_tests net_chat_test)
+        # Slippi netplay packet codec (src/pc/slippi/, docs/slippi-migration-plan.md
+        # M1). Plain C: the test #includes the .c, so no source is linked here.
+        add_executable(slp_packet_test EXCLUDE_FROM_ALL tools/test_slp_packet.c)
+        target_include_directories(slp_packet_test PRIVATE src)
+        target_compile_options(slp_packet_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_packet COMMAND slp_packet_test)
+        set_tests_properties(slp_packet PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_packet_test)
         add_executable(net_dht_bootstrap_test EXCLUDE_FROM_ALL tools/test_net_dht_bootstrap.c)
         target_compile_options(net_dht_bootstrap_test PRIVATE -UNDEBUG)
         add_test(NAME net_dht_bootstrap COMMAND net_dht_bootstrap_test)
