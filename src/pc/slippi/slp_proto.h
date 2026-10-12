@@ -27,8 +27,13 @@
  * matchmaking server advertises its version; a client whose version is older
  * than the server's newer one stays out of matchmaking rather than run two
  * different rule sets against an updated player. Mirrors
- * melee-unlocked port/runtime/hle/slippi_version.h. */
-#define PC_SLIPPI_SEMVER "3.18.0"
+ * melee-unlocked port/runtime/hle/slippi_version.h.
+ *
+ * 3.6.4 is the current Slippi Dolphin release (Ishiiruka v3.6.4, 2026-06-15),
+ * the same version melee-unlocked pins and has played port-vs-Dolphin against.
+ * NOTE: this is Slippi's *netplay* version, NOT the .slp replay format version
+ * (which is 3.18.0, src/pc/slp_format.h). The two are unrelated. */
+#define PC_SLIPPI_SEMVER "3.6.4"
 
 /* ---- rollback / timing ------------------------------------------------ */
 #define PC_SLIPPI_ROLLBACK_MAX_FRAMES 7
