@@ -5490,6 +5490,106 @@ void mnCharSel_Scene_OnEnter(void* arg0)
     mnCharSel_802640A0();
 }
 
+#ifdef TARGET_PC
+#include "pc/net.h"
+#include "pc/pc.h"
+#include <stdlib.h>
+extern bool pc_net_slippi_active(void);
+
+/* HIDDEN does not cascade to a joint's children, so hide the whole tree. */
+static void cssHideTree(HSD_JObj* jobj)
+{
+    HSD_JObj* child;
+    if (jobj == NULL) {
+        return;
+    }
+    HSD_JObjSetFlags(jobj, JOBJ_HIDDEN);
+    for (child = jobj->child; child != NULL; child = child->next) {
+        cssHideTree(child);
+    }
+}
+
+static void cssNoRender(HSD_GObj* gobj, int pass)
+{
+}
+
+/* The hand and token procs reset their own hidden flags every frame, so stop
+ * the gobj from drawing at all. */
+static void cssHideGObj(HSD_GObj* gobj)
+{
+    if (gobj != NULL) {
+        gobj->render_cb = (GObj_RenderFunc) cssNoRender;
+    }
+}
+
+static void cssHideJoint(int id)
+{
+    HSD_JObj* jobj = NULL;
+    lb_80011E24(mnCharSel_804D6CC0, &jobj, id, -1);
+    cssHideTree(jobj);
+}
+
+/* The door's panel, nameplate and HMN/CPU labels are separate joint trees laid
+ * out at fixed strides (measured with MELEE_CSS_DUMP=1). */
+static void cssHideDoor(int door)
+{
+    CSSDoor* d = &mnCharSel_803F0DFC.doors[door];
+    u8 joints[] = { d->emblem_joint, d->costume_joint, d->team_joint,
+                    d->door_joint, d->bg_joint, d->player_indicator_joint,
+                    d->slidername_joint, d->cpuslider_joint,
+                    d->cpuslider2_joint };
+    int i;
+    for (i = 0; i < (int) ARRAY_SIZE(joints); i++) {
+        if (joints[i] != 0) {
+            cssHideJoint(joints[i]);
+        }
+    }
+    {
+        CSSTag* tag = &mnCharSel_803F0E8C[door];
+        if (tag->list_joint != 0) {
+            cssHideJoint(tag->list_joint);
+        }
+        if (tag->name_jointl != 0) {
+            cssHideJoint(tag->name_jointl);
+        }
+        if (tag->kostar_text_joint != 0) {
+            cssHideJoint(tag->kostar_text_joint);
+        }
+    }
+    cssHideJoint(132 + 8 * door);
+    cssHideJoint(61 + 6 * door);
+    cssHideJoint(87 + 6 * door);
+    cssHideJoint(112 + 5 * door);
+    cssHideJoint(41 + door);
+    cssHideJoint(46 + door);
+    cssHideJoint(51 + door);
+    cssHideJoint(56 + door);
+}
+
+/* Slippi's online CSS shows only your own player: the opponent's hand, token,
+ * character preview and door stay hidden, as do the unused ports. The picks
+ * still sync through the pads, so the match is unchanged. */
+static void mnCharSel_HideOnlineRemote(void)
+{
+    int remote;
+    if (!pc_net_active() || !pc_net_slippi_active() ||
+        mnCharSel_804D6CF5 == 1)
+    {
+        return;
+    }
+    remote = pc_net_local_player() ? 0 : 1;
+    if (mnCharSel_804A0BC0[remote] != NULL) {
+        cssHideGObj(mnCharSel_804A0BC0[remote]->gobj);
+    }
+    if (mnCharSel_804A0BD0[remote] != NULL) {
+        cssHideGObj(mnCharSel_804A0BD0[remote]->gobj);
+    }
+    cssHideDoor(remote);
+    cssHideDoor(2);
+    cssHideDoor(3);
+}
+#endif
+
 void mnCharSel_Scene_OnFrame(void)
 {
     int num_slots;
@@ -5498,6 +5598,28 @@ void mnCharSel_Scene_OnFrame(void)
     int i;
 
     PAD_STACK(8);
+
+#ifdef TARGET_PC
+    mnCharSel_HideOnlineRemote();
+    {
+        static bool dumped;
+        if (!dumped && mnCharSel_804D6CEC == 90 && getenv("MELEE_CSS_DUMP")) {
+            int id;
+            dumped = true;
+            for (id = 0; id < 160; id++) {
+                HSD_JObj* j = NULL;
+                lb_80011E24(mnCharSel_804D6CC0, &j, id, -1);
+                if (j != NULL) {
+                    Vec3 t;
+                    HSD_JObjGetTranslation(j, &t);
+                    pc_log_line("cssjoint %3d x=%7.2f y=%7.2f z=%7.2f flags=%08x child=%d next=%d",
+                                id, t.x, t.y, t.z, (unsigned) j->flags,
+                                j->child != NULL, j->next != NULL);
+                }
+            }
+        }
+    }
+#endif
 
     mnCharSel_804D6CEC += 1;
     if (mnCharSel_804D6CF6 <= 1) {

@@ -634,7 +634,10 @@ def in_match_scene(inst):
     in_fight() (net.c:1345-1362, in_fight() = scene_kind() is GS_VS or
     GS_SUDDEN_DEATH at :173), so `n` above zero IS "the sim is in a match"."""
     snaps = [int(n) for n in SNAP_RX.findall(inst.text())]
-    return count(inst, SCENE_FILE["match"]) + sum(1 for n in snaps if n > 0)
+    # The scene hand-off line is the third witness: a matchmaking run picks its
+    # stage through the SSS and may load an archive STAGE_RX does not name.
+    vs = len(re.findall(r"net: scene \d+ -> 2 at frame", inst.text()))
+    return count(inst, SCENE_FILE["match"]) + sum(1 for n in snaps if n > 0) + vs
 
 
 def wait_match(insts, timeout=240):
