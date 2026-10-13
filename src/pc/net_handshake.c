@@ -726,7 +726,7 @@ static bool rules_ready(void) {
  * same unlocks -- so this is interim until M4's selections flow carries it. */
 /* Slippi's netplay ruleset. Its General Codes write these every frame
  * (GALE01r2.ini: "Stock Mode", "4 Stocks", "8 Minutes", "No Items", "Singles
- * Stages"; docs/slippi-gecko-catalog.md), so whatever the player's own VS rules
+ * Stages"; the output of tools/gecko_catalog.py), so whatever the player's own VS rules
  * say, a Slippi peer plays stock mode, 4 stocks, 8 minutes, damage ratio 1.0,
  * no handicap, no items and the singles stage set, with everything unlocked.
  * Both peers apply the same constants, so no RULES message is needed and the

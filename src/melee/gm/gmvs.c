@@ -1772,7 +1772,7 @@ static float direction(float x)
 
 #ifdef TARGET_PC
 /* Slippi's "Neutral Spawn" General Code (GALE01r2.ini, NeutralSpawn.asm, hook
- * 0x8016E510; docs/slippi-gecko-catalog.md). Retail starts player i on the
+ * 0x8016E510; the output of tools/gecko_catalog.py). Retail starts player i on the
  * stage's spawn point i, i.e. by port. Slippi instead numbers the players
  * 0, 1, ... in port order among the open slots and, on its six standard stages,
  * puts them on fixed neutral spots (both on platforms, mirrored); on any other
