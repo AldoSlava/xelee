@@ -287,12 +287,24 @@ linked into the `melee` target.
 **M2 gate met.** Next: M3 (game-side wiring + rollback parity).
 
 ### M3 — Game-side wiring + rollback parity
-Adapter + native Slippi behaviour: input delay, stall/capture/load cadence,
-seed handshake, checksum exchange, CSS sync. Reuse `net_snapshot.c`.
+**Approach: ring-level transport swap (A), chosen after verifying the engine
+against Slippi's ASM (see §6).** Add a narrow seam so the Slippi driver feeds
+`net.c`'s existing `s_local_ring`/`s_remote_ring`/`s_remote_have` and keeps the
+entire rollback loop, barrier, pad-lock and audio machinery unchanged. Do NOT
+re-implement the rollback loop (the plan's earlier option B would have
+duplicated ~1000 lines of proven correctness).
+
+Deliverables:
+- Wire Slippi messages under the existing engine, behind `MELEE_NET_STACK=slippi`.
+- **Slippi wire checksum** — done (`slp_checksum.c`, `3e79973`); the game-side
+  glue that fills `PcSlippiSlotState` from the live Fighter/Player state goes
+  with the adapter.
+- Input delay, stall/capture/load cadence, seed handshake, CSS sync reuse the
+  existing paths.
+
 **Gate:** local instance-vs-instance match runs with rollback driven by the
-Slippi message flow; two headless Dolphin builds cannot be scripted here, so
-Dolphin parity is proven later (§M5). Internally, our own record/replay and
-`MELEE_NET_RESIM_AUDIT` must show a pure tick and faithful re-simulation.
+Slippi message flow; our own record/replay and `MELEE_NET_RESIM_AUDIT` show a
+pure tick and faithful re-simulation. Dolphin parity is proven later (§M5).
 
 ### M4 — Identity + matchmaking
 `slp_user.c` (read Launcher `user.json`, REST refresh) and `slp_match.c`
@@ -331,9 +343,40 @@ independence from central infrastructure is a feature. Slippi Direct (endpoint)
 remains available too, so LAN players can opt into Dolphin cross-play if they
 want. Maintenance cost is accepted: two transports, selected by mode.
 
-## 6. Rollback/snapshot reuse — is the seam real?
+## 6. Rollback/snapshot reuse — verified against Slippi's ASM
 
-Yes. Evidence:
+In addition to the seam evidence below, the rollback **policy** was checked
+field-for-field against Slippi's authoritative ASM (`project-slippi/slippi-ssbm-asm`
+`Online/Core/{StartEngineLoop,LoopEngineForRollback,TriggerSendInput}.asm`) and
+Ishiiruka `CEXISlippi.cpp`. Conclusion: our loop already *is* Slippi's cadence,
+so M3 feeds the driver into it rather than duplicating it.
+
+| Slippi behaviour | Slippi source | Ours | Match |
+|---|---|---|---|
+| Prediction = repeat last received input | `TriggerSendInput.asm` `LOAD_STALE_INPUTS: li r3,0` | `predict(): = s_remote_ring[s_remote_have]` | ✅ |
+| Roll back to earliest mispredicted frame | `CHECK_WHETHER_TO_ROLL_BACK_LOOP` → min player savestate frame | `s_rb_frame` = first mismatch; `rollback_to(s_rb_frame)` | ✅ |
+| Snapshot before each predicted frame, ~7 kept | `CAPTURE_CHECK`, `ROLLBACK_MAX_FRAME_COUNT=7` | `snap_predicted()`; `SNAPS=8 > WINDOW=7` | ✅ |
+| Stall when remote > window behind | `shouldSkipOnlineFrame` | `need = frame − WINDOW`; `wait_remote` | ✅ |
+| Delay frames carry neutral pad; sample f → frame f+delay | `handleSendInputs` | `write_head` same convention | ✅ |
+| Checksum frame = newest finalized frame | `TXB_FINALIZED_FRAME` | `ck_frame = confirmed_frame()` | ✅ |
+
+Two **timing-only** differences (neither changes simulation state):
+- Time sync: Slippi uses clock-offset + frame skip; we use frame-advantage
+difference (a deliberate improvement, `netcode-plan.md`).
+- Rollback trigger: Slippi has a trigger deadzone; ours is exact `memcmp`
+(→ at most extra rollbacks, never a desync).
+
+**The one real gap — now closed** (`3e79973`): Slippi's *wire* checksum is a
+specific formula (`FN_COMPUTE_CHECKSUM`: ActionStateID, raw pos/percent bits,
+spawn #, stocks, plus a float sum), and Dolphin **hard-aborts** on mismatch.
+Our `frame_checksum` is a stronger FNV hash that can never equal it. So the
+Slippi transport carries `src/pc/slippi/slp_checksum.c` (Slippi's formula,
+ported and tested) while our own checksum stays for LAN/desync detection.
+
+Remaining caveat: policy parity does not prove *simulation* parity with
+Dolphin. M5 is the gate for that.
+
+### Seam evidence
 
 - `snapshot_take(Snapshot*, int32_t frame)` and `snapshot_restore(const
   Snapshot*)` (`net_snapshot.c:602`, `:706`) take no transport types. The
