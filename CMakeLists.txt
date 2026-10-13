@@ -241,6 +241,7 @@ set(PC_SOURCES
         src/pc/slippi/slp_session.c
         src/pc/slippi/slp_net.c
         src/pc/slippi/slp_checksum.c
+        src/pc/slippi/slp_adapter.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
         src/pc/touch.c
@@ -597,6 +598,16 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_test(NAME slp_checksum COMMAND slp_checksum_test)
         set_tests_properties(slp_checksum PROPERTIES LABELS melee TIMEOUT 30)
         add_dependencies(unit_tests slp_checksum_test)
+        add_executable(slp_adapter_test EXCLUDE_FROM_ALL tools/test_slp_adapter.c)
+        target_include_directories(slp_adapter_test PRIVATE src)
+        target_compile_options(slp_adapter_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_adapter_test PRIVATE melee_enet)
+        if (NOT WIN32)
+            target_link_libraries(slp_adapter_test PRIVATE pthread)
+        endif ()
+        add_test(NAME slp_adapter COMMAND slp_adapter_test)
+        set_tests_properties(slp_adapter PROPERTIES LABELS melee TIMEOUT 60)
+        add_dependencies(unit_tests slp_adapter_test)
         add_executable(net_dht_bootstrap_test EXCLUDE_FROM_ALL tools/test_net_dht_bootstrap.c)
         target_compile_options(net_dht_bootstrap_test PRIVATE -UNDEBUG)
         add_test(NAME net_dht_bootstrap COMMAND net_dht_bootstrap_test)
