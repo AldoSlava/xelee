@@ -288,19 +288,28 @@ linked into the `melee` target.
 
 ### M3 — Game-side wiring + rollback parity
 **Approach: ring-level transport swap (A), chosen after verifying the engine
-against Slippi's ASM (see §6).** Add a narrow seam so the Slippi driver feeds
-`net.c`'s existing `s_local_ring`/`s_remote_ring`/`s_remote_have` and keeps the
-entire rollback loop, barrier, pad-lock and audio machinery unchanged. Do NOT
-re-implement the rollback loop (the plan's earlier option B would have
-duplicated ~1000 lines of proven correctness).
+against Slippi's ASM (see §6).**
 
-Deliverables:
-- Wire Slippi messages under the existing engine, behind `MELEE_NET_STACK=slippi`.
-- **Slippi wire checksum** — done (`slp_checksum.c`, `3e79973`); the game-side
-  glue that fills `PcSlippiSlotState` from the live Fighter/Player state goes
-  with the adapter.
-- Input delay, stall/capture/load cadence, seed handshake, CSS sync reuse the
-  existing paths.
+**Core wiring done** (`69999c1`, `20f27bb`, `2acd237`):
+- `slp_session`: `pc_slippi_session_remote_latest` / `..._pad_for_frame`.
+- `net_snapshot`: `pc_slippi_wire_checksum()` gathers Slippi's exact checkum
+  fields from the live game (separate from `frame_checksum`).
+- `slp_adapter.{c,h}`: the transport seam; delivers each newly-arrived
+  contiguous remote frame via a callback (the adapter's `on_inputs`-shaped walk).
+- `net.c`: `MELEE_NET_STACK=slippi` routes send/receive/wait through the
+  Slippi driver at their single entry points; `slp_frame_cb` applies frames to
+  `s_remote_ring`/`s_remote_have`/`s_rb_frame`; `pc_net_connect_slippi()` and a
+  Slippi teardown in `pc_net_disconnect()`. Rollback loop, barrier, snapshot
+  ring and pad handling are unchanged.
+
+Verified: full `melee` target links; 6/6 `slp_*` ctests pass; the legacy
+`net_resume`/`net_handshake`/`net_reliable`/`net_lan_txt` tests still pass.
+
+**Remaining for M3:** the in-game seed/rules exchange and CSS selection sync
+currently ride the custom handshake; under Slippi those come from Slippi's own
+selections flow (M4). An actual local instance-vs-instance **match** over the
+Slippi transport (not just the transport tests) is the true M3 gate and still
+needs running.
 
 **Gate:** local instance-vs-instance match runs with rollback driven by the
 Slippi message flow; our own record/replay and `MELEE_NET_RESIM_AUDIT` show a
