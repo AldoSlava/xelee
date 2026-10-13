@@ -234,11 +234,13 @@ set(PC_SOURCES
         # Slippi netplay protocol (docs/slippi-migration-plan.md). slp_proto.h is
         # the constants header; slp_packet.c is the wire codec (M1); slp_msg.c
         # is the message bodies, slp_session.c the transport-free session core,
-        # and slp_net.c the ENet driver (M2). The game adapter lands in M3.
+        # slp_net.c the ENet driver, and slp_checksum.c Slippi's wire desync
+        # checksum (M3). The game adapter lands in M3.
         src/pc/slippi/slp_packet.c
         src/pc/slippi/slp_msg.c
         src/pc/slippi/slp_session.c
         src/pc/slippi/slp_net.c
+        src/pc/slippi/slp_checksum.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
         src/pc/touch.c
@@ -589,6 +591,12 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_test(NAME slp_net COMMAND slp_net_test)
         set_tests_properties(slp_net PROPERTIES LABELS melee TIMEOUT 60)
         add_dependencies(unit_tests slp_net_test)
+        add_executable(slp_checksum_test EXCLUDE_FROM_ALL tools/test_slp_checksum.c)
+        target_include_directories(slp_checksum_test PRIVATE src)
+        target_compile_options(slp_checksum_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_checksum COMMAND slp_checksum_test)
+        set_tests_properties(slp_checksum PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_checksum_test)
         add_executable(net_dht_bootstrap_test EXCLUDE_FROM_ALL tools/test_net_dht_bootstrap.c)
         target_compile_options(net_dht_bootstrap_test PRIVATE -UNDEBUG)
         add_test(NAME net_dht_bootstrap COMMAND net_dht_bootstrap_test)
