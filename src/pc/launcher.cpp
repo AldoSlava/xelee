@@ -9,6 +9,7 @@
 #include "net_match.h"
 #include "net.h"
 #include "pc.h"
+#include "slippi/slp_user.h"
 #include <RmlUi/Core/Elements/ElementFormControl.h>
 #include <aurora/dvd.h>
 #include <aurora/event.h>
@@ -39,41 +40,178 @@ namespace {
 launcher::Preferences prefs;
 std::filesystem::path config_path;
 
+/* ---- Slippi sign-in (the launcher's only online concern) --------------
+ * The launcher overlay authenticates; it never starts or configures a match.
+ * Matchmaking lives in the game's Online menu (gm/gmonolinemode.c). The
+ * account is our own store via slp_user, so this works on Quest, where the
+ * desktop Slippi Launcher cannot run. The login is blocking HTTPS, so it runs
+ * on a worker; the overlay polls the future in its frame loop.
+ *
+ * One shared slot serves both overlays (the launcher window and the F1 menu),
+ * because only one is ever open and both show the same account. */
+struct SlippiAuth {
+    PcSlippiAccount account;
+    std::future<bool> login;
+    std::string error;
+    bool busy = false;
+    bool loaded = false;
+    void begin(const std::string& email, const std::string& password) {
+        if (busy)
+            return;
+        busy = true;
+        error.clear();
+        login = std::async(std::launch::async, [this, email, password] {
+            PcSlippiAccount a;
+            char err[160] = {0};
+            bool ok = pc_slippi_account_login(email.c_str(), password.c_str(), &a, err, sizeof err);
+            if (!ok) {
+                /* Stash the message for the poll site; the future only carries
+                 * the boolean. */
+                std::lock_guard<std::mutex> lock(failure_mutex);
+                failure = err;
+            }
+            return ok;
+        });
+    }
+    /* Called from the frame loop. Returns true when the busy state changed, so
+     * the caller can refresh its widgets. */
+    bool poll() {
+        if (!busy || !login.valid())
+            return false;
+        if (login.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            return false;
+        bool ok = login.get();
+        busy = false;
+        if (ok) {
+            account = load_account();
+            error.clear();
+        } else {
+            std::lock_guard<std::mutex> lock(failure_mutex);
+            error = failure.empty() ? "Sign-in failed" : failure;
+        }
+        return true;
+    }
+    void signout() {
+        pc_slippi_account_forget();
+        memset(&account, 0, sizeof account);
+        error.clear();
+    }
+    static PcSlippiAccount load_account() {
+        PcSlippiAccount a;
+        memset(&a, 0, sizeof a);
+        pc_slippi_account_load(&a, true);
+        return a;
+    }
+
+private:
+    std::mutex failure_mutex;
+    std::string failure;
+};
+SlippiAuth slippi_auth;
+/* The credential fields are read from the document rather than persisted (a
+ * password is never stored). Both overlays write into the same slot. */
+std::string auth_email;
+std::string auth_password;
+/* True when the auth fields changed, so the frame loops repaint. */
+bool change_auth(Rml::Event& event) {
+    auto* target = event.GetTargetElement();
+    if (!target)
+        return false;
+    auto id = target->GetId();
+    if (id != "auth-email" && id != "auth-password")
+        return false;
+    auto value = event.GetParameter<Rml::String>("value", "");
+    if (id == "auth-email")
+        auth_email = value;
+    else
+        auth_password = value;
+    return true;
+}
+
+/* Paint whichever of the two states the auth surface is in: signed out
+ * (email + password + Sign in) or signed in (connect code + Sign out). */
+template <typename Doc>
+void paint_auth(Doc* doc) {
+    static const char* const kIdle = "Sign in with the email and password from slippi.gg.";
+    bool signed_in = slippi_auth.account.logged_in;
+    bool configured = pc_slippi_account_login_available();
+    auto show = [doc](const char* id, bool value) {
+        if (auto* e = doc->GetElementById(id))
+            e->SetProperty("display", value ? "block" : "none");
+    };
+    show("auth-signed-out", !signed_in);
+    show("auth-signed-out-pw", !signed_in);
+    show("auth-signed-in", signed_in);
+    show("auth-signed-in-n", signed_in);
+    if (auto* e = doc->GetElementById("auth-sign-in"))
+        e->SetProperty("display", signed_in ? "none" : "inline-block");
+    if (auto* e = doc->GetElementById("auth-sign-out"))
+        e->SetProperty("display", signed_in ? "inline-block" : "none");
+    if (auto* e = doc->GetElementById("auth-status")) {
+        const std::string msg = slippi_auth.busy ? "Signing in..."
+                                : !slippi_auth.error.empty() ? slippi_auth.error
+                                : signed_in ? "Signed in."
+                                            : kIdle;
+        e->SetInnerRML("");
+        e->AppendChild(doc->CreateTextNode(msg));
+        e->SetClass("error", !slippi_auth.error.empty());
+    }
+    if (signed_in) {
+        if (auto* e = doc->GetElementById("auth-code")) {
+            e->SetInnerRML("");
+            e->AppendChild(doc->CreateTextNode(slippi_auth.account.connect_code[0]
+                                                   ? slippi_auth.account.connect_code
+                                                   : "-"));
+        }
+        if (auto* e = doc->GetElementById("auth-name")) {
+            e->SetInnerRML("");
+            e->AppendChild(doc->CreateTextNode(slippi_auth.account.display_name[0]
+                                                   ? slippi_auth.account.display_name
+                                                   : "-"));
+        }
+    }
+    /* The account file (or the platform) may not carry a Slippi login in this
+     * build; say so rather than offering a button that can only fail. */
+    if (!signed_in && !configured) {
+        if (auto* e = doc->GetElementById("auth-status")) {
+            e->SetInnerRML("");
+            e->AppendChild(doc->CreateTextNode("Online sign-in is unavailable in this build. "
+                                               "Direct Connect still works from the in-game "
+                                               "Online menu."));
+        }
+    }
+    if (auto* e = doc->GetElementById("auth-sign-in")) {
+        e->SetInnerRML(slippi_auth.busy ? "Signing in..." : "Sign in");
+        e->SetAttribute("disabled", !configured || slippi_auth.busy);
+    }
+}
+
 void refresh_online(Rml::ElementDocument* doc) {
     pc_net_set_input_delay(prefs.net_delay);
-    for (const auto& pair :
-        {std::pair{"net-name", prefs.net_name}, std::pair{"net-target", prefs.net_target}})
-    {
-        if (auto* e = dynamic_cast<Rml::ElementFormControl*>(doc->GetElementById(pair.first)))
-            e->SetValue(pair.second);
-    }
+    if (auto* e = dynamic_cast<Rml::ElementFormControl*>(doc->GetElementById("net-name")))
+        e->SetValue(prefs.net_name);
     if (auto* e = doc->GetElementById("net-delay"))
         e->SetInnerRML(prefs.net_delay < 0 ? "Auto" : std::to_string(prefs.net_delay) + " frames");
-    if (auto* e = doc->GetElementById("net-code"))
-        e->SetInnerRML(pc_net_match_local_code());
+    paint_auth(doc);
 }
 bool change_online(Rml::Event& event) {
     auto* target = event.GetTargetElement();
     if (!target)
         return false;
     auto id = target->GetId();
-    if (id != "net-name" && id != "net-target")
+    if (id != "net-name")
         return false;
     auto value = event.GetParameter<Rml::String>("value", "");
-    const size_t limit = id == "net-name" ? 8 : 17;
-    if (value.size() > limit)
+    if (value.size() > 8)
         return true;
     for (char& c : value) {
         if (c >= 'a' && c <= 'z')
             c -= 'a' - 'A';
-        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (id == "net-target" && c == '#')))
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
             return true;
     }
-    if (id == "net-name") {
-        if (!value.empty())
-            prefs.net_name = value;
-    } else
-        prefs.net_target = value;
+    if (!value.empty())
+        prefs.net_name = value;
     return true;
 }
 
@@ -259,7 +397,8 @@ class Launcher final : public Rml::EventListener {
         case 2:
             return {"unlock-all", "frozen-stadium", "free-camera", "ucf"};
         case 4:
-            return {"net-name", "net-target", "net-delay"};
+            return {"auth-email", "auth-password", "auth-sign-in", "auth-sign-out", "net-name",
+                "net-delay"};
         default:
             return {};
         }
@@ -467,6 +606,16 @@ class Launcher final : public Rml::EventListener {
         controls();
     }
     void action(const std::string& id) {
+        if (id == "auth-sign-in") {
+            slippi_auth.begin(auth_email, auth_password);
+            refresh_settings();
+            return;
+        }
+        if (id == "auth-sign-out") {
+            slippi_auth.signout();
+            refresh_settings();
+            return;
+        }
         if (id == "net-delay") {
             prefs.net_delay = prefs.net_delay == 4 ? -1 : prefs.net_delay + 1;
             save();
@@ -705,6 +854,7 @@ class Launcher final : public Rml::EventListener {
 
 public:
     Launcher(SDL_Window* w, Rml::ElementDocument* d) : window(w), document(d) {
+        slippi_auth.account = SlippiAuth::load_account();
         document->AddEventListener(Rml::EventId::Click, this);
         document->AddEventListener(Rml::EventId::Keydown, this);
         document->AddEventListener(Rml::EventId::Change, this);
@@ -745,6 +895,8 @@ public:
         } else if (event.GetId() == Rml::EventId::Change) {
             auto* target = event.GetTargetElement();
             if (!target || quiet)
+                return;
+            if (change_auth(event))
                 return;
             if (change_online(event)) {
                 save();
@@ -816,6 +968,9 @@ public:
                 break;
             }
             auto* events = aurora_update();
+            /* The sign-in runs on a worker; pick it up here and repaint. */
+            if (slippi_auth.poll() && settings)
+                refresh_settings();
             for (auto* e = events; e && e->type != AURORA_NONE; ++e) {
                 if (e->type == AURORA_EXIT) {
                     result = 0;
@@ -1257,7 +1412,8 @@ public:
         case 2:
             return {"unlock-all", "frozen-stadium", "free-camera", "ucf"};
         case 4:
-            return {"net-name", "net-target", "net-delay"};
+            return {"auth-email", "auth-password", "auth-sign-in", "auth-sign-out", "net-name",
+                "net-delay"};
         default: {
             std::vector<std::string> ids{"pad-port"};
             for (int i = 0; i < PAD_BUTTON_COUNT; ++i)
@@ -1487,6 +1643,16 @@ public:
         refresh_bindings();
     }
     void apply(const Rml::String& id) {
+        if (id == "auth-sign-in") {
+            slippi_auth.begin(auth_email, auth_password);
+            refresh();
+            return;
+        }
+        if (id == "auth-sign-out") {
+            slippi_auth.signout();
+            refresh();
+            return;
+        }
         if (id == "net-delay") {
             prefs.net_delay = prefs.net_delay == 4 ? -1 : prefs.net_delay + 1;
             saved();
@@ -1752,6 +1918,8 @@ public:
         }
         if (event.GetId() == Rml::EventId::Change) {
             auto* target = event.GetTargetElement();
+            if (target && !quiet && change_auth(event))
+                return;
             if (target && !quiet && change_online(event)) {
                 saved();
                 return;
@@ -1776,6 +1944,7 @@ extern "C" bool pc_menu_is_open(void) {
     return port_menu.open;
 }
 extern "C" void pc_menu_init(SDL_Window* window) {
+    slippi_auth.account = SlippiAuth::load_account();
     pc_widescreen_set_mode(prefs.widescreen);
     VISetFrameBufferScale(prefs.render_scale);
     pc_audio_set_volume(prefs.mute ? 0 : prefs.volume);
@@ -1832,6 +2001,9 @@ extern "C" void pc_menu_update(void) {
             port_menu.counter->Hide();
     }
     port_menu.poll_binding();
+    /* The F1 menu can also sign in; repaint it when the worker finishes. */
+    if (slippi_auth.poll() && port_menu.open)
+        port_menu.refresh();
 }
 
 extern "C" bool pc_is_custom_textures_enabled(void) {

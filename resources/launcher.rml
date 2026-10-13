@@ -180,12 +180,15 @@
             </div>
           </div>
           <div id="page-online" class="page">
-<div class="setting"><div class="description"><h3>Player name</h3><p>1–8 letters or digits. Changes apply to the next search.</p></div><input type="text" id="net-name" maxlength="8" value="PLAYER" /></div>
-<div class="setting"><div class="description"><h3>Your connect code</h3><p id="net-code"></p></div></div>
-<div class="setting"><div class="description"><h3>Friend's connect code</h3><p>Leave blank to host your code. Open Online → Direct Connect in-game.</p></div><input type="text" id="net-target" maxlength="17" value="" /></div>
+<div class="setting"><div class="description"><h3>Slippi account</h3><p id="auth-status">Sign in with the email and password from slippi.gg.</p></div><button id="auth-sign-in">Sign in</button><button id="auth-sign-out" style="display:none">Sign out</button></div>
+<div id="auth-signed-out" class="setting"><div class="description"><h3>Email</h3><p>The email address on your Slippi account.</p></div><input type="text" id="auth-email" value="" /></div>
+<div id="auth-signed-out-pw" class="setting"><div class="description"><h3>Password</h3><p>Used only to sign in; never stored.</p></div><input type="password" id="auth-password" value="" /></div>
+<div id="auth-signed-in" class="setting" style="display:none"><div class="description"><h3>Connect code</h3><p id="auth-code"></p></div></div>
+<div id="auth-signed-in-n" class="setting" style="display:none"><div class="description"><h3>Display name</h3><p id="auth-name"></p></div></div>
+<div class="setting"><div class="description"><h3>Local player name</h3><p>1&ndash;8 letters or digits. Used for LAN play.</p></div><input type="text" id="net-name" maxlength="8" value="PLAYER" /></div>
 <div class="setting"><div class="description"><h3>Input delay</h3><p>Automatic adapts to your connection. Changes apply next match.</p></div><button id="net-delay">Auto</button></div>
-<div class="setting"><div class="description"><p>Internet discovery can take a few minutes. Some home networks cannot connect without a relay.</p></div></div>
-</div>
+<div class="setting"><div class="description"><p>Matchmaking starts in the game: VS Mode &rarr; Online &rarr; Unranked or Direct Connect.</p></div></div>
+          </div>
 <div id="page-controls" class="page">
             <div class="section controls">
               <div class="section-heading"><h2>Keyboard</h2></div>
