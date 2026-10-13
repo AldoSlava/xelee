@@ -988,6 +988,15 @@ uint32_t pc_net_match_seed(void) {
 bool pc_net_match_is_slippi(void) {
     return s_slippi_match;
 }
+int pc_net_match_slippi_stages(uint16_t* out, int max) {
+    /* Only Unranked takes the server's list: Direct players pick. */
+    if (!s_slippi_match || mode != PC_MATCH_UNRANKED || !s_slippi_ticket.ok)
+        return 0;
+    int n = s_slippi_ticket.stage_count < max ? s_slippi_ticket.stage_count : max;
+    for (int i = 0; i < n; i++)
+        out[i] = s_slippi_ticket.stages[i];
+    return n;
+}
 const char* pc_net_match_local_code(void) {
     if (s_slippi_match && s_slippi_code[0])
         return s_slippi_code;

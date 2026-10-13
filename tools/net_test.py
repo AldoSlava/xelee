@@ -413,7 +413,20 @@ def drive_mm(a, b):
     if not (a.wait_log(r"lobby: entering CSS", 90) and b.wait_log(r"lobby: entering CSS", 90)):
         print("net_test: the lobby never handed over to the CSS", flush=True)
         return False
-    return drive_css(a, b) and drive_sss(a, b)
+    if not drive_css(a, b):
+        return False
+    # Unranked takes the stage from the ticket's list: no picks, and both
+    # peers must land on the same one.
+    rx = r"sss: Slippi ticket stage (\d+)"
+    if not (a.wait_log(rx, 60) and b.wait_log(rx, 60)):
+        print("net_test: no ticket stage was chosen", flush=True)
+        return False
+    sa, sb = re.findall(rx, a.text()), re.findall(rx, b.text())
+    if sa != sb or not sa or int(sa[0]) not in (2, 3, 8, 28, 31, 32):
+        print(f"net_test: the peers disagree on the ticket stage: a={sa} b={sb}", flush=True)
+        return False
+    print(f"net_test: ticket stage {sa[0]} on both peers", flush=True)
+    return True
 
 
 def drive_lan(a, b):

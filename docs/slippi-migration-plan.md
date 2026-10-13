@@ -415,6 +415,30 @@ Two halves, split by surface (§4 "UI split"):
 returned; Direct connect succeeds between two of our instances — both started
 from the in-game Online menu, not the launcher.
 
+### M4 UI port — Slippi's netplay screens (in progress)
+Slippi's screens are Gecko/ASM over the retail menus, so there is no source to
+port; these match what Slippi Dolphin shows. Done on `slippi-net`, all gated on
+the Slippi transport (`MELEE_NET_STACK=slippi` / a Slippi match) so LAN and the
+legacy stack are unchanged:
+- **Lobby/search status** (`gmonlinemode.c`): Slippi connect code as "YOU",
+  "Connecting to Slippi...", "Looking for an opponent", "Connecting to CODE...",
+  "Matched with CODE - starting...".
+- **Online CSS** (`mncharsel.c`): only the local player's panel, hand and token
+  are drawn; the opponent's door, hand, token and the unused ports are hidden
+  (picks still sync through the pads). HMN/CPU door toggles are disabled, so a
+  Slippi match stays 1v1 between humans. `MELEE_CSS_DUMP=1` logs the joint
+  layout the door strides were measured from; `MELEE_CSS_SHOW_ALL=1` turns the
+  hiding off.
+- **Name tags** (`ifnametag.c`): fighters carry their connect codes.
+- **Stage flow** (`mnstagesel.c`): Unranked picks from the ticket's stage list
+  (external ids; same cell on both peers from the shared seed, no SSS picks);
+  Direct keeps the pick exchange.
+
+Not done: the four dark name bars under the CSS doors are still drawn (a
+structure outside the joints hidden so far); the Direct screen still takes the
+DHT `#XXXXXXXX` code, not a Slippi connect code (`ABCD#123`); results-screen
+names; Slippi's chat/quick-chat styling.
+
 ### M5 — Cross-play verification (the whole point)
 1. Our instance vs our instance over the real matchmaking servers, full game.
 2. **Our instance vs Slippi Dolphin**, Unranked and Direct, full game — the

@@ -124,6 +124,7 @@ struct StageSelUserData {
 #include "pc/net.h"
 #include "pc/xr_pointer.h"
 #include "pc/net_lan.h"
+#include "pc/net_match.h"
 #include "pc/net_rank_session.h"
 #include <sysdolphin/baselib/sislib.h>
 #include "pc/pc.h"
@@ -196,6 +197,7 @@ static void rankStageFrame(void)
 #define NET_MSG_STAGE_PICK 0x20
 static int net_local_pick = -1;
 static int net_remote_pick = -1;
+static bool net_slippi_fixed; /* the ticket chose the stage; skip the pick exchange */
 
 static bool netStageSel_Active(void)
 {
@@ -205,6 +207,37 @@ static bool netStageSel_Active(void)
 static void netStageSel_Reset(void)
 {
     net_local_pick = net_remote_pick = -1;
+    net_slippi_fixed = false;
+}
+
+/* Slippi Unranked: the server's ticket names the legal stages and the game
+ * picks one at random, so there is nothing for the players to choose. Both
+ * peers hash the shared seed with the number of games played so far, giving
+ * the same cell without a message. Returns the table cell, or -1 when this
+ * match lets the players pick. The table's stkind is the external stage id
+ * the ticket uses. */
+static int netStageSel_SlippiCell(void)
+{
+    static u32 games;
+    uint16_t ids[16];
+    int n = pc_net_match_slippi_stages(ids, 16);
+    u32 r;
+    int id;
+    int i;
+    if (n <= 0) {
+        return -1;
+    }
+    r = (pc_net_seed() + games++ * 0x9E3779B9u) * 2654435761u;
+    r ^= r >> 15;
+    r *= 2246822519u;
+    id = ids[(r >> 8) % (u32) n];
+    for (i = 0; i < NUM_STAGES; i++) {
+        if (mnStageSel_803F06D0[i].stkind == id) {
+            pc_log_line("sss: Slippi ticket stage %d (cell %d of %d allowed)", id, i, n);
+            return i;
+        }
+    }
+    return -1;
 }
 
 static void netStageSel_Poll(void)
@@ -778,6 +811,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
             if (!pc_rank_session_active()) {
                 mnStageSel_804D50A0 = pc_net_local_player();
                 netStageSel_Reset();
+                {
+                    int cell = netStageSel_SlippiCell();
+                    if (cell >= 0) {
+                        mnStageSel_804D6CAE = (u8) cell;
+                        mnStageSel_804D6CAF = 2; /* chosen; resolve below */
+                        net_slippi_fixed = true;
+                    }
+                }
             } else {
                 mnStageSel_804D50A0 = -1;
             }
@@ -1202,12 +1243,14 @@ void mnStageSel_Scene_OnFrame(void)
                 gm_801A4B60();
                 return;
             }
-            if (net_remote_pick < 0) {
-                return; /* opponent still choosing; keep showing our pick */
-            }
-            mnStageSel_804D6CAE = netStageSel_Resolve();
-            if (mnStageSel_804D6CAE >= NUM_STAGES) {
-                mnStageSel_804D6CAE = netStageSel_Random();
+            if (!net_slippi_fixed) {
+                if (net_remote_pick < 0) {
+                    return; /* opponent still choosing; keep showing our pick */
+                }
+                mnStageSel_804D6CAE = netStageSel_Resolve();
+                if (mnStageSel_804D6CAE >= NUM_STAGES) {
+                    mnStageSel_804D6CAE = netStageSel_Random();
+                }
             }
         }
 #endif
