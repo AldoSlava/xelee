@@ -1623,8 +1623,17 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
       .xrSolidIdxRange = xrSolidIdxRange,
       .xrSolidIndexCount = xrSolidIndexCount,
       .xrMotionPipeline = xrMotionPipeline,
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
       .xrBatchPipeline = xrPipeline != 0 && xrSolidIndexCount == 0 && cls_inside ? xr_batch_pipeline(false) : 0,
       .xrMotionBatchPipeline = xrMotionPipeline != 0 && cls_inside ? xr_batch_pipeline(true) : 0,
+#else
+      // xr_batch_pipeline() is XR-only (it needs the multiview/motion layouts),
+      // so off XR the batch pipelines stay 0. The DrawData fields exist either
+      // way and batching is disabled, so this is the same as before the XR
+      // branch, not a behaviour change.
+      .xrBatchPipeline = 0,
+      .xrMotionBatchPipeline = 0,
+#endif
       .uniformSharedKey = cache.uniformSharedKey,
   });
 }
