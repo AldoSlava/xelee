@@ -39,49 +39,49 @@ extern "C" {
  * Selections, chat and the build message are all far smaller. */
 #define PC_SLIPPI_PACKET_MAX (14 + PC_SLIPPI_MAX_INPUT_FRAMES * 8)
 
-typedef struct PcSlpWriter {
+typedef struct PcSlippiWriter {
     uint8_t* data; /* caller-owned buffer */
     size_t cap;    /* its capacity in bytes */
     size_t len;    /* bytes written so far */
     bool ok;       /* false once an append overflowed the buffer */
-} PcSlpWriter;
+} PcSlippiWriter;
 
-typedef struct PcSlpReader {
+typedef struct PcSlippiReader {
     const uint8_t* data;
     size_t len;
     size_t pos; /* bytes consumed */
     bool ok;    /* false once a read ran past the end */
-} PcSlpReader;
+} PcSlippiReader;
 
 /* ---- writer ----------------------------------------------------------- */
-void pc_slp_writer_init(PcSlpWriter* w, void* data, size_t cap);
-void pc_slp_put_u8(PcSlpWriter* w, uint8_t v);
-void pc_slp_put_bool(PcSlpWriter* w, bool v);
-void pc_slp_put_u16(PcSlpWriter* w, uint16_t v);
-void pc_slp_put_u32(PcSlpWriter* w, uint32_t v);
-void pc_slp_put_i32(PcSlpWriter* w, int32_t v);
-void pc_slp_put_bytes(PcSlpWriter* w, const void* data, size_t n);
-void pc_slp_put_string(PcSlpWriter* w, const char* s);
+void pc_slippi_writer_init(PcSlippiWriter* w, void* data, size_t cap);
+void pc_slippi_put_u8(PcSlippiWriter* w, uint8_t v);
+void pc_slippi_put_bool(PcSlippiWriter* w, bool v);
+void pc_slippi_put_u16(PcSlippiWriter* w, uint16_t v);
+void pc_slippi_put_u32(PcSlippiWriter* w, uint32_t v);
+void pc_slippi_put_i32(PcSlippiWriter* w, int32_t v);
+void pc_slippi_put_bytes(PcSlippiWriter* w, const void* data, size_t n);
+void pc_slippi_put_string(PcSlippiWriter* w, const char* s);
 
 /* ---- reader ----------------------------------------------------------- */
-void pc_slp_reader_init(PcSlpReader* r, const void* data, size_t len);
-uint8_t pc_slp_get_u8(PcSlpReader* r);
-bool pc_slp_get_bool(PcSlpReader* r);
-uint16_t pc_slp_get_u16(PcSlpReader* r);
-uint32_t pc_slp_get_u32(PcSlpReader* r);
-int32_t pc_slp_get_i32(PcSlpReader* r);
+void pc_slippi_reader_init(PcSlippiReader* r, const void* data, size_t len);
+uint8_t pc_slippi_get_u8(PcSlippiReader* r);
+bool pc_slippi_get_bool(PcSlippiReader* r);
+uint16_t pc_slippi_get_u16(PcSlippiReader* r);
+uint32_t pc_slippi_get_u32(PcSlippiReader* r);
+int32_t pc_slippi_get_i32(PcSlippiReader* r);
 /* Copies min(n, remaining) bytes into `out`; returns the number copied. If
  * fewer than n remain, `ok` latches false. */
-size_t pc_slp_get_bytes(PcSlpReader* r, void* out, size_t n);
+size_t pc_slippi_get_bytes(PcSlippiReader* r, void* out, size_t n);
 /* Reads a u32 length then that many bytes into a caller buffer, always
  * NUL-terminating. Copies at most cap-1 bytes and discards the rest of a
  * longer string so `pos` stays correct; a string longer than an internal
  * sanity limit latches `ok` false (Slippi never sends one). `out` may be
  * NULL to skip the contents but still advance. */
-void pc_slp_get_string(PcSlpReader* r, char* out, size_t cap);
+void pc_slippi_get_string(PcSlippiReader* r, char* out, size_t cap);
 
 /* Bytes left to read. */
-size_t pc_slp_reader_remaining(const PcSlpReader* r);
+size_t pc_slippi_reader_remaining(const PcSlippiReader* r);
 
 #ifdef __cplusplus
 }

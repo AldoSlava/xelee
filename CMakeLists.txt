@@ -232,9 +232,10 @@ set(PC_SOURCES
         src/pc/slp.c
         src/pc/slp_format.c
         # Slippi netplay protocol (docs/slippi-migration-plan.md). slp_proto.h is
-        # the constants header; slp_packet.c is the wire codec (M1). The
-        # transport and matchmaking modules land here in M2/M4.
+        # the constants header; slp_packet.c is the wire codec (M1); slp_msg.c
+        # is the message bodies (M2). The ENet transport lands here in M2.
         src/pc/slippi/slp_packet.c
+        src/pc/slippi/slp_msg.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
         src/pc/touch.c
@@ -561,6 +562,12 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_test(NAME slp_packet COMMAND slp_packet_test)
         set_tests_properties(slp_packet PROPERTIES LABELS melee TIMEOUT 30)
         add_dependencies(unit_tests slp_packet_test)
+        add_executable(slp_msg_test EXCLUDE_FROM_ALL tools/test_slp_msg.c)
+        target_include_directories(slp_msg_test PRIVATE src)
+        target_compile_options(slp_msg_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_msg COMMAND slp_msg_test)
+        set_tests_properties(slp_msg PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_msg_test)
         add_executable(net_dht_bootstrap_test EXCLUDE_FROM_ALL tools/test_net_dht_bootstrap.c)
         target_compile_options(net_dht_bootstrap_test PRIVATE -UNDEBUG)
         add_test(NAME net_dht_bootstrap COMMAND net_dht_bootstrap_test)

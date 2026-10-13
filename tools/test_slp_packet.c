@@ -40,14 +40,14 @@
 
 static void test_integer_encoding(void) {
     uint8_t buf[32];
-    PcSlpWriter w;
-    pc_slp_writer_init(&w, buf, sizeof buf);
-    pc_slp_put_u8(&w, 0xAB);
-    pc_slp_put_u16(&w, 0x1234);
-    pc_slp_put_u32(&w, 0xDEADBEEF);
-    pc_slp_put_i32(&w, -1);
-    pc_slp_put_bool(&w, true);
-    pc_slp_put_bool(&w, false);
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_u8(&w, 0xAB);
+    pc_slippi_put_u16(&w, 0x1234);
+    pc_slippi_put_u32(&w, 0xDEADBEEF);
+    pc_slippi_put_i32(&w, -1);
+    pc_slippi_put_bool(&w, true);
+    pc_slippi_put_bool(&w, false);
     assert(w.ok);
     assert(w.len == 1 + 2 + 4 + 4 + 1 + 1);
     assert(buf[0] == 0xAB);
@@ -57,85 +57,85 @@ static void test_integer_encoding(void) {
     assert(buf[11] == 0x01); /* bool true */
     assert(buf[12] == 0x00); /* bool false */
 
-    PcSlpReader r;
-    pc_slp_reader_init(&r, buf, w.len);
-    assert(pc_slp_get_u8(&r) == 0xAB);
-    assert(pc_slp_get_u16(&r) == 0x1234);
-    assert(pc_slp_get_u32(&r) == 0xDEADBEEF);
-    assert(pc_slp_get_i32(&r) == -1);
-    assert(pc_slp_get_bool(&r) == true);
-    assert(pc_slp_get_bool(&r) == false);
+    PcSlippiReader r;
+    pc_slippi_reader_init(&r, buf, w.len);
+    assert(pc_slippi_get_u8(&r) == 0xAB);
+    assert(pc_slippi_get_u16(&r) == 0x1234);
+    assert(pc_slippi_get_u32(&r) == 0xDEADBEEF);
+    assert(pc_slippi_get_i32(&r) == -1);
+    assert(pc_slippi_get_bool(&r) == true);
+    assert(pc_slippi_get_bool(&r) == false);
     assert(r.ok);
     assert(r.pos == r.len);
 }
 
 static void test_strings(void) {
     uint8_t buf[64];
-    PcSlpWriter w;
-    pc_slp_writer_init(&w, buf, sizeof buf);
-    pc_slp_put_string(&w, "ABC#123");
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_string(&w, "ABC#123");
     assert(w.ok);
     assert(w.len == 4 + 7);
     assert(buf[0] == 0 && buf[1] == 0 && buf[2] == 0 && buf[3] == 7);
     assert(memcmp(buf + 4, "ABC#123", 7) == 0);
 
     char out[32];
-    PcSlpReader r;
-    pc_slp_reader_init(&r, buf, w.len);
-    pc_slp_get_string(&r, out, sizeof out);
+    PcSlippiReader r;
+    pc_slippi_reader_init(&r, buf, w.len);
+    pc_slippi_get_string(&r, out, sizeof out);
     assert(r.ok);
     assert(strcmp(out, "ABC#123") == 0);
 
     /* Empty string is length 0 and no bytes. */
-    pc_slp_writer_init(&w, buf, sizeof buf);
-    pc_slp_put_string(&w, "");
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_string(&w, "");
     assert(w.ok && w.len == 4);
-    pc_slp_reader_init(&r, buf, w.len);
-    pc_slp_get_string(&r, out, sizeof out);
+    pc_slippi_reader_init(&r, buf, w.len);
+    pc_slippi_get_string(&r, out, sizeof out);
     assert(r.ok && out[0] == '\0');
 
     /* A string longer than the destination truncates but the position still
      * lands after the whole string, so a following field reads correctly. */
-    pc_slp_writer_init(&w, buf, sizeof buf);
-    pc_slp_put_string(&w, "0123456789");
-    pc_slp_put_u16(&w, 0xBEEF);
-    pc_slp_reader_init(&r, buf, w.len);
-    pc_slp_get_string(&r, out, 5); /* room for 4 chars + NUL */
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_string(&w, "0123456789");
+    pc_slippi_put_u16(&w, 0xBEEF);
+    pc_slippi_reader_init(&r, buf, w.len);
+    pc_slippi_get_string(&r, out, 5); /* room for 4 chars + NUL */
     assert(r.ok);
     assert(strcmp(out, "0123") == 0);
-    assert(pc_slp_get_u16(&r) == 0xBEEF);
+    assert(pc_slippi_get_u16(&r) == 0xBEEF);
     assert(r.ok && r.pos == r.len);
 
     /* out == NULL skips contents but advances. */
-    pc_slp_reader_init(&r, buf, w.len);
-    pc_slp_get_string(&r, NULL, 0);
+    pc_slippi_reader_init(&r, buf, w.len);
+    pc_slippi_get_string(&r, NULL, 0);
     assert(r.ok);
-    assert(pc_slp_get_u16(&r) == 0xBEEF);
+    assert(pc_slippi_get_u16(&r) == 0xBEEF);
 }
 
 static void test_reader_latches_ok(void) {
     uint8_t buf[4] = {1, 2, 3, 4};
-    PcSlpReader r;
-    pc_slp_reader_init(&r, buf, sizeof buf);
-    assert(pc_slp_get_u16(&r) == 0x0102);
+    PcSlippiReader r;
+    pc_slippi_reader_init(&r, buf, sizeof buf);
+    assert(pc_slippi_get_u16(&r) == 0x0102);
     assert(r.ok);
     /* Four bytes wanted, two remain: fails and latches. */
-    assert(pc_slp_get_u32(&r) == 0);
+    assert(pc_slippi_get_u32(&r) == 0);
     assert(!r.ok);
     /* Later reads yield zero and do not advance. */
     size_t before = r.pos;
-    assert(pc_slp_get_u8(&r) == 0);
-    assert(pc_slp_get_u16(&r) == 0);
+    assert(pc_slippi_get_u8(&r) == 0);
+    assert(pc_slippi_get_u16(&r) == 0);
     assert(r.pos == before);
 }
 
 static void test_writer_overflow(void) {
     uint8_t buf[4];
-    PcSlpWriter w;
-    pc_slp_writer_init(&w, buf, sizeof buf);
-    pc_slp_put_u32(&w, 0x11223344);
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_u32(&w, 0x11223344);
     assert(w.ok && w.len == 4);
-    pc_slp_put_u8(&w, 0x55); /* no room */
+    pc_slippi_put_u8(&w, 0x55); /* no room */
     assert(!w.ok);
     assert(w.len == 4); /* nothing written past the cap */
     assert(memcmp(buf, "\x11\x22\x33\x44", 3) == 0);
@@ -157,28 +157,28 @@ static void test_pad_payload(void) {
     };
     const int count = 3;
 
-    PcSlpWriter w;
-    pc_slp_writer_init(&w, buf, sizeof buf);
-    pc_slp_put_u8(&w, PC_SLIPPI_MSG_PAD);
-    pc_slp_put_i32(&w, frame);
-    pc_slp_put_u8(&w, port);
-    pc_slp_put_i32(&w, ck_frame);
-    pc_slp_put_u32(&w, ck);
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_u8(&w, PC_SLIPPI_MSG_PAD);
+    pc_slippi_put_i32(&w, frame);
+    pc_slippi_put_u8(&w, port);
+    pc_slippi_put_i32(&w, ck_frame);
+    pc_slippi_put_u32(&w, ck);
     assert((int)w.len == PC_SLIPPI_PAD_DATA_OFFSET);
     for (int i = 0; i < count; i++) {
-        pc_slp_put_bytes(&w, pads[i], PC_SLIPPI_PAD_DATA_SIZE);
+        pc_slippi_put_bytes(&w, pads[i], PC_SLIPPI_PAD_DATA_SIZE);
     }
     assert(w.ok);
     assert(w.len == PC_SLIPPI_PAD_DATA_OFFSET + (size_t)count * PC_SLIPPI_PAD_DATA_SIZE);
 
     /* Decode as the receiver does. */
-    PcSlpReader r;
-    pc_slp_reader_init(&r, buf, w.len);
-    assert(pc_slp_get_u8(&r) == PC_SLIPPI_MSG_PAD);
-    int32_t got_frame = pc_slp_get_i32(&r);
-    uint8_t got_port = pc_slp_get_u8(&r);
-    int32_t got_ck_frame = pc_slp_get_i32(&r);
-    uint32_t got_ck = pc_slp_get_u32(&r);
+    PcSlippiReader r;
+    pc_slippi_reader_init(&r, buf, w.len);
+    assert(pc_slippi_get_u8(&r) == PC_SLIPPI_MSG_PAD);
+    int32_t got_frame = pc_slippi_get_i32(&r);
+    uint8_t got_port = pc_slippi_get_u8(&r);
+    int32_t got_ck_frame = pc_slippi_get_i32(&r);
+    uint32_t got_ck = pc_slippi_get_u32(&r);
     assert(got_frame == frame && got_port == port && got_ck_frame == ck_frame && got_ck == ck);
     assert(r.pos == PC_SLIPPI_PAD_DATA_OFFSET);
 
@@ -201,13 +201,13 @@ static void test_wire_header_order(void) {
     /* Pin the byte order of the four header fields directly, because a mixed
      * endianness is the defect most likely to survive a round-trip test. */
     uint8_t buf[14];
-    PcSlpWriter w;
-    pc_slp_writer_init(&w, buf, sizeof buf);
-    pc_slp_put_u8(&w, 0x80);
-    pc_slp_put_i32(&w, 0x01020304);
-    pc_slp_put_u8(&w, 0x02);
-    pc_slp_put_i32(&w, 0x05060708);
-    pc_slp_put_u32(&w, 0x090A0B0C);
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_u8(&w, 0x80);
+    pc_slippi_put_i32(&w, 0x01020304);
+    pc_slippi_put_u8(&w, 0x02);
+    pc_slippi_put_i32(&w, 0x05060708);
+    pc_slippi_put_u32(&w, 0x090A0B0C);
     assert(w.len == 14);
     const uint8_t expect[14] = {0x80, 0x01, 0x02, 0x03, 0x04, 0x02, 0x05, 0x06,
                                 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C};
