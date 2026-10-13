@@ -455,6 +455,33 @@ Agreed and baked in:
 - Do **not** copy Melee Unlocked's `docs/mu-net-protocol.md` P2P protocol — it is
   its own invention, not Slippi, and is irrelevant to interop.
 
+## 9.5 Build recipe (XR branch)
+
+The `quest-xr` branch needs OpenXR + the local Dawn fork. On this workstation
+the prepared environment is the `melee-xr` distrobox:
+
+```sh
+distrobox enter melee-xr -- bash -lc 'cd /home/rmercado/projects/melee-pc && \
+  cmake -B build-container-xr -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DAURORA_ENABLE_OPENXR=ON \
+    -DAURORA_DAWN_PROVIDER=vendor \
+    -DFETCHCONTENT_SOURCE_DIR_DAWN=/home/rmercado/projects/dawn \
+    -DDAWN_SUPPORTS_CXX_MODULES=OFF && \
+  ninja -C build-container-xr melee'
+```
+
+- `vendor` + `FETCHCONTENT_SOURCE_DIR_DAWN=../dawn` uses the local Dawn fork
+  (experimental Vulkan-hook + multiview patches OpenXR needs). The prebuilt
+  `package` Dawn lacks them.
+- `DAWN_SUPPORTS_CXX_MODULES=OFF` is required with CMake 3.28.
+- The plain (non-XR) config does not link on this branch: `xr_batch_pipeline`
+  is defined inside `#if AURORA_ENABLE_OPENXR` but used unguarded at
+  `extern/aurora/lib/gx/command_processor.cpp:1626`, so `AURORA_ENABLE_OPENXR=OFF`
+  fails to compile. Pre-existing, unrelated to Slippi.
+
+All five `slp_*` tests pass and the full `melee` target links in this config
+(verified 2026-10-12).
+
 ## 10. Sources (external)
 
 - `project-slippi/Ishiiruka` `Source/Core/Core/Slippi/{SlippiNetplay,SlippiMatchmaking,SlippiUser}.h`,
