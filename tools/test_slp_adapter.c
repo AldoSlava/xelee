@@ -161,8 +161,8 @@ int main(void) {
     p1.net = make_net(0, 0);
     p2.net = make_net(1, b_port);
     assert(p1.net != NULL && p2.net != NULL);
-    pc_slippi_adapter_init(&p1.adapter, p1.net, log_frame, &p1.log);
-    pc_slippi_adapter_init(&p2.adapter, p2.net, log_frame, &p2.log);
+    pc_slippi_adapter_init(&p1.adapter, p1.net, log_frame, NULL, &p1.log);
+    pc_slippi_adapter_init(&p2.adapter, p2.net, log_frame, NULL, &p2.log);
     pc_slippi_net_listen(p2.net);
     assert(pc_slippi_net_connect(p1.net, "127.0.0.1", b_port));
 

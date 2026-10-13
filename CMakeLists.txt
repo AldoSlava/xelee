@@ -235,13 +235,18 @@ set(PC_SOURCES
         # the constants header; slp_packet.c is the wire codec (M1); slp_msg.c
         # is the message bodies, slp_session.c the transport-free session core,
         # slp_net.c the ENet driver, and slp_checksum.c Slippi's wire desync
-        # checksum (M3). The game adapter lands in M3.
+        # checksum (M3). slp_adapter.c is the game-side transport seam; slp_json.c
+        # (M4) parses matchmaking replies and account files.
         src/pc/slippi/slp_packet.c
         src/pc/slippi/slp_msg.c
         src/pc/slippi/slp_session.c
         src/pc/slippi/slp_net.c
         src/pc/slippi/slp_checksum.c
         src/pc/slippi/slp_adapter.c
+        src/pc/slippi/slp_json.c
+        src/pc/slippi/slp_user.c
+        src/pc/slippi/slp_http.c
+        src/pc/slippi/slp_match.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
         src/pc/touch.c
@@ -594,6 +599,34 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_test(NAME slp_session COMMAND slp_session_test)
         set_tests_properties(slp_session PROPERTIES LABELS melee TIMEOUT 30)
         add_dependencies(unit_tests slp_session_test)
+        # slp_json (M4): the JSON reader, #includes its .c like the others.
+        add_executable(slp_json_test EXCLUDE_FROM_ALL tools/test_slp_json.c)
+        target_include_directories(slp_json_test PRIVATE src)
+        target_compile_options(slp_json_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_json COMMAND slp_json_test)
+        set_tests_properties(slp_json PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_json_test)
+        # slp_user (M4): account parse/serialize, #includes its .c. Needs SDL
+        # for the pref path; no network (the HTTP edge is stubbed in the test).
+        add_executable(slp_user_test EXCLUDE_FROM_ALL tools/test_slp_user.c)
+        target_include_directories(slp_user_test PRIVATE src extern/aurora/include)
+        target_compile_options(slp_user_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_user_test PRIVATE ${AURORA_SDL3_TARGET})
+        add_test(NAME slp_user COMMAND slp_user_test)
+        set_tests_properties(slp_user PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_user_test)
+        # slp_match (M4): ticket parse + local-peer mode, #includes its .c.
+        # Needs ENet for the client and SDL for the search thread.
+        add_executable(slp_match_test EXCLUDE_FROM_ALL tools/test_slp_match.c)
+        target_include_directories(slp_match_test PRIVATE src extern/aurora/include)
+        target_compile_options(slp_match_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_match_test PRIVATE melee_enet ${AURORA_SDL3_TARGET})
+        if (NOT WIN32)
+            target_link_libraries(slp_match_test PRIVATE pthread)
+        endif ()
+        add_test(NAME slp_match COMMAND slp_match_test)
+        set_tests_properties(slp_match PROPERTIES LABELS melee TIMEOUT 60)
+        add_dependencies(unit_tests slp_match_test)
         # The ENet driver (M2c) runs two peers over loopback, so it links the
         # vendored ENet. Timed generously: it waits on real ENet handshakes.
         add_executable(slp_net_test EXCLUDE_FROM_ALL tools/test_slp_net.c)

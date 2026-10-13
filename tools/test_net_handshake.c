@@ -111,6 +111,21 @@ bool pc_net_send_reliable(uint8_t type, const void* payload, int len) {
     return true;
 }
 
+/* net_handshake.c branches to the Slippi transport for its setup message. This
+ * fixture drives the custom handshake, so the Slippi path is inactive; the
+ * other two stubs exist only to satisfy the link. */
+bool pc_net_slippi_active(void) {
+    return false;
+}
+bool pc_net_slippi_send_setup(uint32_t seed, int32_t start_frame) {
+    (void)seed;
+    (void)start_frame;
+    return false;
+}
+int pc_net_slippi_conn_state(void) {
+    return 0;
+}
+
 void pc_log_line(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);

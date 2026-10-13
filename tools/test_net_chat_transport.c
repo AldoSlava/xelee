@@ -10,6 +10,18 @@ Uint64 SDL_GetTicks(void) {
 bool pc_net_active(void) {
     return net.active;
 }
+/* net_reliable.c branches to the Slippi transport at its entry points. This
+ * fixture exercises only the custom transport, so the Slippi path is reported
+ * inactive; the send stub is present only to satisfy the link. */
+bool pc_net_slippi_active(void) {
+    return false;
+}
+bool pc_net_slippi_send_rel(uint8_t type, const void* payload, int len) {
+    (void)type;
+    (void)payload;
+    (void)len;
+    return false;
+}
 int main(void) {
     assert(reliable_fixture_main() == 0);
     rel_reset();
