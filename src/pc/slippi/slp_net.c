@@ -431,7 +431,11 @@ static bool service_one(PcSlippiNet* n, uint64_t now_us, uint32_t timeout_ms, bo
     }
     switch (ev.type) {
     case ENET_EVENT_TYPE_CONNECT:
-        if (n->peer == NULL) {
+        /* Both sides dial each other in a hole punch, so there can be two
+         * connections. Send on one that is actually up: the peer made at
+         * dial time may still be half-open (a reliable packet queued there
+         * is lost when the other connection wins). */
+        if (n->peer == NULL || n->peer->state != ENET_PEER_STATE_CONNECTED) {
             n->peer = ev.peer;
         }
         if (n->status != PC_SLIPPI_NET_CONNECTED) {
@@ -453,6 +457,10 @@ static bool service_one(PcSlippiNet* n, uint64_t now_us, uint32_t timeout_ms, bo
         break;
     }
     case ENET_EVENT_TYPE_DISCONNECT:
+        /* A half-open duplicate timing out is not the session ending. */
+        if (n->peer != NULL && ev.peer != n->peer) {
+            break;
+        }
         /* ENet puts the peer's disconnect reason in ev.data. */
         n->status = PC_SLIPPI_NET_DISCONNECTED;
         n->disconnect_reason = (int)ev.data;

@@ -409,10 +409,25 @@ static int match_thread(void* user) {
 
     if (m->use_local_peer) {
         /* No server: synthesize the ticket, as melee-unlocked's local_peer. */
+        /* Test overrides, so two instances can pair on loopback in either
+         * seat: MELEE_SLIPPI_LOCAL_INDEX (0|1) is this instance's seat,
+         * MELEE_SLIPPI_PEER_PORT the other's UDP port, MELEE_SLIPPI_LOCAL_HOST
+         * (0|1) who the ticket names the decider. */
+        const char* li = getenv("MELEE_SLIPPI_LOCAL_INDEX");
+        int local_index = li != NULL && li[0] == '1' ? 1 : 0;
+        const char* pp = getenv("MELEE_SLIPPI_PEER_PORT");
         uint16_t base = m->local_port > 0 ? (uint16_t)(m->local_port + 1) : 1;
-        ok = pc_slippi_ticket_local(m->local_port, base, 2, 0, &ticket);
+        if (pp != NULL && pp[0]) {
+            base = (uint16_t)(atoi(pp) - (1 - local_index));
+        }
+        ok = pc_slippi_ticket_local(m->local_port, base, 2, local_index, &ticket);
         if (!ok) {
             snprintf(error, sizeof error, "%s", ticket.error);
+        } else {
+            const char* lh = getenv("MELEE_SLIPPI_LOCAL_HOST");
+            if (lh != NULL && (lh[0] == '0' || lh[0] == '1')) {
+                ticket.is_host = lh[0] == '1';
+            }
         }
         goto done;
     }

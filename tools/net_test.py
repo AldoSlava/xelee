@@ -33,6 +33,7 @@ and run() to sweep the link-simulator matrix.
 """
 import argparse
 import errno
+import json
 import os
 import re
 import shutil
@@ -401,6 +402,18 @@ def to_lobby(inst, tries=4):
         print(f"net_test: [{inst.name}] no lobby on attempt {attempt + 1}, resetting the menus",
               flush=True)
     return False
+
+
+def drive_mm(a, b):
+    """Both instances boot into the Unranked lobby, pair through the
+    synthesized ticket, and the lobby releases both at the agreed start frame."""
+    if not (a.wait_log(r"match: Slippi ticket", 60) and b.wait_log(r"match: Slippi ticket", 60)):
+        print("net_test: no instance got a Slippi ticket", flush=True)
+        return False
+    if not (a.wait_log(r"lobby: entering CSS", 90) and b.wait_log(r"lobby: entering CSS", 90)):
+        print("net_test: the lobby never handed over to the CSS", flush=True)
+        return False
+    return drive_css(a, b) and drive_sss(a, b)
 
 
 def drive_lan(a, b):
@@ -1197,6 +1210,11 @@ def parse_args(argv=None):
     ap.add_argument("--slippi", action="store_true",
                     help="use the Slippi ENet transport (MELEE_NET_STACK=slippi) instead of the "
                          "custom UDP path; direct mode only")
+    ap.add_argument("--mm", action="store_true",
+                    help="Slippi matchmaking path: boot into the Unranked lobby with a synthesized "
+                         "local-peer ticket (MELEE_SLIPPI_LOCAL_PEER) and a fake account, then CSS/SSS")
+    ap.add_argument("--mm-decider", choices=("a", "b"), default="a",
+                    help="with --mm: which instance the ticket names the decider (a is P1, b is P2)")
     ap.add_argument("--exe", default=os.path.join(here, "..", "build", "melee"))
     ap.add_argument("--disc", default=os.path.join(here, "..", "..", "melee.ciso"))
     ap.add_argument("--port", type=int, default=42050, help="A's UDP port; B uses +1")
@@ -1211,6 +1229,8 @@ def run(args):
         return run_disconnect(args)
     if args.stall:
         return run_stall(args)
+    if args.mm:
+        args.lan = True  # boots a lobby, not a MELEE_NET direct session
     if args.scenes:
         args.lan = True  # the set flow is the online one: lobby, CSS, SSS, VS, results
     frames = int(args.minutes * 3600) + BOOT_FRAMES
@@ -1249,6 +1269,24 @@ def run(args):
         sim_a["MELEE_FROZEN_STADIUM"] = sim["MELEE_FROZEN_STADIUM"] = "0"
     shutil.rmtree(args.work, ignore_errors=True)
     os.makedirs(args.work)
+    if args.mm:
+        for name, env, port, peer in (("a", sim_a, args.port, args.port + 1),
+                                      ("b", sim, args.port + 1, args.port)):
+            slp_dir = os.path.join(args.work, f"slippi-{name}")
+            os.makedirs(slp_dir)
+            with open(os.path.join(slp_dir, "slippi-account.json"), "w") as f:
+                json.dump({"uid": f"test{name}", "playKey": "k", "displayName": f"Test {name}",
+                           "connectCode": f"TST#{1 if name == 'a' else 2}"}, f)
+            env.update({
+                "MELEE_NET_STACK": "slippi",
+                "MELEE_BOOT_SCENE": "unranked",
+                "MELEE_SLIPPI_DIR": slp_dir,
+                "MELEE_SLIPPI_LOCAL_PEER": "1",
+                "MELEE_SLIPPI_LOCAL_PORT": str(port),
+                "MELEE_SLIPPI_PEER_PORT": str(peer),
+                "MELEE_SLIPPI_LOCAL_INDEX": "0" if name == "a" else "1",
+                "MELEE_SLIPPI_LOCAL_HOST": "1" if name == args.mm_decider else "0",
+            })
     if args.state_log:
         # Per-frame state dumps beside the logs, so a DESYNC can be diffed
         # field by field (src/pc/net_snapshot.c).
@@ -1271,6 +1309,10 @@ def run(args):
             ok = drive_scenes(a, b)
             if not ok:
                 print("net_test: scene drive failed (see logs)", flush=True)
+        elif args.mm:
+            ok = drive_mm(a, b)
+            if not ok:
+                print("net_test: matchmaking drive failed (see logs)", flush=True)
         elif args.lan:
             ok = drive_lan(a, b)
             if not ok:
