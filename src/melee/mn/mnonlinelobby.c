@@ -54,8 +54,8 @@ enum {
 
 #define KEY_X0 136.0f
 #define KEY_DX 48.0f
-#define KEY_Y0 200.0f
-#define KEY_DY 40.0f
+#define KEY_Y0 170.0f
+#define KEY_DY 38.0f
 
 static HSD_Text* lobby_text;
 static Line lines[line_count];
@@ -222,7 +222,7 @@ void mnOnlineLobby_Update(const OnlineLobbyView* view)
     }
     for (i = 0; i < ONLINE_LOBBY_KEY_ROWS * ONLINE_LOBBY_KEY_COLS; i++) {
         char key[2] = { 0, 0 };
-        if (view->screen == LOBBY_SCREEN_KEYS && view->keys != NULL) {
+        if (view->screen == LOBBY_SCREEN_KEYS && view->keys != NULL && i < (int) strlen(view->keys)) {
             key[0] = view->keys[i];
         }
         setLine(&lines[line_keys + i], key);

@@ -404,7 +404,97 @@ static void contacts_note(const char* code) {
         pc_log_line("match: could not save %s", path);
 }
 
+/* ---- Slippi side: the signed-in account and the codes it has played ---- */
+
+/* The Online menu asks about the account every frame it draws, and loading it
+ * reads a file, so look again at most once a second. */
+static bool slp_account_cached(PcSlippiAccount* out) {
+    static PcSlippiAccount cached;
+    static uint64_t at;
+    uint64_t now = SDL_GetTicks();
+    if (at == 0 || now - at > 1000) {
+        memset(&cached, 0, sizeof cached);
+        pc_slippi_account_load(&cached, true);
+        at = now ? now : 1;
+    }
+    *out = cached;
+    return cached.logged_in;
+}
+
+bool pc_net_match_slippi_ready(void) {
+    PcSlippiAccount a;
+    return slp_account_cached(&a);
+}
+
+const char* pc_net_match_slippi_code(void) {
+    static char code[PC_SLIPPI_CONNECT_CODE_MAX];
+    PcSlippiAccount a;
+    snprintf(code, sizeof code, "%s", slp_account_cached(&a) ? a.connect_code : "");
+    return code;
+}
+
+static PcNetContact s_slippi_contacts[PC_NET_CONTACTS_MAX];
+static int s_slippi_contact_count = -1; /* -1: not loaded */
+
+static void slippi_contacts_path(char* out, size_t n) {
+    snprintf(out, n, "%s/contacts.txt", pc_slippi_user_dir());
+}
+
+static void slippi_contacts_load(void) {
+    if (s_slippi_contact_count >= 0)
+        return;
+    s_slippi_contact_count = 0;
+    char path[1300];
+    slippi_contacts_path(path, sizeof path);
+    FILE* f = fopen(path, "r");
+    if (!f)
+        return;
+    char line[128];
+    while (s_slippi_contact_count < PC_NET_CONTACTS_MAX && fgets(line, sizeof line, f)) {
+        PcNetContact c = {0};
+        long long when = 0;
+        if (sscanf(line, "%17s %lld", c.code, &when) != 2 || !pc_slippi_connect_code_valid(c.code))
+            continue;
+        c.last_played = (int64_t)when;
+        s_slippi_contacts[s_slippi_contact_count++] = c;
+    }
+    fclose(f);
+}
+
+static void slippi_contacts_note(const char* code) {
+    slippi_contacts_load();
+    if (!pc_slippi_connect_code_valid(code))
+        return;
+    int at = s_slippi_contact_count < PC_NET_CONTACTS_MAX ? s_slippi_contact_count
+                                                           : PC_NET_CONTACTS_MAX - 1;
+    for (int i = 0; i < s_slippi_contact_count; i++)
+        if (!strcmp(s_slippi_contacts[i].code, code)) {
+            at = i;
+            break;
+        }
+    if (at == s_slippi_contact_count)
+        s_slippi_contact_count++;
+    memmove(&s_slippi_contacts[1], &s_slippi_contacts[0], (size_t)at * sizeof s_slippi_contacts[0]);
+    snprintf(s_slippi_contacts[0].code, sizeof s_slippi_contacts[0].code, "%s", code);
+    s_slippi_contacts[0].last_played = (int64_t)time(NULL);
+    char path[1300];
+    slippi_contacts_path(path, sizeof path);
+    SDL_CreateDirectory(pc_slippi_user_dir());
+    FILE* f = fopen(path, "w");
+    if (!f)
+        return;
+    for (int i = 0; i < s_slippi_contact_count; i++)
+        fprintf(f, "%s %lld\n", s_slippi_contacts[i].code, (long long)s_slippi_contacts[i].last_played);
+    fclose(f);
+}
+
 int pc_net_match_contacts(PcNetContact* out, int max) {
+    if (pc_net_match_slippi_ready()) {
+        slippi_contacts_load();
+        int n = s_slippi_contact_count < max ? s_slippi_contact_count : max;
+        memcpy(out, s_slippi_contacts, (size_t)n * sizeof *out);
+        return n;
+    }
     contacts_load();
     int n = contact_count < 0 ? 0 : contact_count < max ? contact_count : max;
     memcpy(out, contacts, (size_t)n * sizeof *out);
@@ -416,6 +506,16 @@ int pc_net_match_contacts(PcNetContact* out, int max) {
 bool pc_net_match_clipboard_code(char out[18]) {
     if (!SDL_HasClipboardText())
         return false;
+    if (pc_net_match_slippi_ready()) {
+        char* clip = SDL_GetClipboardText();
+        char code[PC_SLIPPI_CONNECT_CODE_MAX];
+        bool good = clip && pc_slippi_connect_code_normalize(clip, code, sizeof code) &&
+                    strcmp(code, pc_net_match_slippi_code()) != 0;
+        SDL_free(clip);
+        if (good)
+            snprintf(out, 18, "%s", code);
+        return good;
+    }
     char* text = SDL_GetClipboardText();
     char suffix[9], name[9];
     bool ok = text && pc_identity_parse_code(text, suffix, name) &&
@@ -427,7 +527,8 @@ bool pc_net_match_clipboard_code(char out[18]) {
 }
 
 bool pc_net_match_copy_code(void) {
-    const char* code = pc_net_match_local_code();
+    const char* code = pc_net_match_slippi_ready() ? pc_net_match_slippi_code()
+                                                   : pc_net_match_local_code();
     return code[0] && SDL_SetClipboardText(code);
 }
 
@@ -451,7 +552,10 @@ void pc_net_match_progress(PcNetMatchProgress* p) {
 static void ready(void) {
     state = PC_MATCH_READY;
     pc_net_set_datagram_handler(NULL);
-    contacts_note(opponent);
+    if (s_slippi_match)
+        slippi_contacts_note(opponent);
+    else
+        contacts_note(opponent);
 }
 
 static bool accept_ack(const MatchAck* a) {
@@ -636,9 +740,7 @@ static bool slp_mode(enum PcNetMatchMode m) {
     if (m == PC_MATCH_RANKED)
         return false;
     PcSlippiAccount account;
-    memset(&account, 0, sizeof account);
-    pc_slippi_account_load(&account, true);
-    return account.logged_in;
+    return slp_account_cached(&account);
 }
 
 /* Parse "ip:port". False on anything else (no port, empty host). */

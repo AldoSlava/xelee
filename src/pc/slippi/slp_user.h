@@ -66,6 +66,15 @@ bool pc_slippi_account_from_json(const char* text, size_t len, PcSlippiAccount* 
  * if the buffer is too small. Always NUL-terminates when cap > 0. */
 size_t pc_slippi_account_to_json(const PcSlippiAccount* a, char* out, size_t cap);
 
+/* True for a Slippi connect code as typed in Direct: a tag of 1-7 characters
+ * from A-Z and 0-9, a '#', then 1-3 digits ("ABCD#123"). Upper case only; use
+ * pc_slippi_connect_code_normalize() first for user input. */
+bool pc_slippi_connect_code_valid(const char* code);
+
+/* Trim and upper-case `in` into `out`, and report whether the result is a
+ * valid connect code. `out` is filled either way (best effort). */
+bool pc_slippi_connect_code_normalize(const char* in, char* out, size_t cap);
+
 /* The directory melee-pc keeps its Slippi files in. Resolution order:
  *   1. $MELEE_SLIPPI_DIR, when set (tests, and a player who moved it);
  *   2. <SDL pref dir>/Slippi, on desktop and Quest alike.

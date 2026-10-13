@@ -41,6 +41,11 @@ int32_t pc_net_match_start_frame(void);
 uint32_t pc_net_match_seed(void);
 const char* pc_net_match_local_code(void); /* the Slippi connect code during a Slippi search */
 bool pc_net_match_is_slippi(void);
+/* A Slippi account is signed in, so Unranked and Direct go through Slippi
+ * matchmaking and Direct takes Slippi connect codes ("ABCD#123"). */
+bool pc_net_match_slippi_ready(void);
+/* The signed-in account's connect code, "" when there is none. */
+const char* pc_net_match_slippi_code(void);
 /* The external stage ids a Slippi Unranked ticket allows (0 when the match is
  * not an Unranked Slippi one: players pick). */
 int pc_net_match_slippi_stages(uint16_t* out, int max);

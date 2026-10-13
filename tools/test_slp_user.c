@@ -185,7 +185,34 @@ static void test_discover_appimage_dir(void) {
     remove(path);
 }
 
+static void test_connect_codes(void) {
+    char out[32];
+    assert(pc_slippi_connect_code_valid("MERC#931"));
+    assert(pc_slippi_connect_code_valid("A#1"));
+    assert(pc_slippi_connect_code_valid("ABCDEFG#999"));
+    assert(pc_slippi_connect_code_valid("A1B2#07"));
+    assert(!pc_slippi_connect_code_valid("ABCDEFGH#1")); /* tag too long */
+    assert(!pc_slippi_connect_code_valid("#123"));       /* no tag */
+    assert(!pc_slippi_connect_code_valid("ABC#"));       /* no digits */
+    assert(!pc_slippi_connect_code_valid("ABC#1234"));   /* too many digits */
+    assert(!pc_slippi_connect_code_valid("ABC#12A"));    /* letters after the hash */
+    assert(!pc_slippi_connect_code_valid("abc#123"));    /* lower case */
+    assert(!pc_slippi_connect_code_valid("AB-C#123"));
+    assert(!pc_slippi_connect_code_valid("ABC123"));
+    assert(!pc_slippi_connect_code_valid("A#1#2"));
+    assert(!pc_slippi_connect_code_valid(""));
+    assert(!pc_slippi_connect_code_valid(NULL));
+    assert(pc_slippi_connect_code_normalize("  merc#931\n", out, sizeof out));
+    assert(strcmp(out, "MERC#931") == 0);
+    assert(pc_slippi_connect_code_normalize("merc#931 add me!", out, sizeof out));
+    assert(strcmp(out, "MERC#931") == 0);
+    assert(!pc_slippi_connect_code_normalize("hello world", out, sizeof out));
+    assert(!pc_slippi_connect_code_normalize(NULL, out, sizeof out));
+    assert(out[0] == '\0');
+}
+
 int main(void) {
+    test_connect_codes();
     test_discover_appimage_dir();
     test_parse_real();
     test_defaults();

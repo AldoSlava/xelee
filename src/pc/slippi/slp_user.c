@@ -256,6 +256,53 @@ static bool read_file(const char* path, char* out, size_t cap, size_t* len) {
     return true;
 }
 
+bool pc_slippi_connect_code_valid(const char* code) {
+    size_t i = 0;
+    size_t tag = 0;
+    size_t digits = 0;
+    if (code == NULL) {
+        return false;
+    }
+    for (; code[i] != '\0' && code[i] != '#'; i++, tag++) {
+        char c = code[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
+            return false;
+        }
+    }
+    if (tag < 1 || tag > 7 || code[i] != '#') {
+        return false;
+    }
+    for (i++; code[i] != '\0'; i++, digits++) {
+        if (code[i] < '0' || code[i] > '9') {
+            return false;
+        }
+    }
+    return digits >= 1 && digits <= 3;
+}
+
+bool pc_slippi_connect_code_normalize(const char* in, char* out, size_t cap) {
+    size_t n = 0;
+    if (cap == 0) {
+        return false;
+    }
+    out[0] = '\0';
+    if (in == NULL) {
+        return false;
+    }
+    while (*in == ' ' || *in == '\t' || *in == '\r' || *in == '\n') {
+        in++;
+    }
+    for (; *in != '\0' && n + 1 < cap; in++) {
+        char c = *in;
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            break; /* trailing text after the code is not part of it */
+        }
+        out[n++] = (c >= 'a' && c <= 'z') ? (char) (c - 'a' + 'A') : c;
+    }
+    out[n] = '\0';
+    return pc_slippi_connect_code_valid(out);
+}
+
 bool pc_slippi_account_load(PcSlippiAccount* out, bool rediscover) {
     account_clear(out);
     char path[1200];

@@ -27,6 +27,7 @@
 #include "pc/net_lan.h"
 #include "pc/net_identity.h"
 #include "pc/net_match.h"
+#include "pc/slippi/slp_user.h"
 #include "pc/net_rank_session.h"
 extern const char* pc_get_net_target(void);
 extern void pc_set_net_target(const char* code);
@@ -426,10 +427,29 @@ static bool internetLobby(void) {
 enum { DIRECT_OFF, DIRECT_HUB, DIRECT_KEYS };
 enum { ROW_PASTE, ROW_CONTACT, ROW_TYPE, ROW_WAIT };
 static const char direct_keys[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+/* A Slippi connect code: a tag of up to 7 letters/digits, '#', up to 3 digits. */
+#define DIRECT_SLIPPI_MAX 11
+static const char direct_keys_slippi[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#";
+static bool directSlippi(void)
+{
+    return pc_net_match_slippi_ready();
+}
+static const char* directKeys(void)
+{
+    return directSlippi() ? direct_keys_slippi : direct_keys;
+}
+static int directKeyCount(void)
+{
+    return (int) strlen(directKeys());
+}
+static const char* directOwnCode(void)
+{
+    return directSlippi() ? pc_net_match_slippi_code() : pc_net_match_local_code();
+}
 static int direct_screen;
 static int direct_cursor;       /* hub row */
 static int direct_key;          /* keyboard cell */
-static char direct_suffix[DIRECT_SUFFIX + 1];
+static char direct_suffix[DIRECT_SLIPPI_MAX + 1];
 static char direct_error[ONLINE_LOBBY_MSG_LEN];
 static char direct_clip[18];    /* a code seen on the clipboard, or "" */
 static PcNetContact direct_contacts[ONLINE_LOBBY_MENU_ROWS];
@@ -454,7 +474,11 @@ static void directHubBuild(void)
         direct_row_arg[direct_rows++] = i;
     }
     direct_row_kind[direct_rows++] = ROW_TYPE;
-    direct_row_kind[direct_rows++] = ROW_WAIT;
+    if (!directSlippi()) {
+        /* Slippi Direct connects two players who each type the other's code;
+         * there is no hosting without one. */
+        direct_row_kind[direct_rows++] = ROW_WAIT;
+    }
     if (direct_cursor >= direct_rows) {
         direct_cursor = 0;
     }
@@ -514,7 +538,7 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
     u64 repeat = gm_801A36C0(PAD_MAX_CONTROLLERS);
     char buf[ONLINE_LOBBY_MSG_LEN], shown[40];
 
-    directShow(shown, sizeof shown, pc_net_match_local_code());
+    directShow(shown, sizeof shown, directOwnCode());
     snprintf(view->subtitle, sizeof view->subtitle, "YOU %s", shown);
     view->phase = LOBBY_PHASE_FOUND;
 
@@ -563,6 +587,7 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
         snprintf(view->message, sizeof view->message, "%s",
                  direct_error[0] ? direct_error :
                  direct_copied ? "Your code is copied - send it to a friend" :
+                 directSlippi() ? "Enter your friend's connect code. They enter yours." :
                  "Pick who to play. Both of you can call each other.");
         view->hint = "A: select   Y: copy my code   B: back";
         if (input & HSD_PAD_Y) {
@@ -592,34 +617,61 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
         return direct_screen != DIRECT_OFF;
     }
 
-    /* KEYS: eight characters, A-Z and 2-7 (the code alphabet has no 0, 1,
-     * 8 or 9, so there is nothing to mistype them as). The grid wraps, so
-     * any key is at most six moves away. */
+    /* KEYS. A Slippi code is typed whole (letters and digits, one '#'); a DHT
+     * code is eight characters of A-Z and 2-7 (no 0, 1, 8 or 9, so there is
+     * nothing to mistype them as). The grid wraps either way. */
+    const bool slp = directSlippi();
+    const char* keys = directKeys();
+    const int nkeys = directKeyCount();
+    const int maxlen = slp ? DIRECT_SLIPPI_MAX : DIRECT_SUFFIX;
     int len = (int) strlen(direct_suffix);
     if (repeat & PAD_ANY_LEFT) {
         direct_key = direct_key / ONLINE_LOBBY_KEY_COLS * ONLINE_LOBBY_KEY_COLS +
                      (direct_key + ONLINE_LOBBY_KEY_COLS - 1) % ONLINE_LOBBY_KEY_COLS;
+        if (direct_key >= nkeys) {
+            direct_key = nkeys - 1;
+        }
         sfxMove();
     } else if (repeat & PAD_ANY_RIGHT) {
         direct_key = direct_key / ONLINE_LOBBY_KEY_COLS * ONLINE_LOBBY_KEY_COLS +
                      (direct_key + 1) % ONLINE_LOBBY_KEY_COLS;
+        if (direct_key >= nkeys) {
+            direct_key = direct_key / ONLINE_LOBBY_KEY_COLS * ONLINE_LOBBY_KEY_COLS;
+        }
         sfxMove();
     } else if (repeat & PAD_ANY_UP) {
-        direct_key = (direct_key + (int) sizeof direct_keys - 1 - ONLINE_LOBBY_KEY_COLS) %
-                     ((int) sizeof direct_keys - 1);
+        direct_key = (direct_key + nkeys - ONLINE_LOBBY_KEY_COLS) % nkeys;
         sfxMove();
     } else if (repeat & PAD_ANY_DOWN) {
-        direct_key = (direct_key + ONLINE_LOBBY_KEY_COLS) % ((int) sizeof direct_keys - 1);
+        direct_key = (direct_key + ONLINE_LOBBY_KEY_COLS) % nkeys;
         sfxMove();
     }
-    if ((input & HSD_PAD_A) && len < DIRECT_SUFFIX) {
-        direct_suffix[len++] = direct_keys[direct_key];
-        direct_suffix[len] = '\0';
-        direct_error[0] = '\0';
-        sfxForward();
+    if ((input & HSD_PAD_A) && len < maxlen) {
+        char key = keys[direct_key];
+        const char* hash = strchr(direct_suffix, '#');
+        const char* refuse = NULL;
+        if (slp && key == '#' && (len == 0 || hash != NULL)) {
+            refuse = len == 0 ? "A code starts with its name, then #" : "A code has only one #";
+        } else if (slp && hash != NULL && (key < '0' || key > '9')) {
+            refuse = "After the # only digits (1-3)";
+        } else if (slp && hash != NULL && (int) strlen(hash + 1) >= 3) {
+            refuse = "A code has at most 3 digits after the #";
+        } else if (slp && hash == NULL && len >= 7 && key != '#') {
+            refuse = "A name has at most 7 characters - press #";
+        }
+        if (refuse != NULL) {
+            snprintf(direct_error, sizeof direct_error, "%s", refuse);
+            sfxBack();
+        } else {
+            direct_suffix[len++] = key;
+            direct_suffix[len] = '\0';
+            direct_error[0] = '\0';
+            sfxForward();
+        }
     } else if (input & HSD_PAD_B) {
         if (len > 0) {
             direct_suffix[--len] = '\0';
+            direct_error[0] = '\0';
             sfxBack();
         } else {
             direct_screen = DIRECT_HUB; /* B on an empty code goes back a step */
@@ -627,21 +679,29 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
             return true;
         }
     } else if (input & HSD_PAD_START) {
-        if (len == DIRECT_SUFFIX) {
+        if (slp && pc_slippi_connect_code_valid(direct_suffix)) {
+            sfxForward();
+            directCall(direct_suffix);
+            return false;
+        } else if (!slp && len == DIRECT_SUFFIX) {
             char code[18];
             snprintf(code, sizeof code, "#%s", direct_suffix);
             sfxForward();
             directCall(code);
             return false;
         }
-        snprintf(direct_error, sizeof direct_error, "A code has 8 characters after the #");
+        snprintf(direct_error, sizeof direct_error, "%s",
+                 slp ? "A code looks like NAME#123" : "A code has 8 characters after the #");
         sfxBack();
     }
     view->screen = LOBBY_SCREEN_KEYS;
-    view->keys = direct_keys;
+    view->keys = keys;
     view->key_cursor = direct_key;
     view->menu_count = 1;
-    {
+    if (slp) {
+        snprintf(buf, sizeof buf, "Friend's code   %s_", direct_suffix);
+        snprintf(view->menu[0], sizeof view->menu[0], "%s", buf);
+    } else {
         char slots[DIRECT_SUFFIX + 1];
         for (int i = 0; i < DIRECT_SUFFIX; i++) {
             slots[i] = i < len ? direct_suffix[i] : '_';
@@ -652,6 +712,7 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
     }
     snprintf(view->message, sizeof view->message, "%s",
              direct_error[0] ? direct_error :
+             slp ? "Type their name, #, then their digits" :
              "Type the 8 characters after the #");
     view->hint = "A: type   B: delete   START: call";
     return true;
