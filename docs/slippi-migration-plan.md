@@ -5,7 +5,7 @@ implementation of Slippi's wire protocol, so this port can play against Slippi
 Dolphin and use Slippi Launcher, recon replays and the surrounding ecosystem.
 Ranked is explicitly out of scope (see §7).
 
-Status: **M1 + M2 done, M3 (game wiring + rollback) next.**
+Status: **M1 + M2 + M3 done; M4 (identity + matchmaking) next.**
 `docs/netcode-plan.md` remains the description of what exists today.
 
 Branch: **`slippi-net`**, cut from `quest-xr` at `2a1ec6b` (decision 4). All
@@ -305,15 +305,38 @@ against Slippi's ASM (see §6).**
 Verified: full `melee` target links; 6/6 `slp_*` ctests pass; the legacy
 `net_resume`/`net_handshake`/`net_reliable`/`net_lan_txt` tests still pass.
 
-**Remaining for M3:** the in-game seed/rules exchange and CSS selection sync
-currently ride the custom handshake; under Slippi those come from Slippi's own
-selections flow (M4). An actual local instance-vs-instance **match** over the
-Slippi transport (not just the transport tests) is the true M3 gate and still
-needs running.
+**M3 GATE MET** (`7cb0dfb`): a local melee-pc instance vs melee-pc instance
+match runs over the Slippi transport with rollback. `tools/net_test.py
+--slippi` (direct, loopback) plays 10800 frames: both peers log `net: test
+done`, 210-980 rollbacks per peer (max depth up to 7, lost 0), scenes hand off
+in lockstep, and `net: DESYNC` never fires. The desync gate is genuine, not
+vacuous: `net: first Slippi desync check at frame 534 (local 80030014 remote
+80030014)` proves nonzero matching Slippi checksums are being compared (the
+peer's wire checksum is fed into `s_rck`, our per-frame Slippi formula lives in
+`s_wire_ck_ring`, compared with `pc_slippi_checksum_is_hard_desync`).
 
-**Gate:** local instance-vs-instance match runs with rollback driven by the
-Slippi message flow; our own record/replay and `MELEE_NET_RESIM_AUDIT` show a
-pure tick and faithful re-simulation. Dolphin parity is proven later (§M5).
+Problems found and fixed while closing the gate:
+- `pc_net_connect_slippi` passed NULL callbacks to the driver, so setup and
+  every engine reliable message were silently dropped (pads survived because
+  the adapter polls the session directly). Now a callback struct forwards
+  `on_setup` -> `slp_setup_cb` and `on_rel` -> `rel_dispatch`.
+- The engine's lane-1 reliable lane (REL_SCENE scene hand-off, REL_DELAY,
+  REL_CHAT) still went out the absent custom socket (`sendto error 9`). It is
+  now tunnelled over ENet's reliable channel as `PC_SLIPPI_MSG_REL` (0xE2);
+  `on_rel`'s dispatch was extracted into `rel_dispatch` so both transports
+  share one consumer.
+- `s_slippi_wait_remote` never resent unacked inputs, so a peer waiting on a
+  frame the other had already sent-but-not-resent waited forever (froze near
+  frame 1200). Added `pc_slippi_session_resend` / adapter `resend_local`
+  (rebuild the whole unacked window, matching Slippi and the legacy wait) and
+  call it each wait iteration alongside `send_inputs`.
+
+**Deferred to M4:** the in-game seed/rules exchange and CSS selection sync now
+ride an interim melee-pc-only `PC_SLIPPI_MSG_SETUP` (0xE1, seed + start frame)
+instead of the custom RULES/READY. Slippi's own selections flow replaces it for
+Dolphin interop.
+
+**Gate:** MET. Dolphin parity is proven later (§M5).
 
 ### M4 — Identity + matchmaking
 `slp_user.c` (read Launcher `user.json`, REST refresh) and `slp_match.c`
