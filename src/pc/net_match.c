@@ -628,7 +628,7 @@ static bool slp_mode(enum PcNetMatchMode m) {
         return false;
     PcSlippiAccount account;
     memset(&account, 0, sizeof account);
-    pc_slippi_account_load(&account, false);
+    pc_slippi_account_load(&account, true);
     return account.logged_in;
 }
 
@@ -651,7 +651,7 @@ static bool split_addr(const char* addr, char* ip, size_t ip_cap, uint16_t* port
 static bool slp_start(enum PcNetMatchMode m, const char* code) {
     PcSlippiAccount account;
     memset(&account, 0, sizeof account);
-    pc_slippi_account_load(&account, false);
+    pc_slippi_account_load(&account, true);
     int mode = m == PC_MATCH_UNRANKED ? PC_SLIPPI_MODE_UNRANKED : PC_SLIPPI_MODE_DIRECT;
     s_slippi_search = pc_slippi_match_start(
         &account, mode, code ? code : "", (uint16_t)pc_match_local_port());

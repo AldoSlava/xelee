@@ -14,6 +14,8 @@
 #include "../src/pc/slippi/slp_user.c"
 
 #include <assert.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -156,7 +158,35 @@ static void test_login_unconfigured(void) {
     unsetenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT");
 }
 
+/* The Linux netplay AppImage keeps user.json under ~/.config/SlippiOnline,
+ * outside the Launcher's folder; discovery has to look there. */
+static void test_discover_appimage_dir(void) {
+    char root[] = "/tmp/slp_user_test_XXXXXX";
+    assert(mkdtemp(root) != NULL);
+    char path[512];
+    snprintf(path, sizeof path, "%s/.config", root);
+    mkdir(path, 0700);
+    snprintf(path, sizeof path, "%s/.config/SlippiOnline", root);
+    mkdir(path, 0700);
+    snprintf(path, sizeof path, "%s/.config/SlippiOnline/Slippi", root);
+    mkdir(path, 0700);
+    snprintf(path, sizeof path, "%s/.config/SlippiOnline/Slippi/user.json", root);
+    FILE* f = fopen(path, "w");
+    assert(f != NULL);
+    fputs("{\"uid\":\"u1\",\"playKey\":\"k\",\"connectCode\":\"ABC#123\","
+          "\"displayName\":\"abc\"}", f);
+    fclose(f);
+    setenv("HOME", root, 1);
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("MELEE_SLIPPI_DIR");
+    PcSlippiAccount a;
+    assert(pc_slippi_account_discover(&a));
+    assert(strcmp(a.connect_code, "ABC#123") == 0);
+    remove(path);
+}
+
 int main(void) {
+    test_discover_appimage_dir();
     test_parse_real();
     test_defaults();
     test_empty_is_logged_out();

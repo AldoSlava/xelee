@@ -369,6 +369,22 @@ bool pc_slippi_account_discover(PcSlippiAccount* out) {
             return true;
         }
     }
+    /* Linux: the Launcher's netplay Dolphin is an AppImage that keeps its
+     * user folder at ~/.config/SlippiOnline (or $XDG_CONFIG_HOME), outside the
+     * Launcher's own folder. */
+    char appimage[1400];
+    if (xdg != NULL && xdg[0] != '\0') {
+        snprintf(appimage, sizeof appimage, "%s/SlippiOnline/Slippi/user.json", xdg);
+        if (try_user_json(appimage, out)) {
+            return true;
+        }
+    }
+    if (home != NULL && home[0] != '\0') {
+        snprintf(appimage, sizeof appimage, "%s/.config/SlippiOnline/Slippi/user.json", home);
+        if (try_user_json(appimage, out)) {
+            return true;
+        }
+    }
     return false;
 }
 
