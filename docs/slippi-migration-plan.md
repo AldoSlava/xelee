@@ -5,8 +5,8 @@ implementation of Slippi's wire protocol, so this port can play against Slippi
 Dolphin and use Slippi Launcher, recon replays and the surrounding ecosystem.
 Ranked is explicitly out of scope (see §7).
 
-Status: **M1 + M2a/M2b done, M2c (ENet driver) next.** `docs/netcode-plan.md`
-remains the description of what exists today.
+Status: **M1 + M2 done, M3 (game wiring + rollback) next.**
+`docs/netcode-plan.md` remains the description of what exists today.
 
 Branch: **`slippi-net`**, cut from `quest-xr` at `2a1ec6b` (decision 4). All
 migration work happens here; `main` stays untouched until the branch is ready.
@@ -278,12 +278,13 @@ sessions together and pins the behaviour (ctest `slp_session`). Two parity
 details confirmed against upstream: the remote window returns the **oldest**
 selected frames, and the game-facing pad is **12** bytes (8 wire + 4 zero).
 
-**M2c next:** `slp_net.c` — the ENet driver around the core: `enet_host_create`
-(3 channels), connect/handshake, the receive thread, message dispatch to the
-core, and the send paths (pads unsequenced ch1, inline ack ch2, reliable ch0).
-Driven from a headless harness (`tools/`), not the game yet.
-**Gate:** two instances exchange pads and selections for a scripted match; log
-shows ping/offset sampling matching the reference formula.
+**M2c done** (`e11587b`): `src/pc/slippi/slp_net.{c,h}` — the ENet driver
+(`enet_host_create` 10 peers / 3 channels, connect/disconnect, dispatch,
+send-channel choice: pads+acks unsequenced, rest reliable).
+`tools/test_slp_net.c` runs P1↔P2 over loopback: selections, a pad reaching P2,
+and the ack returning to P1 (ctest `slp_net`, ~15 µs ping). `melee_enet` is now
+linked into the `melee` target.
+**M2 gate met.** Next: M3 (game-side wiring + rollback parity).
 
 ### M3 — Game-side wiring + rollback parity
 Adapter + native Slippi behaviour: input delay, stall/capture/load cadence,
