@@ -141,7 +141,7 @@ class Instance:
             "MELEE_CACHE_DIR": cache,
             "MELEE_WINDOW_TITLE": f"melee-net-{name}",
             "MELEE_KEY_FIFO": self.fifo,
-            "MELEE_SEED": "7",
+            "MELEE_SEED": os.environ.get("MELEE_SEED_" + name.upper(), "7"),  # _A/_B: per-instance
             "MELEE_FPS": "1",  # one line per second: the rate the drive scales its holds by
             "MELEE_NET_RECORD": self.rec_path,  # per-frame pads + checksum, for check_match()
         })

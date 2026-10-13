@@ -2537,6 +2537,12 @@ bool pc_net_connect_slippi(
     /* Default: P1 sends the setup. A matchmaking session overrides this from
      * the ticket's decider flag (pc_net_slippi_set_setup_host). */
     s_slippi_setup_host = net.local == 0;
+    /* Test hook: MELEE_SLIPPI_SETUP_PORT=1|2 names the port that sends the
+     * setup (both peers set the same value), to exercise a non-P1 decider. */
+    const char* setup_port = getenv("MELEE_SLIPPI_SETUP_PORT");
+    if (setup_port && (setup_port[0] == '1' || setup_port[0] == '2')) {
+        s_slippi_setup_host = net.local == setup_port[0] - '1';
+    }
     net.connect_timeout_ms = MATCH_CONNECT_TIMEOUT_MS;
     const char* delay = getenv("MELEE_NET_DELAY");
     net.delay_auto = delay ? strcmp(delay, "auto") == 0 : s_configured_delay < 0;
