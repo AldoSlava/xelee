@@ -53,7 +53,8 @@ netplay protocol", not the Launcher's UI.
   satisfy, not code to reuse. It owns the `user.json` account file (uid,
   playKey, connectCode, displayName) that Slippi clients read for login, the
   replay folder layout, and the login/refresh REST endpoints. We read its
-  identity files exactly as Melee Unlocked does (`slippi_net.cpp:220-249`).
+  identity files exactly as Melee Unlocked does (`slippi_net.cpp:220-249`) — as
+  a desktop fallback; our own account store is primary.
 - **`Hero88go/melee-unlocked`** (GPL-2.0-or-later for the ported Dolphin/Slippi
   files, per `NOTICE`): the reference implementation. A native decomp with:
   - `port/runtime/hle/slippi_net.{h,cpp}` — ~1.6k lines, a from-scratch,
@@ -202,8 +203,11 @@ shape (`src/pc/net_internal.h:130-135`) — the pad encoding is already Slippi's
    `0x221` connect codes, `0x249` Slippi UIDs, `0x2BE` session id, `0x2F1` game
    number, `0x2F5` tiebreaker (`slp_format.c:151-155`) from the session, so our
    `.slp` files are indistinguishable from Dolphin's online replays.
-5. **Launcher-facing identity** — read/write the Slippi Launcher user directory
-   layout; surface connect code in the menu.
+5. **Account identity (launcher) vs match initiation (Melee UI)** — the
+   launcher's online tab owns *only* authentication: login/logout and showing
+   your connect code. Everything that starts a match stays in the game's own
+   Online menu (`mn/mnonline.c` → `gm/gmonlinemode.c`), as in real Slippi and
+   Melee Unlocked. See §4 "UI split" for why.
 
 ## 4. Target architecture and the seam
 
@@ -244,6 +248,63 @@ and the new one coexist behind a build/runtime switch during the migration.
 **A/B switch.** Add `MELEE_NET_STACK=slippi|legacy` (default `legacy` until
 parity, then `slippi`), so regression tests and the current LAN/Direct flows
 keep working throughout.
+
+### UI split — auth in the launcher, matches in the Melee UI
+
+Two surfaces, and each owns exactly one concern:
+
+- **Authentication — the launcher overlay** (`resources/launcher.rml`,
+  `port-menu.rml`; RmlUi, drawn before the game starts). Login, logout, and
+  displaying the account's connect code. This is also where on-device
+  credential entry lives (`slp_user`'s own account store). It writes our store
+  and, on desktop, may *discover* an existing Slippi Launcher `user.json` as a
+  convenience. It must not start, search for, or configure a match.
+- **Match flow — the game's Online menu** (`src/melee/mn/mnonline.c` →
+  `src/melee/gm/gmonlinemode.c`). LAN / Direct / Unranked / Ranked selection,
+  the Direct hub and its code-entry keyboard, the search/browse screens, and
+  the `pc_net_match_start(...)` / `slp_match` calls. This is where a match
+  begins, and it is unchanged from the existing port except for the backend.
+
+Why: (1) it matches the ecosystem — Slippi Dolphin has no external match UI, and
+Melee Unlocked drives matchmaking from inside the game; (2) the game is the only
+surface on **Quest**, where the desktop Slippi Launcher cannot run at all, so a
+launcher-only match flow would break the primary target; (3) the launcher is not
+running while the game plays, so it cannot host a search or lobby that must
+outlive the boot.
+
+This also disambiguates "launcher". The auth surface is **our** RmlUi overlay,
+which runs on every target. The **Slippi Electron Launcher** is a separate,
+desktop-only program we never invoke; at most we read a `user.json` it left
+behind, and only as a fallback.
+
+#### Login flow (launcher auth surface)
+
+Slippi has no OAuth redirect we can use from the game; the account is a
+Firebase email/password identity, and the playKey is a backend secret. So the
+login is three plain HTTPS calls (no Firebase SDK needed — the same calls the
+Slippi Launcher makes):
+
+1. **Sign in** — `POST https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=<FIREBASE_API_KEY>`
+   with `{email, password, returnSecureToken:true}` → an **ID token** and the
+   Firebase **uid** (`localId`).
+2. **Fetch the account** — `POST <SLIPPI_GRAPHQL_ENDPOINT>` with
+   `Authorization: Bearer <idToken>` and `getUserKeyQuery($fbUid)` →
+   `displayName`, `connectCode.code`, `private.playKey`, and
+   `getLatestDolphin.version`.
+3. **Store** — write `slp_user`'s own account file (uid, playKey, connectCode,
+   displayName, latestVersion, chat). Best-effort `slp_user` REST refresh keeps
+   the display name/version current afterwards.
+
+Config (no secrets in the repo): `FIREBASE_API_KEY` and
+`SLIPPI_GRAPHQL_ENDPOINT` are build/runtime configuration, exactly as the
+Slippi Launcher takes them from its environment. When either is absent the auth
+surface reports "online login unavailable" and the in-game menu still offers
+Direct with a manual connect code (decision 2).
+
+On-device UX: the launcher online tab becomes **email + password + a Sign in
+button**, then shows the connect code and a Sign out button. No match fields.
+On desktop, if no account is stored and a Slippi Launcher `user.json` is found,
+offer "Use this computer's account" as the fallback path.
 
 ## 5. Phased plan
 
@@ -339,11 +400,20 @@ Dolphin interop.
 **Gate:** MET. Dolphin parity is proven later (§M5).
 
 ### M4 — Identity + matchmaking
-`slp_user.c` (read Launcher `user.json`, REST refresh) and `slp_match.c`
-(Unranked + Direct on `mm.slippi.gg:43113`). Version gate against the server's
-advertised Slippi version.
+Two halves, split by surface (§4 "UI split"):
+
+- **Auth (launcher overlay):** `slp_user.c` — our own account store is
+  first-class (Quest has no Slippi Launcher), with a desktop `user.json`
+  discovery fallback; REST refresh; on-device login UI. This is the only online
+  concern the launcher owns.
+- **Matchmaking (Melee UI):** `slp_match.c` — Unranked + Direct on
+  `mm.slippi.gg:43113`, initiated from `gm/gmonlinemode.c` as it is today. The
+  interim `PC_SLIPPI_MSG_SETUP` is replaced by Slippi's own selections flow;
+  version gate against the server's advertised Slippi version.
+
 **Gate:** a real Unranked ticket is accepted and a match id + peer endpoint are
-returned; Direct connect succeeds between two of our instances.
+returned; Direct connect succeeds between two of our instances — both started
+from the in-game Online menu, not the launcher.
 
 ### M5 — Cross-play verification (the whole point)
 1. Our instance vs our instance over the real matchmaking servers, full game.
@@ -450,7 +520,7 @@ Agreed and baked in:
 | 2 | Central dependency: `mm.slippi.gg` can change, rate-limit or die; unknown-message and version-gate behaviour must degrade gracefully. | Follow `slippi_version.h` gating; keep Direct (endpoint) working without matchmaking. Keep the legacy stack on the branch until M6, then remove it (decision 1). |
 | 3 | Slippi protocol version drift (we pin `SLIPPI_SEMVER`; Dolphin may move). | **Decided: pin to a specific Slippi release** (reference pins 3.6.4; pick the current stable release at M1). Single constant in `slp_proto.h`; refresh from the server, refuse on newer. Keeping it current for compatibility is explicitly our responsibility (decision 3). |
 | 4 | ENet vendoring on all platforms (Windows/macOS/Android/iOS) — new C dependency in a tree that currently has none. | ENet is portable C with existing Android/macOS support; add to `CMakeLists.txt` and CI matrix. |
-| 5 | Account requirement: Slippi matchmaking needs a Slippi Launcher login. | Read `user.json`; allow Direct with an arbitrary code when no account exists. |
+| 5 | Account requirement: Slippi matchmaking needs a Slippi account (uid/playKey/connectCode). | Own account store first-class (works on Quest, no Slippi Launcher needed); desktop `user.json` discovery as a fallback. Direct stays usable with an arbitrary code when no account exists. |
 | 6 | Licensing/attribution for ported GPL-2.0-or-later code. | §9. |
 | 7 | We give up distinct strengths (serverless DHT, signed rating) for internet interop, while keeping LAN. | Intentional per this decision. Legacy internet modules stay behind the mode/`MELEE_NET_STACK` selector until M6; LAN keeps using them permanently. |
 | 8 | Determinism across our build and Dolphin's is not the same as determinism within our builds. | M5 is the only test that counts. Our record/replay proves our internal purity first. |
@@ -465,7 +535,9 @@ Agreed and baked in:
    two transports — legacy for LAN, Slippi for Unranked/Direct — selected by
    mode. `MELEE_NET_STACK` stays as that selector; the DHT/ranked modules do not.
 2. **Identity: account-gated Unranked is acceptable.** Unranked matchmaking
-   requires a Slippi Launcher account (`user.json`); Direct must remain usable
+   requires a Slippi account (uid/playKey/connectCode). The account is stored in
+   our own file, entered through the launcher's auth UI (Quest included), with
+   desktop `user.json` discovery as a fallback. Direct must remain usable
    without one (manual endpoint / code).
 3. **Version policy: pin to a release.** Pin `SLIPPI_SEMVER` to a specific
    current Slippi release and keep it updated ourselves — compatibility is our

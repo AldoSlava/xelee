@@ -460,3 +460,182 @@ void pc_slippi_account_refresh_async(const PcSlippiAccount* a) {
     }
     SDL_DetachThread(t);
 }
+
+/* ---- login (launcher auth surface) ----------------------------------- */
+
+/* The Firebase identity toolkit endpoint. Sign-in is one POST that returns an
+ * ID token and the Firebase uid; both are needed for the GraphQL query. This
+ * is exactly the call the Slippi Launcher's Firebase SDK makes underneath. */
+#define PC_SLIPPI_FIREBASE_SIGNIN \
+    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s"
+
+/* The account fields the GraphQL query asks for, with $fbUid substituted. */
+#define PC_SLIPPI_GET_USER_QUERY                                                              \
+    "{\"query\":\"query getUserKeyQuery($fbUid: String) { getUser(fbUid: $fbUid) { "         \
+    "fbUid displayName connectCode { code } private { playKey } } getLatestDolphin { "        \
+    "version } }\",\"variables\":{\"fbUid\":\"%s\"}}"
+
+bool pc_slippi_account_login_available(void) {
+    const char* key = getenv("MELEE_SLIPPI_FIREBASE_KEY");
+    const char* gql = getenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT");
+    return key != NULL && key[0] != '\0' && gql != NULL && gql[0] != '\0';
+}
+
+/* Escape a string for embedding in a JSON string literal, into a bounded
+ * buffer. Email addresses and passwords are ASCII in practice, but a password
+ * may contain a quote or backslash, which must not break the request. */
+static bool login_json_escape(const char* s, char* out, size_t cap) {
+    size_t w = 0;
+    for (const unsigned char* p = (const unsigned char*)s; *p != '\0'; p++) {
+        char esc[8];
+        const char* add = NULL;
+        switch (*p) {
+        case '"': add = "\\\""; break;
+        case '\\': add = "\\\\"; break;
+        case '\n': add = "\\n"; break;
+        case '\r': add = "\\r"; break;
+        case '\t': add = "\\t"; break;
+        default:
+            if (*p < 0x20) {
+                snprintf(esc, sizeof esc, "\\u%04x", *p);
+                add = esc;
+            }
+            break;
+        }
+        const char* src = add != NULL ? add : (const char*)p;
+        size_t n = add != NULL ? strlen(add) : 1;
+        if (w + n >= cap) {
+            return false;
+        }
+        memcpy(out + w, src, n);
+        w += n;
+    }
+    out[w] = '\0';
+    return true;
+}
+
+bool pc_slippi_account_login(const char* email, const char* password, PcSlippiAccount* out,
+                             char* err, size_t err_cap) {
+    if (out != NULL) {
+        account_clear(out);
+    }
+    if (err != NULL && err_cap > 0) {
+        err[0] = '\0';
+    }
+    const char* key = getenv("MELEE_SLIPPI_FIREBASE_KEY");
+    const char* gql = getenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT");
+    if (key == NULL || key[0] == '\0' || gql == NULL || gql[0] == '\0') {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, "Online login is not configured in this build");
+        }
+        return false;
+    }
+    if (email == NULL || email[0] == '\0' || password == NULL || password[0] == '\0') {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, "Enter your Slippi email and password");
+        }
+        return false;
+    }
+
+    /* 1. Firebase sign-in -> ID token + uid. */
+    char url[512];
+    int n = snprintf(url, sizeof url, PC_SLIPPI_FIREBASE_SIGNIN, key);
+    char em[256], pw[256];
+    if (n < 0 || (size_t)n >= sizeof url || !login_json_escape(email, em, sizeof em) ||
+        !login_json_escape(password, pw, sizeof pw)) {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, "Login credentials are too long");
+        }
+        return false;
+    }
+    char body[768];
+    snprintf(body, sizeof body,
+             "{\"email\":\"%s\",\"password\":\"%s\",\"returnSecureToken\":true}", em, pw);
+    char* resp = (char*)malloc(16384);
+    if (resp == NULL) {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, "Out of memory");
+        }
+        return false;
+    }
+    /* The API key is a URL parameter and the body is a secret pair; neither is
+     * ever logged here. */
+    int status = 0;
+    if (!pc_slippi_http_post_json(url, body, NULL, resp, 16384, &status) || status != 200) {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, status == 400 ? "Wrong email or password"
+                                                 : "Could not reach Slippi login");
+        }
+        free(resp);
+        return false;
+    }
+    char id_token[4096];
+    char fb_uid[PC_SLIPPI_UID_MAX];
+    PcSlippiJson* root = NULL;
+    char jerr[48];
+    bool token_ok = pc_slippi_json_parse(resp, strlen(resp), &root, jerr, sizeof jerr);
+    if (token_ok) {
+        pc_slippi_json_string(pc_slippi_json_get(root, "idToken"), id_token, sizeof id_token);
+        pc_slippi_json_string(pc_slippi_json_get(root, "localId"), fb_uid, sizeof fb_uid);
+        token_ok = id_token[0] != '\0' && fb_uid[0] != '\0';
+        pc_slippi_json_free(root);
+    }
+    if (!token_ok) {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, "Slippi login returned an unexpected reply");
+        }
+        free(resp);
+        return false;
+    }
+
+    /* 2. GraphQL getUserKeyQuery -> connect code, playKey, display name. */
+    char gql_body[1024];
+    snprintf(gql_body, sizeof gql_body, PC_SLIPPI_GET_USER_QUERY, fb_uid);
+    if (!pc_slippi_http_post_json(gql, gql_body, id_token, resp, 16384, &status) ||
+        status != 200) {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, "Could not fetch your Slippi account");
+        }
+        free(resp);
+        return false;
+    }
+
+    PcSlippiAccount a;
+    account_clear(&a);
+    snprintf(a.uid, sizeof a.uid, "%s", fb_uid);
+    bool got = false;
+    if (pc_slippi_json_parse(resp, strlen(resp), &root, jerr, sizeof jerr)) {
+        const PcSlippiJson* data = pc_slippi_json_get(root, "data");
+        const PcSlippiJson* user = pc_slippi_json_get(data, "getUser");
+        if (user != NULL && user->type == PC_SLIPPI_JSON_OBJECT) {
+            pc_slippi_json_string(pc_slippi_json_get(user, "displayName"), a.display_name,
+                                  sizeof a.display_name);
+            pc_slippi_json_string(
+                pc_slippi_json_get(pc_slippi_json_get(user, "connectCode"), "code"),
+                a.connect_code, sizeof a.connect_code);
+            pc_slippi_json_string(
+                pc_slippi_json_get(pc_slippi_json_get(user, "private"), "playKey"), a.play_key,
+                sizeof a.play_key);
+            pc_slippi_json_string(
+                pc_slippi_json_get(pc_slippi_json_get(data, "getLatestDolphin"), "version"),
+                a.latest_version, sizeof a.latest_version);
+            got = a.connect_code[0] != '\0' && a.play_key[0] != '\0';
+        }
+        pc_slippi_json_free(root);
+    }
+    free(resp);
+    if (!got) {
+        if (err != NULL && err_cap > 0) {
+            snprintf(err, err_cap, "This account has no Slippi connect code yet. "
+                                   "Finish setup on slippi.gg, then sign in again");
+        }
+        return false;
+    }
+    a.logged_in = true;
+    pc_slippi_account_default_chat(&a);
+    pc_slippi_account_save(&a);
+    if (out != NULL) {
+        *out = a;
+    }
+    return true;
+}

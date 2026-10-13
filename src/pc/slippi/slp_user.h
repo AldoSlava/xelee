@@ -105,6 +105,22 @@ bool pc_slippi_http_get(const char* url, const char* bearer, char* out, size_t c
 bool pc_slippi_http_post_json(const char* url, const char* body, const char* bearer, char* out,
                               size_t cap, int* status);
 
+/* ---- login (launcher auth surface) ----------------------------------- */
+
+/* True when the login flow is configured: the Firebase API key and the Slippi
+ * GraphQL endpoint are both set (MELEE_SLIPPI_FIREBASE_KEY,
+ * MELEE_SLIPPI_GRAPHQL_ENDPOINT). When false the launcher offers Direct with a
+ * manual code instead of Unranked. */
+bool pc_slippi_account_login_available(void);
+
+/* Log in with a Slippi (Firebase) email/password and fetch the account fields.
+ * This is blocking (two HTTPS round trips), so call it off the main thread.
+ * Returns true and fills `out` on success; on failure returns false and writes
+ * a human-readable reason into `err` (up to err_cap). On success the account is
+ * saved to our store. See docs/slippi-migration-plan.md for the two calls. */
+bool pc_slippi_account_login(const char* email, const char* password, PcSlippiAccount* out,
+                             char* err, size_t err_cap);
+
 #ifdef __cplusplus
 }
 #endif

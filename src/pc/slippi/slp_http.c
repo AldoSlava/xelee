@@ -6,6 +6,7 @@
  * file". This is not on the per-frame path. */
 #include "pc/slippi/slp_user.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(MELEE_USE_CURL) && defined(_WIN32)
@@ -70,13 +71,18 @@ static bool http_request(const char* url, const char* body, const char* bearer, 
     }
     Sink sink = {out, cap, 0, false};
     struct curl_slist* headers = NULL;
-    char auth[512];
+    /* A Slippi ID token is a JWT, commonly over 1 KB, so this must not be a
+     * small fixed buffer that silently drops the header and fails the login. */
+    char* auth = NULL;
     if (bearer != NULL && bearer[0] != '\0') {
-        if (strlen(bearer) + 8 >= sizeof auth) {
+        static const char kPrefix[] = "Authorization: Bearer ";
+        size_t need = strlen(bearer) + sizeof kPrefix;
+        auth = (char*)malloc(need);
+        if (auth == NULL) {
             curl_easy_cleanup(curl);
             return false;
         }
-        snprintf(auth, sizeof auth, "Authorization: Bearer %s", bearer);
+        snprintf(auth, need, "%s%s", kPrefix, bearer);
         headers = curl_slist_append(headers, auth);
     }
     if (post) {
@@ -107,6 +113,7 @@ static bool http_request(const char* url, const char* body, const char* bearer, 
     if (headers != NULL) {
         curl_slist_free_all(headers);
     }
+    free(auth);
     curl_easy_cleanup(curl);
     return rc == CURLE_OK;
 }

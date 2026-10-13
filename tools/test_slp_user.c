@@ -132,12 +132,37 @@ static void test_hostile(void) {
     assert(a.uid[0] == '\0');
 }
 
+static void test_login_unconfigured(void) {
+    /* No FIREBASE_KEY / GRAPHQL_ENDPOINT in the test env: login must refuse
+     * cleanly, not attempt a request, and say why. */
+    unsetenv("MELEE_SLIPPI_FIREBASE_KEY");
+    unsetenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT");
+    assert(!pc_slippi_account_login_available());
+    PcSlippiAccount a;
+    char err[128];
+    assert(!pc_slippi_account_login("a@b.c", "pw", &a, err, sizeof err));
+    assert(err[0] != '\0');
+    /* Empty credentials are refused too, once configured. */
+    setenv("MELEE_SLIPPI_FIREBASE_KEY", "k", 1);
+    setenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT", "https://example.test/gql", 1);
+    assert(pc_slippi_account_login_available());
+    assert(!pc_slippi_account_login("", "", &a, err, sizeof err));
+    assert(strstr(err, "email") != NULL);
+    /* Configured, but the HTTP edge is stubbed to fail: a clean failure with a
+     * message, never a crash. */
+    assert(!pc_slippi_account_login("a@b.c", "pw", &a, err, sizeof err));
+    assert(err[0] != '\0');
+    unsetenv("MELEE_SLIPPI_FIREBASE_KEY");
+    unsetenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT");
+}
+
 int main(void) {
     test_parse_real();
     test_defaults();
     test_empty_is_logged_out();
     test_round_trip();
     test_hostile();
+    test_login_unconfigured();
     printf("slp_user: all tests passed\n");
     return 0;
 }
