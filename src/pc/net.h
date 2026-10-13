@@ -61,6 +61,13 @@ void pc_net_poll(void);
  * transfers on success only; no new NAT mapping is created. */
 bool pc_net_connect_socket(
     intptr_t socket, const char* ip, uint16_t port, int player, uint32_t seed);
+/* Connect over the Slippi transport (MELEE_NET_STACK=slippi,
+ * docs/slippi-migration-plan.md). Uses the Slippi ENet protocol; the game-side
+ * rollback/barrier/ring machinery is unchanged. `local_udp_port` 0 lets ENet
+ * pick one (a direct dial); a matchmaking hole punch passes the lobby's port.
+ * `ip` of NULL or empty listens only. */
+bool pc_net_connect_slippi(
+    const char* ip, uint16_t port, int player, uint32_t seed, uint16_t local_udp_port);
 /* Offered every IPv4 datagram on the session socket before the session sees
  * it; true consumes it. Runs on net.c's receive thread, and
  * pc_net_set_datagram_handler() returns only once no call into the previous

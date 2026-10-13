@@ -532,6 +532,20 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
                 target_sources(${case}_test PRIVATE extern/monocypher/monocypher.c)
                 target_include_directories(${case}_test PRIVATE extern/monocypher)
             endif()
+            if (case STREQUAL "net_resume")
+                # net_resume includes net.c itself, which now references the
+                # Slippi transport (src/pc/slippi/). Compile those sources in
+                # and link ENet; the test does not include them itself.
+                target_sources(${case}_test PRIVATE
+                        src/pc/slippi/slp_packet.c
+                        src/pc/slippi/slp_msg.c
+                        src/pc/slippi/slp_session.c
+                        src/pc/slippi/slp_net.c
+                        src/pc/slippi/slp_checksum.c
+                        src/pc/slippi/slp_adapter.c)
+                target_include_directories(${case}_test PRIVATE extern/enet/include)
+                target_link_libraries(${case}_test PRIVATE melee_enet)
+            endif()
             target_include_directories(${case}_test PRIVATE extern/aurora/include src src/sdk_include)
             target_compile_definitions(${case}_test PRIVATE TARGET_PC=1 MELEE_PC=1 AURORA NDEBUG XXH_INLINE_ALL)
             target_link_libraries(${case}_test PRIVATE ${AURORA_SDL3_TARGET} xxhash)

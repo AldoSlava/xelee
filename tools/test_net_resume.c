@@ -333,6 +333,11 @@ uint32_t frame_checksum(const PADStatus* head) {
     (void)head;
     return 0;
 }
+/* net_snapshot.c: the Slippi wire checksum, referenced by net.c's Slippi
+ * send path. This test drives the legacy transport, so a stub is enough. */
+uint32_t pc_slippi_wire_checksum(void) {
+    return 0;
+}
 void record_state(const PADStatus* head, int32_t frame) {
     (void)head;
     (void)frame;

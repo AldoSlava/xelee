@@ -395,6 +395,13 @@ struct NetSession {
 
     /* sync test (net_snapshot.c) */
     bool synctest;
+
+    /* Slippi transport (MELEE_NET_STACK=slippi, src/pc/slippi/). When true,
+     * the send/receive/wait paths below go through the Slippi ENet driver and
+     * its adapter instead of the custom UDP socket, while the rollback loop,
+     * snapshot ring, barrier and pad handling stay exactly as they are. `sock`
+     * is SOCK_INVALID under Slippi (there is no custom socket). */
+    bool slippi;
 };
 extern struct NetSession net;
 

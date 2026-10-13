@@ -30,6 +30,7 @@
 #include "pc/file_cache.h"
 #include "pc/net_internal.h"
 #include "pc/net_sfx.h"
+#include "pc/slippi/slp_adapter.h"
 
 #include <dolphin/ar.h>
 #include <dolphin/os.h>
@@ -63,6 +64,22 @@ static int32_t s_remote_have = -1;   /* newest contiguous real remote frame */
 static int32_t s_remote_newest = -1; /* newest frame the peer reported holding */
 static int32_t s_last_acked = -1;    /* newest local frame the peer holds */
 static int32_t s_rb_frame = -1;      /* oldest mispredicted frame not rolled back yet */
+
+/* Slippi transport (MELEE_NET_STACK=slippi, docs/slippi-migration-plan.md
+ * section 6). When s_slippi_on is set, the socket send/receive/wait paths go
+ * through the Slippi ENet driver and its adapter; the rollback loop, snapshot
+ * ring, barrier, pad handling and time-sync estimator stay exactly as they
+ * are, because the Slippi frame callback below feeds the same s_remote_ring /
+ * s_remote_have / s_rb_frame state the custom transport's on_inputs does. */
+static bool s_slippi_on;
+static PcSlippiAdapter s_slippi;
+static bool s_slippi_ever_heard;
+static uint64_t s_slippi_now_us(void);
+/* Defined below, after simulated_upto()/s_local_ring are in scope; forward
+ * declared here because send_inputs() (earlier in the file) branches to one. */
+static void s_slippi_send_inputs(void);
+static bool s_slippi_recv(void);
+static bool s_slippi_wait_remote(int32_t need);
 /* The peer's checksums by frame. Each input packet reports one frame, the
  * newest it has confirmed, and that is often ahead of ours; a single slot
  * overwritten by every packet meant those frames were never compared from
@@ -439,6 +456,10 @@ static Uint32 SDLCALL tx_timer(void* ud, SDL_TimerID id, Uint32 interval) {
 }
 
 static void send_inputs(void) {
+    if (s_slippi_on) {
+        s_slippi_send_inputs();
+        return;
+    }
     /* The local sample taken at frame f is the input for frame f + delay. */
     int32_t newest = s_wrote;
     if (newest < 0) {
@@ -737,6 +758,135 @@ static void on_inputs(const Packet* pk, bool reordered) {
     }
     if (pk->newest > s_remote_newest) {
         s_remote_newest = pk->newest;
+    }
+}
+
+/* ---- Slippi transport (MELEE_NET_STACK=slippi) ------------------------
+ * The adapter delivers every newly-arrived contiguous remote frame, oldest
+ * first, exactly the loop on_inputs runs over a legacy packet's pads. This
+ * applies one frame to the same ring state, so the rollback loop above is
+ * unchanged. It is the ONLY place the Slippi transport writes remote input. */
+static void slp_frame_cb(void* user, int remote_slot, int32_t frame,
+                         const uint8_t pad[PC_SLIPPI_PAD_DATA_SIZE]) {
+    (void)user;
+    (void)remote_slot;
+    /* The local peer occupies one port, so in a 1v1 there is a single remote
+     * pad per frame; WirePad and the 8 wire bytes are the same layout. */
+    WirePad wp;
+    memcpy(&wp, pad, sizeof wp);
+    WirePad* slot = &s_remote_ring[frame & (RING - 1)];
+    int32_t upto = simulated_upto();
+    if (frame <= upto && memcmp(slot, &wp, sizeof wp) != 0 &&
+        (s_rb_frame < 0 || frame < s_rb_frame)) {
+        s_rb_frame = frame;
+    }
+    *slot = wp;
+    s_remote_have = frame;
+    s_progress_ns = SDL_GetTicksNS();
+    /* The remote reported this frame as delivered, so it is the newest we can
+     * use; the Slippi "newest" is the highest delivered frame. */
+    if (frame > s_remote_newest) {
+        s_remote_newest = frame;
+    }
+}
+
+/* Monotonic microseconds for the Slippi clock-offset sample. */
+static uint64_t s_slippi_now_us(void) {
+    return SDL_GetTicksNS() / 1000ull;
+}
+
+/* One Slippi pump: service ENet and deliver any new contiguous frames through
+ * slp_frame_cb. No-op unless the Slippi transport is in force. */
+static bool s_slippi_pump(void) {
+    if (!s_slippi_on) {
+        return false;
+    }
+    return pc_slippi_adapter_pump(&s_slippi, s_slippi_now_us());
+}
+
+/* Newest local frame handed to the Slippi session. The session sends its whole
+ * unacked window each call, so we queue every new frame since the last send
+ * (normally one) and let it assemble the packet. The engine's delay convention
+ * is already inside s_wrote (write_head writes frame + delay), which matches
+ * Slippi's handleSendInputs (sample f is sent as frame f + delay). */
+static int32_t s_slippi_sent_upto = -1;
+
+static void s_slippi_send_inputs(void) {
+    if (s_wrote < 0 || !pc_slippi_adapter_connected(&s_slippi)) {
+        return;
+    }
+    /* The finalized-frame checksum the peer compares (Slippi's formula, not
+     * our frame_checksum). Computed once here, before the pads go out. */
+    pc_slippi_adapter_set_checksum(&s_slippi, confirmed_frame(), pc_slippi_wire_checksum());
+    uint64_t now = s_slippi_now_us();
+    for (int32_t f = s_slippi_sent_upto + 1; f <= s_wrote; f++) {
+        const WirePad* w = &s_local_ring[f & (RING - 1)];
+        if (!pc_slippi_adapter_send_local(&s_slippi, f, w, now)) {
+            break;
+        }
+        s_slippi_sent_upto = f;
+    }
+}
+
+/* Service the Slippi transport and fold its liveness into the same state the
+ * custom receive path maintains, so wait_remote/diagnostics need no Slippi
+ * special case beyond the wait loop. */
+static bool s_slippi_recv(void) {
+    if (!s_slippi_on) {
+        return false;
+    }
+    bool got = s_slippi_pump();
+    int st = pc_slippi_adapter_status(&s_slippi);
+    if (st == PC_SLIPPI_NET_DISCONNECTED || st == PC_SLIPPI_NET_FAILED) {
+        if (!s_peer_left) {
+            s_peer_left = true;
+            int reason = pc_slippi_adapter_disconnect_reason(&s_slippi);
+            s_status = st == PC_SLIPPI_NET_FAILED ? PC_NET_PEER_TIMEOUT :
+                       (reason == PC_SLIPPI_DISCONNECT_UNSPECIFIED ? PC_NET_PEER_LEFT
+                                                                   : PC_NET_PEER_LEFT);
+        }
+        return got;
+    }
+    if (st == PC_SLIPPI_NET_CONNECTED || s_slippi_ever_heard) {
+        s_slippi_ever_heard = true;
+        s_heard = true;
+        s_last_rx_ns = SDL_GetTicksNS();
+        uint32_t ping = 0;
+        PcSlippiNetStats stats;
+        pc_slippi_net_stats(s_slippi.net, &stats);
+        ping = stats.ping_us;
+        if (ping != 0) {
+            net.ping_us = ping;
+        }
+    }
+    return got;
+}
+
+/* The Slippi wait: pump until the needed frame is delivered or the peer goes
+ * away/silent. ENet owns reliability and connection state, so the custom
+ * transport's reconnect phase has no analogue here; a connected session simply
+ * keeps pumping until the frame arrives or the connect timeout elapses. */
+static bool s_slippi_wait_remote(int32_t need) {
+    uint64_t t0 = SDL_GetTicksNS();
+    for (;;) {
+        s_slippi_recv();
+        if (s_remote_have >= need) {
+            return true;
+        }
+        if (s_peer_left) {
+            return false;
+        }
+        if (pc_slippi_adapter_status(&s_slippi) == PC_SLIPPI_NET_FAILED) {
+            s_status = PC_NET_PEER_TIMEOUT;
+            return false;
+        }
+        uint64_t limit = (uint64_t)net.connect_timeout_ms * 1000000ull;
+        uint64_t since = s_progress_ns ? s_progress_ns : t0;
+        if (SDL_GetTicksNS() - since > limit) {
+            s_status = PC_NET_PEER_TIMEOUT;
+            return false;
+        }
+        SDL_Delay(1);
     }
 }
 
@@ -1185,6 +1335,10 @@ static uint64_t rx_heard_ns(void) {
 /* Apply what the receive thread queued, in arrival order (game thread): the
  * frame loop calls this once per fresh tick and wait_remote() once a turn. */
 void recv_inputs(void) {
+    if (s_slippi_on) {
+        s_slippi_recv();
+        return;
+    }
     atomic_store(&s_frame_pub, net.frame);
     if (s_rx_thread == NULL) {
         rx_pump();
@@ -1516,6 +1670,9 @@ static int connect_timeout_ms(void) {
     return net.connect_timeout_ms > 0 ? net.connect_timeout_ms : CONNECT_TIMEOUT_MS;
 }
 static bool wait_remote(int32_t need) {
+    if (s_slippi_on) {
+        return s_slippi_wait_remote(need);
+    }
     if (s_remote_have >= need) {
         return true;
     }
@@ -1872,6 +2029,26 @@ static void session_reset(void) {
 }
 
 void pc_net_disconnect(void) {
+    if (s_slippi_on) {
+        /* Tear the Slippi transport down first: it owns the ENet host, and a
+         * disconnected peer needs no custom BYE (ENet signals it). */
+        if (s_slippi.net != NULL) {
+            pc_slippi_net_disconnect(s_slippi.net, PC_SLIPPI_DISCONNECT_UNSPECIFIED);
+            pc_slippi_adapter_pump(&s_slippi, s_slippi_now_us());
+            pc_slippi_net_destroy(s_slippi.net);
+            s_slippi.net = NULL;
+        }
+        s_slippi_on = false;
+        net.slippi = false;
+        net.active = false;
+        net.resim = false;
+        net.hs = HS_IDLE;
+        rules_restore();
+        HSD_PadLibData.qtype = 0;
+        pc_log_line("net: Slippi disconnected at frame %d (status %d)", net.tick_frame, s_status);
+        snaps_free();
+        return;
+    }
     if (net.sock == SOCK_INVALID) {
         return;
     }
@@ -2202,6 +2379,78 @@ static bool connect_impl(
 bool pc_net_connect(const char* ip, uint16_t port, int player, uint32_t seed) {
     return connect_impl(SOCK_INVALID, ip, port, player, seed);
 }
+
+/* Connect over the Slippi transport (MELEE_NET_STACK=slippi). The game-visible
+ * session setup (local/remote ports, delay, seed, barrier, rings) is shared
+ * with the custom path; only the transport differs. `local_udp_port` of 0 lets
+ * ENet pick a port (fine for a direct dial); a matchmaking hole punch passes
+ * the lobby's port. */
+bool pc_net_connect_slippi(
+    const char* ip, uint16_t port, int player, uint32_t seed, uint16_t local_udp_port) {
+#ifdef __EMSCRIPTEN__
+    (void)ip, (void)port, (void)player, (void)seed, (void)local_udp_port;
+    pc_log_line("net: the Slippi transport is unavailable in the browser");
+    return false;
+#else
+    if (net.tx_lock == NULL) {
+        net.tx_lock = SDL_CreateMutex();
+        s_rx_lock = SDL_CreateMutex();
+        sock_startup();
+        pc_slippi_net_global_init();
+    }
+    pc_net_disconnect();
+    session_reset();
+    HSD_PadLibData.qtype = 2;
+    net.local = player ? 1 : 0;
+    net.remote = 1 - net.local;
+    net.connect_timeout_ms = MATCH_CONNECT_TIMEOUT_MS;
+    const char* delay = getenv("MELEE_NET_DELAY");
+    net.delay_auto = delay ? strcmp(delay, "auto") == 0 : s_configured_delay < 0;
+    net.delay = net.delay_auto ? 2 : delay ? atoi(delay) : s_configured_delay;
+    if (net.delay < 0 || net.delay >= RING / 2) {
+        net.delay = 2;
+    }
+    net.delay_next = net.delay;
+    s_wrote = net.delay - 1;
+    net.seed = seed;
+    net.direct = true;
+
+    PcSlippiSessionConfig cfg;
+    memset(&cfg, 0, sizeof cfg);
+    cfg.local_port = (uint8_t)net.local;
+    cfg.remote_count = 1;
+    cfg.remote_ports[0] = (uint8_t)net.remote;
+    s_slippi.net = pc_slippi_net_create(&cfg, local_udp_port, NULL);
+    if (s_slippi.net == NULL) {
+        pc_log_line("net: cannot create the Slippi ENet host");
+        return false;
+    }
+    pc_slippi_adapter_init(&s_slippi, s_slippi.net, slp_frame_cb, NULL);
+    pc_slippi_adapter_start_game(&s_slippi, s_slippi_now_us());
+    s_slippi_sent_upto = -1;
+    s_slippi_ever_heard = false;
+    s_slippi_on = true;
+    net.slippi = true;
+    net.sock = SOCK_INVALID; /* there is no custom socket under Slippi */
+    pc_slippi_net_listen(s_slippi.net); /* accept if the peer dials us */
+    if (ip != NULL && ip[0] != '\0') {
+        if (!pc_slippi_net_connect(s_slippi.net, ip, port)) {
+            pc_log_line("net: cannot dial Slippi peer %s:%u", ip, port);
+            pc_slippi_net_destroy(s_slippi.net);
+            s_slippi.net = NULL;
+            s_slippi_on = false;
+            net.slippi = false;
+            return false;
+        }
+    }
+    net.active = true;
+    pc_log_line("net: Slippi transport: peer %s:%u, local port P%d, delay %s%d, seed %u",
+        ip != NULL && ip[0] ? ip : "(listen)", port, net.local + 1, net.delay_auto ? "auto " : "",
+        net.delay, seed);
+    return true;
+#endif
+}
+
 bool pc_net_connect_socket(
     intptr_t socket, const char* ip, uint16_t port, int player, uint32_t seed) {
     if (socket == -1)
@@ -2225,9 +2474,21 @@ void pc_net_init(void) {
     host[colon - peer] = '\0';
     const char* player = getenv("MELEE_NET_PLAYER");
     const char* seed = getenv("MELEE_SEED");
-    if (!pc_net_connect(host, (uint16_t)atoi(colon + 1), player && player[0] == '1',
-            seed ? (uint32_t)strtoul(seed, NULL, 0) : 0))
-    {
+    const int is_p2 = player != NULL && player[0] == '1';
+    const uint32_t seed_val = seed ? (uint32_t)strtoul(seed, NULL, 0) : 0;
+    /* MELEE_NET_STACK=slippi selects the Slippi ENet transport (Slppi online
+     * services), legacy (default) the custom UDP path. The game-visible
+     * session is the same either way. */
+    const char* stack = getenv("MELEE_NET_STACK");
+    if (stack != NULL && strcmp(stack, "slippi") == 0) {
+        const char* lport = getenv("MELEE_NET_PORT");
+        uint16_t udp_port = (uint16_t)(lport ? atoi(lport) : 41000);
+        if (!pc_net_connect_slippi(host, (uint16_t)atoi(colon + 1), is_p2, seed_val, udp_port)) {
+            return;
+        }
+        return;
+    }
+    if (!pc_net_connect(host, (uint16_t)atoi(colon + 1), is_p2, seed_val)) {
         return;
     }
     /* No lobby agreed this match, so the session agrees it itself: the same
