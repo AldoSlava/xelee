@@ -724,6 +724,39 @@ static bool rules_ready(void) {
  * the setup callback (slp_setup_cb in net.c) to do the same. Rules validation
  * is deliberately not repeated here -- both peers run the same build and the
  * same unlocks -- so this is interim until M4's selections flow carries it. */
+/* Slippi's netplay ruleset. Its General Codes write these every frame
+ * (GALE01r2.ini: "Stock Mode", "4 Stocks", "8 Minutes", "No Items", "Singles
+ * Stages"; docs/slippi-gecko-catalog.md), so whatever the player's own VS rules
+ * say, a Slippi peer plays stock mode, 4 stocks, 8 minutes, damage ratio 1.0,
+ * no handicap, no items and the singles stage set, with everything unlocked.
+ * Both peers apply the same constants, so no RULES message is needed and the
+ * local settings never reach the sim (a peer with 3 stocks would otherwise
+ * desync at the first KO). Restored with the rest at disconnect. */
+static void slippi_rules_force(void) {
+    const struct GamePrefs* p = gmMainLib_GetGamePrefs();
+    Rules ru;
+    memset(&ru, 0, sizeof ru);
+    ru.game = *gmMainLib_GetGameRules();
+    ru.game.force_main_menu = 0x00;
+    ru.game.bgm = 0x34;
+    ru.game.mode = 1;         /* stock */
+    ru.game.time_limit = 2;
+    ru.game.stock_count = 4;
+    ru.game.handicap = 0;
+    ru.game.damage_ratio = 10; /* 1.0x */
+    ru.game.stage_sel = 0;
+    ru.game.stock_time_limit = 8;
+    ru.game.friendly_fire = 1;
+    ru.game.pause = 1;
+    ru.game.score_display = 0;
+    ru.item_freq = 0xFF; /* items off */
+    ru.item_mask = p->item_mask;
+    ru.stage_mask = 0xE70000B0; /* Slippi's "Singles Stages" */
+    ru.frozen_stadium = 0;      /* alt_stage_mode 0: Stadium transforms, see the catalogue */
+    unlock_force();
+    rules_apply(&ru, true);
+}
+
 static void slp_direct(void) {
     if (net.hs == HS_IDLE) {
         if (!rules_ready()) {
@@ -740,6 +773,9 @@ static void slp_direct(void) {
             return;
         }
         s_direct_idle_ns = 0;
+        if (!s_rules_on) {
+            slippi_rules_force();
+        }
         if (pc_net_slippi_setup_host()) {
             net.hs_host = true;
             net.hs = HS_PENDING;
