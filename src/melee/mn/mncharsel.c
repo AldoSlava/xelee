@@ -1,5 +1,12 @@
 #include "mncharsel.h"
 
+#ifdef TARGET_PC
+#include "pc/net.h"
+#include "pc/pc.h"
+#include <stdlib.h>
+extern bool pc_net_slippi_active(void);
+#endif
+
 #include <melee/ft/forward.h>
 #include <sysdolphin/baselib/forward.h>
 
@@ -3077,6 +3084,13 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                 {
                                     continue;
                                 }
+#ifdef TARGET_PC
+                                /* A Slippi match is 1v1 between two humans:
+                                 * no CPU fighters, no closing a slot. */
+                                if (pc_net_active() && pc_net_slippi_active()) {
+                                    continue;
+                                }
+#endif
                                 if ((mnCharSel_803F0DFC.doors[door]
                                          .is_hold_cpu_slider |
                                      mnCharSel_803F0DFC.doors[door]
@@ -5491,10 +5505,6 @@ void mnCharSel_Scene_OnEnter(void* arg0)
 }
 
 #ifdef TARGET_PC
-#include "pc/net.h"
-#include "pc/pc.h"
-#include <stdlib.h>
-extern bool pc_net_slippi_active(void);
 
 /* HIDDEN does not cascade to a joint's children, so hide the whole tree. */
 static void cssHideTree(HSD_JObj* jobj)
@@ -5573,7 +5583,7 @@ static void mnCharSel_HideOnlineRemote(void)
 {
     int remote;
     if (!pc_net_active() || !pc_net_slippi_active() ||
-        mnCharSel_804D6CF5 == 1)
+        mnCharSel_804D6CF5 == 1 || getenv("MELEE_CSS_SHOW_ALL"))
     {
         return;
     }

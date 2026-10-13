@@ -1,3 +1,8 @@
+#ifdef TARGET_PC
+#include "pc/net.h"
+#include "pc/net_match.h"
+extern bool pc_net_slippi_active(void);
+#endif
 #include "ifnametag.h"
 
 #include "forward.h"
@@ -146,8 +151,30 @@ static inline float getNameTagFrame(int slot)
                        Player_GetPlayerSlotType(slot));
 }
 
+#ifdef TARGET_PC
+/* A Slippi match tags each fighter with their connect code, whatever tag the
+ * local save has: the opponent's name is theirs, not ours. */
+static const char* slippiTagText(int slot)
+{
+    const char* code;
+    if (!pc_net_active() || !pc_net_slippi_active() || !pc_net_match_is_slippi()) {
+        return NULL;
+    }
+    code = slot == pc_net_local_player() ? pc_net_match_local_code()
+                                         : pc_net_match_opponent_code();
+    return code != NULL && code[0] != '\0' ? code : NULL;
+}
+#endif
+
 static inline bool has_nametag(int slot)
 {
+#ifdef TARGET_PC
+    if (Player_GetPlayerSlotType(slot) == Gm_PKind_Human &&
+        slippiTagText(slot) != NULL)
+    {
+        return true;
+    }
+#endif
     if (Player_GetPlayerSlotType(slot) != Gm_PKind_Human ||
         Player_GetNametagSlotID(slot) == NAMETAG_DISABLED)
     {
@@ -212,6 +239,9 @@ void fn_802FCC44(HSD_GObj* gobj)
     if (Player_GetPlayerSlotType(*slot) != Gm_PKind_NA &&
         Player_GetPlayerState(*slot) && Player_GetStocks(*slot) &&
         (un_804D6D70[*slot] ||
+#ifdef TARGET_PC
+         slippiTagText(*slot) != NULL ||
+#endif
          Player_GetNametagSlotID(*slot) != NAMETAG_DISABLED ||
          Player_80036058(*slot) || gm_8016B258(*slot)))
     {
@@ -248,9 +278,14 @@ static inline float getNametagColorFrame(float frame)
 
 static inline void createNameText(int slot)
 {
+    const char* text = GetNameText(Player_GetNametagSlotID(slot));
+#ifdef TARGET_PC
+    if (slippiTagText(slot) != NULL) {
+        text = slippiTagText(slot);
+    }
+#endif
     un_804A1EF8[slot] =
-        HSD_SisLib_803A6B98(un_804D6D78, -5000.0f, 0.0f,
-                            GetNameText(Player_GetNametagSlotID(slot)));
+        HSD_SisLib_803A6B98(un_804D6D78, -5000.0f, 0.0f, text);
     HSD_SisLib_803A7548(un_804D6D78, un_804A1EF8[slot], 0.4f, 0.55f);
 }
 
