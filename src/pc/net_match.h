@@ -20,6 +20,7 @@ typedef struct PcNetMatchProgress {
     unsigned candidates; /* addresses tried so far */
     bool found;          /* a verified Hello arrived */
     bool calling;        /* direct, with a code: we are the caller */
+    bool slippi;         /* served by Slippi matchmaking; network_ready = server answered */
 } PcNetMatchProgress;
 /* Opponents this profile has played, newest first; codes are only saved once
  * a match actually connected. */
@@ -38,7 +39,8 @@ int pc_net_match_state(const char** why);
 bool pc_net_match_is_host(void);
 int32_t pc_net_match_start_frame(void);
 uint32_t pc_net_match_seed(void);
-const char* pc_net_match_local_code(void);
+const char* pc_net_match_local_code(void); /* the Slippi connect code during a Slippi search */
+bool pc_net_match_is_slippi(void);
 const char* pc_net_match_profile_error(void);
 const char* pc_net_match_profile_directory(void);
 enum PcNetMatchMode pc_net_match_mode(void);

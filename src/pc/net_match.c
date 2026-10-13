@@ -115,6 +115,7 @@ static uint8_t publication_wire[PC_RANK_RECORD_BYTES];
 static bool s_slippi_match;         /* this search is the Slippi backend */
 static PcSlippiMatch* s_slippi_search; /* the running search, else NULL */
 static PcSlippiTicket s_slippi_ticket;
+static char s_slippi_code[PC_SLIPPI_CONNECT_CODE_MAX]; /* our connect code, for the lobby */
 static uint32_t s_slippi_seed;       /* seed for the Slippi game session */
 static int64_t public_sequence(const uint8_t* p) {
     return (int64_t)((uint32_t)p[16] << 24 | (uint32_t)p[17] << 16 | (uint32_t)p[18] << 8 | p[19]);
@@ -437,6 +438,14 @@ void pc_net_match_progress(PcNetMatchProgress* p) {
     p->candidates = candidates_tried;
     p->found = have_peer || state == PC_MATCH_CONNECT || state == PC_MATCH_READY;
     p->calling = mode == PC_MATCH_DIRECT && target_suffix[0];
+    if (s_slippi_match) {
+        /* The Slippi search has no DHT to join: it is ready once the
+         * matchmaking server answers the login. */
+        p->slippi = true;
+        p->calling = mode == PC_MATCH_DIRECT;
+        p->network_ready = s_slippi_search == NULL ||
+                           pc_slippi_match_state(s_slippi_search) != PC_SLIPPI_MATCH_INITIALIZING;
+    }
 }
 
 static void ready(void) {
@@ -653,6 +662,7 @@ static bool slp_start(enum PcNetMatchMode m, const char* code) {
     memset(&account, 0, sizeof account);
     pc_slippi_account_load(&account, true);
     int mode = m == PC_MATCH_UNRANKED ? PC_SLIPPI_MODE_UNRANKED : PC_SLIPPI_MODE_DIRECT;
+    snprintf(s_slippi_code, sizeof s_slippi_code, "%s", account.connect_code);
     s_slippi_search = pc_slippi_match_start(
         &account, mode, code ? code : "", (uint16_t)pc_match_local_port());
     if (s_slippi_search == NULL)
@@ -975,7 +985,12 @@ int32_t pc_net_match_start_frame(void) {
 uint32_t pc_net_match_seed(void) {
     return seed;
 }
+bool pc_net_match_is_slippi(void) {
+    return s_slippi_match;
+}
 const char* pc_net_match_local_code(void) {
+    if (s_slippi_match && s_slippi_code[0])
+        return s_slippi_code;
     return load_identity() ? identity.code : "";
 }
 const char* pc_net_match_profile_error(void) {

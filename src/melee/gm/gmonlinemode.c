@@ -886,7 +886,9 @@ void gm_Scene_OnlineLobby_OnFrame(void)
                 directShow(who, sizeof who, direct_calling);
                 if (!pr.network_ready) {
                     snprintf(view.message, sizeof view.message,
-                             "Joining the online network...  %u:%02u", secs / 60, secs % 60);
+                             pr.slippi ? "Connecting to Slippi...  %u:%02u" :
+                                         "Joining the online network...  %u:%02u",
+                             secs / 60, secs % 60);
                 } else if (online_kind == ONLINE_KIND_DIRECT && pr.calling) {
                     snprintf(view.message, sizeof view.message,
                              secs < 45 ? "Calling %s  %u:%02u" :
@@ -910,8 +912,23 @@ void gm_Scene_OnlineLobby_OnFrame(void)
                         sfxForward();
                     }
                 }
+            } else if (state == PC_MATCH_CONNECT && pc_net_match_is_slippi()) {
+                snprintf(view.message, sizeof view.message, "Connecting to %.17s...",
+                         pc_net_match_opponent_code());
+            } else if (state == PC_MATCH_READY && pc_net_match_is_slippi()) {
+                snprintf(view.message, sizeof view.message, "Matched with %.17s - starting...",
+                         pc_net_match_opponent_code());
             } else {
                 snprintf(view.message, sizeof view.message, "%s", why ? why : "Searching for an opponent...");
+            }
+            {
+                static char last_msg[ONLINE_LOBBY_MSG_LEN];
+                /* Logged on change, minus the ticking timer, so a test can
+                 * assert what the lobby told the player. */
+                if (strncmp(view.message, last_msg, 24) != 0) {
+                    snprintf(last_msg, sizeof last_msg, "%s", view.message);
+                    pc_log_line("lobby: %s [%s]", view.message, pc_net_match_local_code());
+                }
             }
             const char* peer = pc_net_match_opponent_code();
             if (peer && peer[0]) {
