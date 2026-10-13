@@ -840,10 +840,10 @@ static bool s_slippi_recv(void) {
     if (st == PC_SLIPPI_NET_DISCONNECTED || st == PC_SLIPPI_NET_FAILED) {
         if (!s_peer_left) {
             s_peer_left = true;
-            int reason = pc_slippi_adapter_disconnect_reason(&s_slippi);
-            s_status = st == PC_SLIPPI_NET_FAILED ? PC_NET_PEER_TIMEOUT :
-                       (reason == PC_SLIPPI_DISCONNECT_UNSPECIFIED ? PC_NET_PEER_LEFT
-                                                                   : PC_NET_PEER_LEFT);
+            /* ENet reports a failure to connect separately from a peer that
+             * left; both map to the engine's statuses, and the peer's own
+             * reason byte (if any) does not change what the game does. */
+            s_status = st == PC_SLIPPI_NET_FAILED ? PC_NET_PEER_TIMEOUT : PC_NET_PEER_LEFT;
         }
         return got;
     }
@@ -1336,6 +1336,9 @@ static uint64_t rx_heard_ns(void) {
  * frame loop calls this once per fresh tick and wait_remote() once a turn. */
 void recv_inputs(void) {
     if (s_slippi_on) {
+        /* The legacy path publishes the frame for the watchdog and the tx
+         * timer before draining; keep that the same under Slippi. */
+        atomic_store(&s_frame_pub, net.frame);
         s_slippi_recv();
         return;
     }
