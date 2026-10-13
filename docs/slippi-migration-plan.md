@@ -434,6 +434,12 @@ legacy stack are unchanged:
   (external ids; same cell on both peers from the shared seed, no SSS picks);
   Direct keeps the pick exchange.
 
+Wanted, not built: a **stage placement flow** (probably a new button on the
+Online menu, with its own UI) to place the Slippi stage set ahead of time. A
+live online match cannot be frozen, so the XR pre-fight hold is off in netplay
+and stages would otherwise use their default placement; placements made in the
+menu must be what the fight uses (presentation only, same invariant as the hold).
+
 Not done: the four dark name bars under the CSS doors are still drawn (a
 structure outside the joints hidden so far); the Direct screen still takes the
 DHT `#XXXXXXXX` code, not a Slippi connect code (`ABCD#123`); results-screen
