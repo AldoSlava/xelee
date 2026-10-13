@@ -131,8 +131,10 @@ NOTES = [
      "Recommended performance code: sets bit 2 of a byte in the stage data at FoD init. Not "
      "disassembled further; nothing in it reads or writes fighter or stage physics state we saw"),
     ("Normal Lag Reduction", "engine", "N/A",
-     "changes how the game drains its controller polling queue (Dolphin SI timing); our input "
-     "path is not polled that way"),
+     "two branches in the Dolphin SDK's pad read (0x80376xxx) made unconditional so the read "
+     "stops waiting for the next SI poll; our SDK layer is native. Its goal (read as late as "
+     "possible) is met: PADRead runs right after the pacing wait and vsync, and the 1000 Hz "
+     "thread keeps the sample 0.45 ms old on average (p99 1.0 ms, MELEE_INPUT_HUD=1)."),
     ("UseInGameDelay", "engine", "N/A",
      "Slippi applies its input delay in every in-game scene; ours applies net.delay to fights"),
     ("GetCommonMinorID", "n/a", "N/A", "helper for UseInGameDelay"),
