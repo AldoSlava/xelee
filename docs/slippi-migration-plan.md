@@ -5,8 +5,8 @@ implementation of Slippi's wire protocol, so this port can play against Slippi
 Dolphin and use Slippi Launcher, recon replays and the surrounding ecosystem.
 Ranked is explicitly out of scope (see §7).
 
-Status: **M1 done, M2 next.** `docs/netcode-plan.md` remains the description of
-what exists today.
+Status: **M1 + M2a done, M2b next.** `docs/netcode-plan.md` remains the
+description of what exists today.
 
 Branch: **`slippi-net`**, cut from `quest-xr` at `2a1ec6b` (decision 4). All
 migration work happens here; `main` stays untouched until the branch is ready.
@@ -261,9 +261,20 @@ and latches/rejects exactly as the reference does. Verified on this host with
 `cc -std=gnu11` (no cmake in PATH here; CMake wiring is in place for CI).
 
 ### M2 — Slippi P2P client over ENet
-`slp_net.c`: connect two local instances via `Direct` (no matchmaking), exchange
-`PAD`/`PAD_ACK`, selections, chat. Drive it from a headless harness, not the
-game yet.
+
+**M2a done** (`c55d874`): `src/pc/slippi/slp_msg.{c,h}` — transport-free
+encode/decode of the message bodies (selections, chat, pads, pad-ack), ported
+from `SlippiNetplay.cpp` (`writeToPacket`/`readSelectionsFromPacket`, chat,
+inline pad + pad-ack), including Merge semantics, the allowed chat-id set, the
+port→remote-index mapping, and the receiver's pad-count arithmetic.
+`tools/test_slp_msg.c` pins each message's bytes and the malformed-pad
+rejections (ctest `slp_msg`). Codec symbols renamed `pc_slp_*` → `pc_slippi_*`
+to avoid colliding with the `.slp` recorder API.
+
+**M2b next:** `slp_net.c` — the ENet client: connect two local instances via
+`Direct` (no matchmaking), a receive thread, the message dispatch, ack timers,
+remote pad queues, checksum exchange, and time-offset sampling. Driven from a
+headless harness (`tools/`), not the game yet.
 **Gate:** two instances exchange pads and selections for a scripted match; log
 shows ping/offset sampling matching the reference formula.
 
