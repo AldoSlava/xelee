@@ -5,8 +5,8 @@ implementation of Slippi's wire protocol, so this port can play against Slippi
 Dolphin and use Slippi Launcher, recon replays and the surrounding ecosystem.
 Ranked is explicitly out of scope (see §7).
 
-Status: **M1 + M2a done, M2b next.** `docs/netcode-plan.md` remains the
-description of what exists today.
+Status: **M1 + M2a/M2b done, M2c (ENet driver) next.** `docs/netcode-plan.md`
+remains the description of what exists today.
 
 Branch: **`slippi-net`**, cut from `quest-xr` at `2a1ec6b` (decision 4). All
 migration work happens here; `main` stays untouched until the branch is ready.
@@ -271,10 +271,17 @@ port→remote-index mapping, and the receiver's pad-count arithmetic.
 rejections (ctest `slp_msg`). Codec symbols renamed `pc_slp_*` → `pc_slippi_*`
 to avoid colliding with the `.slp` recorder API.
 
-**M2b next:** `slp_net.c` — the ENet client: connect two local instances via
-`Direct` (no matchmaking), a receive thread, the message dispatch, ack timers,
-remote pad queues, checksum exchange, and time-offset sampling. Driven from a
-headless harness (`tools/`), not the game yet.
+**M2b done** (`5e6335f`): `src/pc/slippi/slp_session.{c,h}` — the transport-free
+session core (pad queues + ack-floor trim, remote window, drop-old, RTT/ack
+sampling, trimmed-mean clock offset). `tools/test_slp_session.c` wires two
+sessions together and pins the behaviour (ctest `slp_session`). Two parity
+details confirmed against upstream: the remote window returns the **oldest**
+selected frames, and the game-facing pad is **12** bytes (8 wire + 4 zero).
+
+**M2c next:** `slp_net.c` — the ENet driver around the core: `enet_host_create`
+(3 channels), connect/handshake, the receive thread, message dispatch to the
+core, and the send paths (pads unsequenced ch1, inline ack ch2, reliable ch0).
+Driven from a headless harness (`tools/`), not the game yet.
 **Gate:** two instances exchange pads and selections for a scripted match; log
 shows ping/offset sampling matching the reference formula.
 
