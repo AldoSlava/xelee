@@ -48,7 +48,7 @@ import time
 # boot). The exit frame is fixed at launch, so the budget covers the worst
 # boot seen and check_match() fails a row whose match did not get its minutes.
 BOOT_FRAMES = 9000
-CACHE_ROOT = "/tmp/melee_net_cache"  # kept between runs; keyed by port, never shared
+CACHE_ROOT = os.path.expanduser("~/.cache/melee_net_cache")  # kept between runs; keyed by port, never shared
 LOAD_STALL_FRAME = 900  # --load-stall: session up, menus lockstep, every frame waits
 # A direct session derives a datagram key from its handshake nonces like any
 # other (src/pc/net_handshake.c), but only once that handshake completes a few
