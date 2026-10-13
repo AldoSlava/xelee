@@ -81,6 +81,7 @@ src/melee/ft/ftmotionstates.c
 src/melee/ft/ftparts.c
 src/melee/ft/ftstarrodswing.c
 src/melee/ft/ftswing.c
+src/melee/ft/ftucf.c
 src/melee/ft/ftwaitanim.c
 src/melee/ft/ftwalkcommon.c
 src/melee/ft/ftwalljump.c

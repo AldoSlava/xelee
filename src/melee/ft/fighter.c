@@ -1,4 +1,6 @@
 #include "fighter.h"
+#include "ftucf.h"
+#include <pc/pc.h>
 
 #include <math.h>
 #include <placeholder.h>
@@ -2053,6 +2055,14 @@ void Fighter_procInput(Fighter_GObj* gobj)
                 fp->activity_timer.lstick.y = 0;
                 fp->activity_timer.lstick.x = 0;
             }
+
+#ifdef TARGET_PC
+            /* Slippi's UCF pad buffer + 1.0 cardinals (hook 0x8006B460), only
+             * where online play pins the competitive rules. */
+            if (pc_is_ucf_enabled()) {
+                ftUcf_Update(fp);
+            }
+#endif
 
             // Fighter_ClampSpecificValue
             fp->active_duration.trigger++;

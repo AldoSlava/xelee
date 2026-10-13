@@ -6,6 +6,33 @@
 #include <time.h>
 
 #include "../src/pc/net_match.c"
+
+/* net_match.c can start a Slippi search when an account is signed in; the
+ * harness has none (the account never loads), so these stand-ins only close
+ * the link. SDL_CreateDirectory is for the Slippi contacts file. */
+int pc_match_local_port(void) { return 0; }
+bool pc_net_connect_slippi(const char* ip, uint16_t port, int player, uint32_t seed, uint16_t lp) {
+    (void) ip, (void) port, (void) player, (void) seed, (void) lp; return false;
+}
+uint32_t pc_net_seed(void) { return 0; }
+int32_t pc_net_start_frame(void) { return -1; }
+void pc_net_slippi_set_setup_host(bool host) { (void) host; }
+bool pc_slippi_account_load(PcSlippiAccount* a, bool rediscover) {
+    (void) rediscover; memset(a, 0, sizeof *a); return false;
+}
+const char* pc_slippi_user_dir(void) { return "/nonexistent-slippi"; }
+bool pc_slippi_connect_code_valid(const char* c) { (void) c; return false; }
+bool pc_slippi_connect_code_normalize(const char* in, char* out, size_t cap) {
+    (void) in; if (cap) out[0] = 0; return false;
+}
+PcSlippiMatch* pc_slippi_match_start(const PcSlippiAccount* a, int mode, const char* code, uint16_t port) {
+    (void) a, (void) mode, (void) code, (void) port; return NULL;
+}
+void pc_slippi_match_stop(PcSlippiMatch* m) { (void) m; }
+PcSlippiMatchState pc_slippi_match_state(const PcSlippiMatch* m) { (void) m; return PC_SLIPPI_MATCH_ERROR; }
+const char* pc_slippi_match_error(const PcSlippiMatch* m) { (void) m; return ""; }
+bool pc_slippi_match_result(const PcSlippiMatch* m, PcSlippiTicket* t) { (void) m, (void) t; return false; }
+bool SDL_CreateDirectory(const char* p) { (void) p; return true; }
 #include "../extern/dht/sha1.h"
 
 void pc_dht_sha1(const void* data, size_t len, uint8_t out[20]) {

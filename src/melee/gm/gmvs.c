@@ -1840,7 +1840,7 @@ static bool neutralSpawn(int i, Vec3* v)
     size_t k;
     int n = 0;
     int j;
-    if (!pc_net_deterministic() || gm_IsCurrently1PMode() || i >= 5 ||
+    if (!pc_is_slippi_fixes_enabled() || gm_IsCurrently1PMode() || i >= 5 ||
         tmp->state.fighters[i].spawn_point != -1 || tmp->start.is_teams == true)
     {
         return false;

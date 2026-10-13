@@ -1,3 +1,4 @@
+#include <string.h>
 #include "controller.h"
 
 #include <math.h>
@@ -17,6 +18,8 @@ HSD_PadStatus HSD_PadCopyStatus[4];
 #ifdef TARGET_PC
 s8 pc_pad_master_raw_x[4];
 s8 pc_pad_game_raw_x[4];
+PcRawSticks pc_pad_master_raw[4];
+PcRawSticks pc_pad_game_raw[4];
 #endif
 HSD_PadStatus HSD_PadGameStatus[4];
 const u32 pad_bit[4] = { PAD_CHAN0_BIT, PAD_CHAN1_BIT, PAD_CHAN2_BIT,
@@ -376,6 +379,10 @@ void HSD_PadRenewMasterStatus(void)
             if (mp->err == 0) {
 #ifdef TARGET_PC
                 pc_pad_master_raw_x[i] = qread->stickX;
+                pc_pad_master_raw[i].x = qread->stickX;
+                pc_pad_master_raw[i].y = qread->stickY;
+                pc_pad_master_raw[i].cx = qread->substickX;
+                pc_pad_master_raw[i].cy = qread->substickY;
 #endif
                 mp->button = qread->button;
                 mp->stickX = qread->stickX;
@@ -395,6 +402,7 @@ void HSD_PadRenewMasterStatus(void)
             } else {
 #ifdef TARGET_PC
                 pc_pad_master_raw_x[i] = 0;
+                memset(&pc_pad_master_raw[i], 0, sizeof pc_pad_master_raw[i]);
 #endif
                 mp->button = 0;
                 mp->subStickY = 0;
@@ -539,6 +547,11 @@ void HSD_PadRenewGameStatus(void)
         }
 #ifdef TARGET_PC
         pc_pad_game_raw_x[i] = gs->err == 0 ? pc_pad_master_raw_x[i] : 0;
+        if (gs->err == 0) {
+            pc_pad_game_raw[i] = pc_pad_master_raw[i];
+        } else {
+            memset(&pc_pad_game_raw[i], 0, sizeof pc_pad_game_raw[i]);
+        }
 #endif
         gs->trigger = gs->button & (gs->last_button ^ gs->button);
         gs->release = gs->last_button & (gs->last_button ^ gs->button);

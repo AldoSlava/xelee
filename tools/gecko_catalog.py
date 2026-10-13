@@ -64,8 +64,10 @@ NOTES = [
     ("UCF SDI", "gameplay", "MISSING", "no UCF SDI handling found in src/melee/ft"),
     ("UCF Shield SDI", "gameplay", "MISSING", "no UCF shield-SDI handling found"),
     ("UCF Tumble", "gameplay", "MISSING", "no UCF tumble handling found"),
-    ("UCF Pad Buffer", "gameplay", "MISSING",
-     "pad buffering and the 1.0 cardinals fix; only the dashback's raw-X history exists"),
+    ("UCF Pad Buffer", "gameplay", "DONE",
+     "ftucf.c ftUcf_Update(): per-port raw stick history, the 1.0 cardinals snap and the "
+     "flick counter, called from Fighter_procInput before the trigger timers. Offline too "
+     "(ucf pref, default on). The SDI, shield-SDI and tumble rules below read this history."),
     ("UCF DBOOC SquatRv Fix", "gameplay", "MISSING", "not found"),
     ("UCF Text", "ui", "N/A", "the on-screen UCF indicator; cosmetic"),
     ("FreezeGlitchFix", "gameplay", "DONE", "ftnanaspecials.c, gated on pc_net_deterministic()"),

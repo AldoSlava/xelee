@@ -121,8 +121,12 @@
               <button id="free-camera">Normal</button>
             </div>
             <div class="setting">
-              <div class="description"><h3>Universal Controller Fix</h3><p>UCF 0.8x dashback and shield-drop consistency on any controller. MELEE_UCF overrides.</p></div>
-              <button id="ucf">Off</button>
+              <div class="description"><h3>Universal Controller Fix</h3><p>UCF 0.84 as Slippi plays it: dashback, shield drop, SDI, tumble and 1.0 cardinals on any controller. MELEE_UCF overrides.</p></div>
+              <button id="ucf">On</button>
+            </div>
+            <div class="setting">
+              <div class="description"><h3>Slippi gameplay fixes</h3><p>Slippi's other rules offline: no wobbling, neutral spawn positions and the Ice Climbers freeze-glitch fix. Always on in online play. MELEE_SLIPPI_FIXES overrides.</p></div>
+              <button id="slippi-fixes">On</button>
             </div>
           </div>
           <div id="page-audio" class="page">

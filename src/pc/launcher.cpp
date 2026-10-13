@@ -395,7 +395,7 @@ class Launcher final : public Rml::EventListener {
             return {"volume", "music-volume", "sfx-volume", "mute", "reverb", "fps", "scale",
                 "check-updates", "check-now", "settings-discord"};
         case 2:
-            return {"unlock-all", "frozen-stadium", "free-camera", "ucf"};
+            return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes"};
         case 4:
             return {"auth-email", "auth-password", "auth-sign-in", "auth-sign-out", "net-name",
                 "net-delay"};
@@ -505,6 +505,8 @@ class Launcher final : public Rml::EventListener {
         text("frozen-stadium", prefs.frozen_stadium ? "Hazardless" : "Normal");
         text("free-camera", prefs.free_camera ? "Free" : "Normal");
         text("ucf", std::getenv("MELEE_UCF") ? "Environment override" : prefs.ucf ? "On" : "Off");
+        text("slippi-fixes", std::getenv("MELEE_SLIPPI_FIXES") ? "Environment override" :
+                                 prefs.slippi_fixes ? "On" : "Off");
         text("unlock-all", prefs.unlock_all ? "Unlocked" : "Normal");
         text("backend", backend_name(prefs.backend));
         slider("volume", prefs.volume * 100.0f);
@@ -763,6 +765,11 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("ucf")->Focus();
+        } else if (id == "slippi-fixes") {
+            prefs.slippi_fixes = !prefs.slippi_fixes;
+            save();
+            refresh_settings();
+            element("slippi-fixes")->Focus();
         } else if (id == "unlock-all") {
             prefs.unlock_all = !prefs.unlock_all;
             save();
@@ -1410,7 +1417,7 @@ public:
             return {"volume", "music-volume", "sfx-volume", "mute", "reverb", "fps", "scale",
                 "port-check-update"};
         case 2:
-            return {"unlock-all", "frozen-stadium", "free-camera", "ucf"};
+            return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes"};
         case 4:
             return {"auth-email", "auth-password", "auth-sign-in", "auth-sign-out", "net-name",
                 "net-delay"};
@@ -1522,6 +1529,8 @@ public:
         label("frozen-stadium", prefs.frozen_stadium ? "Hazardless" : "Normal");
         label("free-camera", prefs.free_camera ? "Free" : "Normal");
         label("ucf", std::getenv("MELEE_UCF") ? "Environment override" : prefs.ucf ? "On" : "Off");
+        label("slippi-fixes", std::getenv("MELEE_SLIPPI_FIXES") ? "Environment override" :
+                                  prefs.slippi_fixes ? "On" : "Off");
         label("unlock-all", prefs.unlock_all ? "Unlocked" : "Normal");
         label("backend", backend_name(prefs.backend));
         slider("volume", prefs.volume * 100.0f);
@@ -1722,6 +1731,8 @@ public:
             prefs.free_camera = !prefs.free_camera;
         } else if (id == "ucf") {
             prefs.ucf = !prefs.ucf;
+        } else if (id == "slippi-fixes") {
+            prefs.slippi_fixes = !prefs.slippi_fixes;
         } else if (id == "unlock-all") {
             prefs.unlock_all = !prefs.unlock_all;
         } else if (id == "backend") {
@@ -2052,6 +2063,16 @@ extern "C" bool pc_is_ucf_enabled(void) {
     }
     static const char* env = std::getenv("MELEE_UCF");
     return env ? env[0] != '0' : prefs.ucf;
+}
+/* Slippi's other gameplay rules: wobbling prevention, neutral spawns and the
+ * Ice Climbers freeze-glitch fix. An online or replay run always plays them
+ * (the peers must agree and Slippi does); offline they are the player's choice. */
+extern "C" bool pc_is_slippi_fixes_enabled(void) {
+    if (pc_net_deterministic()) {
+        return true;
+    }
+    static const char* env = std::getenv("MELEE_SLIPPI_FIXES");
+    return env ? env[0] != '0' : prefs.slippi_fixes;
 }
 extern "C" int pc_get_hud_mode(void) {
     return prefs.hud_mode;
