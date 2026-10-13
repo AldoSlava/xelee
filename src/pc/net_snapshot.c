@@ -301,6 +301,50 @@ uint32_t frame_checksum(const PADStatus* head) {
  * frame whenever they differ. Pads are left out: the render does not read
  * them and a zeroed set keeps both sides comparable. Debug only; one line
  * per 60 hits so a callback that writes every frame cannot flood the log. */
+/* Slippi's wire desync checksum, gathered from the live game. This is a
+ * DIFFERENT value from frame_checksum above, on purpose: frame_checksum is our
+ * own stronger internal hash, while this one is the exact formula Dolphin
+ * computes (src/pc/slippi/slp_checksum.h) and is what a Slippi peer compares.
+ * The two must not be interchanged: Dolphin hard-aborts on a mismatch.
+ *
+ * Field mapping, from slippi-ssbm-asm StartEngineLoop.asm FN_COMPUTE_CHECKSUM:
+ *   action_state <- Fighter.motion_id          (CharacterData+0x10)
+ *   pos_x/pos_y  <- Fighter.cur_pos .x/.y      (CharacterData+0xB0/0xB4)
+ *   percent      <- Fighter.dmg.x1830_percent  (CharacterData+0x1830)
+ *   spawn_num    <- Fighter.x8_spawnNum        (CharacterData+0x8)
+ *   stocks       <- Player_GetStocks(slot)      (player static +0x8E)
+ * The two entity slots per player are primary + secondary (Sheik/Zelda,
+ * Ice Climbers' Nana). Like frame_checksum, only read while a fight is
+ * running: player slots hold dangling entity pointers between scenes. */
+uint32_t pc_slippi_wire_checksum(void) {
+    PcSlippiSlotState slots[PC_SLIPPI_SLOTS];
+    memset(slots, 0, sizeof slots);
+    if (!in_fight()) {
+        return pc_slippi_checksum(slots);
+    }
+    for (int slot = 0; slot < PC_SLIPPI_SLOTS; slot++) {
+        slots[slot].stocks = (uint8_t)Player_GetStocks(slot);
+        for (int idx = 0; idx < PC_SLIPPI_CHARS_PER_SLOT; idx++) {
+            HSD_GObj* gobj = Player_GetEntityAtIndex(slot, idx);
+            if (gobj == NULL || gobj->classifier != HSD_GOBJ_CLASS_FIGHTER) {
+                continue;
+            }
+            const Fighter* fp = GET_FIGHTER(gobj);
+            PcSlippiCharState* ch = &slots[slot].chars[idx];
+            ch->present = true;
+            ch->action_state = (uint32_t)fp->motion_id;
+            memcpy(&ch->pos_x_bits, &fp->cur_pos.x, 4);
+            memcpy(&ch->pos_y_bits, &fp->cur_pos.y, 4);
+            memcpy(&ch->percent_bits, &fp->dmg.x1830_percent, 4);
+            ch->spawn_num = (uint32_t)fp->x8_spawnNum;
+            ch->pos_x = fp->cur_pos.x;
+            ch->pos_y = fp->cur_pos.y;
+            ch->percent = fp->dmg.x1830_percent;
+        }
+    }
+    return pc_slippi_checksum(slots);
+}
+
 void pc_net_render_audit(bool after) {
     static int on = -1;
     static uint32_t before;

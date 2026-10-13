@@ -202,6 +202,37 @@ uint32_t pc_slippi_session_ping_us(const PcSlippiSession* s, int remote_slot) {
     return s->ping_us[remote_slot];
 }
 
+int32_t pc_slippi_session_remote_latest(const PcSlippiSession* s, int remote_slot) {
+    if (remote_slot < 0 || remote_slot >= s->cfg.remote_count || s->rx[remote_slot].count == 0) {
+        return 0;
+    }
+    return rx_at_c(&s->rx[remote_slot], 0)->frame;
+}
+
+bool pc_slippi_session_pad_for_frame(const PcSlippiSession* s, int remote_slot, int32_t frame,
+                                     uint8_t out[PC_SLIPPI_PAD_DATA_SIZE]) {
+    if (remote_slot < 0 || remote_slot >= s->cfg.remote_count) {
+        return false;
+    }
+    const PcSlippiPadQueue* q = &s->rx[remote_slot];
+    if (q->count == 0) {
+        return false;
+    }
+    /* Newest is at logical index 0, older at count-1, contiguous by one. */
+    int32_t newest = rx_at_c(q, 0)->frame;
+    int32_t oldest = rx_at_c(q, q->count - 1)->frame;
+    if (frame > newest || frame < oldest) {
+        return false;
+    }
+    int idx = newest - frame; /* position from newest */
+    const PcSlippiPad* p = rx_at_c(q, idx);
+    if (p->frame != frame) {
+        return false; /* a gap slipped in; do not hand out a wrong frame */
+    }
+    memcpy(out, p->data, PC_SLIPPI_PAD_DATA_SIZE);
+    return true;
+}
+
 int32_t pc_slippi_session_last_acked(const PcSlippiSession* s, int remote_slot) {
     if (remote_slot < 0 || remote_slot >= s->cfg.remote_count) {
         return 0;

@@ -264,6 +264,34 @@ static void test_no_samples_is_zero(void) {
     assert(pc_slippi_session_time_offset_us(&p1) == 0);
 }
 
+static void test_pad_for_frame_lookup(void) {
+    PcSlippiSession p1, p2;
+    make_session(&p1, 0);
+    make_session(&p2, 1);
+    uint8_t pkt[PC_SLIPPI_PACKET_MAX];
+    PcSlippiPad pads[4];
+    for (int i = 0; i < 4; i++) {
+        pads[i] = mkpad(4 - i, (uint8_t)(0x40 + i)); /* newest-first: 4,3,2,1 */
+    }
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, pkt, sizeof pkt);
+    assert(pc_slippi_write_pads(&w, 4, 0, 0, 0, pads, 4));
+    uint8_t ack[16];
+    size_t ack_len;
+    assert(deliver_pad(&p2, pkt, w.len, ack, sizeof ack, &ack_len));
+
+    assert(pc_slippi_session_remote_latest(&p2, 0) == 4);
+
+    uint8_t out[PC_SLIPPI_PAD_DATA_SIZE];
+    assert(pc_slippi_session_pad_for_frame(&p2, 0, 4, out));
+    assert(out[0] == 0x40); /* frame 4 -> fill 0x40 */
+    assert(pc_slippi_session_pad_for_frame(&p2, 0, 1, out));
+    assert(out[0] == 0x43); /* frame 1 -> fill 0x43 */
+    /* A frame outside the held range is refused. */
+    assert(!pc_slippi_session_pad_for_frame(&p2, 0, 5, out));
+    assert(!pc_slippi_session_pad_for_frame(&p2, 0, 0, out));
+}
+
 static void test_start_game_clears(void) {
     PcSlippiSession p1, p2;
     make_session(&p1, 0);
@@ -293,6 +321,7 @@ int main(void) {
     test_ack_floor_bounds_queue();
     test_time_offset_middle_third();
     test_no_samples_is_zero();
+    test_pad_for_frame_lookup();
     test_start_game_clears();
     printf("test_slp_session: all checks passed\n");
     return 0;

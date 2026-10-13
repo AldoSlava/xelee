@@ -177,6 +177,16 @@ bool pc_slippi_session_on_pads(PcSlippiSession* s, PcSlippiReader* r, int* out_r
 void pc_slippi_session_remote_pad(const PcSlippiSession* s, int remote_slot, int max_frames,
                                   PcSlippiRemotePadOutput* out);
 
+/* Newest frame held for a remote (0 when none). */
+int32_t pc_slippi_session_remote_latest(const PcSlippiSession* s, int remote_slot);
+
+/* Copy the 8 wire pad bytes held for an exact remote frame. False when that
+ * frame is not held (already dropped, or never arrived). Used by the game
+ * adapter to walk newly-arrived frames one at a time, the same way the legacy
+ * transport hands each frame to on_inputs. */
+bool pc_slippi_session_pad_for_frame(const PcSlippiSession* s, int remote_slot, int32_t frame,
+                                     uint8_t out[PC_SLIPPI_PAD_DATA_SIZE]);
+
 /* Drop remote pads older than `finalized_frame`, keeping at least one. Mirrors
  * DropOldRemoteInputs. */
 void pc_slippi_session_drop_old(PcSlippiSession* s, int32_t finalized_frame);

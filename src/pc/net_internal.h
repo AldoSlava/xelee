@@ -68,6 +68,7 @@
 #include "pc/net.h"
 #include "pc/net_lan.h"
 #include "pc/pc.h"
+#include "pc/slippi/slp_checksum.h"
 
 #include <dolphin/pad.h>
 #pragma GCC diagnostic push
@@ -528,6 +529,9 @@ void snaps_reserve(void);
 void snaps_free(void);
 void snap_stats_report(void);
 uint32_t frame_checksum(const PADStatus* head);
+/* Slippi's exact wire desync checksum over the live game (net_snapshot.c),
+ * used only on the Slippi transport. Distinct from frame_checksum. */
+uint32_t pc_slippi_wire_checksum(void);
 void record_state(const PADStatus* head, int32_t frame);
 void dump_states_around(int32_t frame);
 const char* state_line(int32_t frame); /* one frame's recorded state line, "" if gone */
