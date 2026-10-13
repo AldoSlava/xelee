@@ -201,6 +201,9 @@ int32_t pc_slippi_session_time_offset_us(const PcSlippiSession* s);
 /* Current RTT estimate for a remote, in microseconds (0 if unknown). */
 uint32_t pc_slippi_session_ping_us(const PcSlippiSession* s, int remote_slot);
 
+/* Newest frame the remote has acked to us (0 when none). */
+int32_t pc_slippi_session_last_acked(const PcSlippiSession* s, int remote_slot);
+
 /* Record a clock-offset sample for a remote from a pad packet whose newest
  * frame is `remote_frame`, observed at local time `now_us`. The offset is
  * `(now - ping/2) - ourLastSendTime + FRAME_US * (ourLastFrame - remoteFrame)`,

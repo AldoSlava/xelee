@@ -202,6 +202,13 @@ uint32_t pc_slippi_session_ping_us(const PcSlippiSession* s, int remote_slot) {
     return s->ping_us[remote_slot];
 }
 
+int32_t pc_slippi_session_last_acked(const PcSlippiSession* s, int remote_slot) {
+    if (remote_slot < 0 || remote_slot >= s->cfg.remote_count) {
+        return 0;
+    }
+    return s->last_frame_acked[remote_slot];
+}
+
 bool pc_slippi_session_on_pads(PcSlippiSession* s, PcSlippiReader* r, int* out_remote_slot,
                                void* ack_out, size_t ack_cap, size_t* ack_len) {
     /* The port in the packet identifies which remote sent it. */

@@ -140,9 +140,9 @@ endif ()
 # src/pc/slippi/ speaks Slippi's ENet protocol (docs/slippi-migration-plan.md
 # M1/M2). ENet is vendored at extern/enet (v1.3.13) because nothing on Android
 # or iOS provides it as a package. win32.c is empty off Windows and unix.c on
-# Windows, so both are listed unconditionally. SEPARATE_FROM_ALL keeps it off
-# the build until the Slippi stack actually links it (M2); the slp_packet test
-# does not use ENet.
+# Windows, so both are listed unconditionally. It is a normal target now that
+# the slp_net test links it; nothing in the shipped melee target links it until
+# M3 wires the Slippi transport in.
 set(ENET_SOURCES
         extern/enet/callbacks.c
         extern/enet/compress.c
@@ -233,11 +233,12 @@ set(PC_SOURCES
         src/pc/slp_format.c
         # Slippi netplay protocol (docs/slippi-migration-plan.md). slp_proto.h is
         # the constants header; slp_packet.c is the wire codec (M1); slp_msg.c
-        # is the message bodies and slp_session.c the transport-free session
-        # core (M2a). The ENet driver (slp_net.c) lands here in M2b.
+        # is the message bodies, slp_session.c the transport-free session core,
+        # and slp_net.c the ENet driver (M2). The game adapter lands in M3.
         src/pc/slippi/slp_packet.c
         src/pc/slippi/slp_msg.c
         src/pc/slippi/slp_session.c
+        src/pc/slippi/slp_net.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
         src/pc/touch.c
@@ -311,7 +312,7 @@ target_compile_options(melee PRIVATE
         $<$<AND:$<COMPILE_LANGUAGE:C>,$<NOT:$<BOOL:${WIN32}>>,$<NOT:$<BOOL:${ANDROID}>>,$<NOT:$<BOOL:${APPLE}>>>:-fno-pie>
         $<$<BOOL:${ANDROID}>:-march=armv8-a+crc+crypto>
         $<$<BOOL:${ANDROID}>:-mtune=cortex-a73>)
-target_link_libraries(melee PRIVATE melee_game aurora::main ${MELEE_CRYPTO_LIBS} ${MELEE_NETWORK_LIBS})
+target_link_libraries(melee PRIVATE melee_game aurora::main melee_enet ${MELEE_CRYPTO_LIBS} ${MELEE_NETWORK_LIBS})
 
 if (IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     target_link_libraries(melee PRIVATE
@@ -576,6 +577,18 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_test(NAME slp_session COMMAND slp_session_test)
         set_tests_properties(slp_session PROPERTIES LABELS melee TIMEOUT 30)
         add_dependencies(unit_tests slp_session_test)
+        # The ENet driver (M2c) runs two peers over loopback, so it links the
+        # vendored ENet. Timed generously: it waits on real ENet handshakes.
+        add_executable(slp_net_test EXCLUDE_FROM_ALL tools/test_slp_net.c)
+        target_include_directories(slp_net_test PRIVATE src)
+        target_compile_options(slp_net_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_net_test PRIVATE melee_enet)
+        if (NOT WIN32)
+            target_link_libraries(slp_net_test PRIVATE pthread)
+        endif ()
+        add_test(NAME slp_net COMMAND slp_net_test)
+        set_tests_properties(slp_net PROPERTIES LABELS melee TIMEOUT 60)
+        add_dependencies(unit_tests slp_net_test)
         add_executable(net_dht_bootstrap_test EXCLUDE_FROM_ALL tools/test_net_dht_bootstrap.c)
         target_compile_options(net_dht_bootstrap_test PRIVATE -UNDEBUG)
         add_test(NAME net_dht_bootstrap COMMAND net_dht_bootstrap_test)
