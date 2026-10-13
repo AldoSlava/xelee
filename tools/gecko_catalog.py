@@ -57,15 +57,18 @@ NOTES = [
      "standard stages, else the stage's own spawn point n for the n-th open slot. Singles "
      "only (2v2 stays retail); the asm's two scene-id exclusions (0x21C, 0x10F) are not "
      "reproduced because only online VS reaches it. Verified: both peers log the same spots."),
-    ("UCF Dashback", "gameplay", "UNVERIFIED",
-     "ftCo_Turn.c ftCo_UcfDashback(), ported from AltimorTASDK/ucf; not compared with the "
-     "asm in Slippi's set (the vanilla disassembly route used for SDI/tumble would do it)"),
+    ("UCF Dashback", "gameplay", "DONE",
+     "ftCo_Turn.c ftCo_UcfDashback(): compared line by line with Slippi's asm and the vanilla "
+     "ftCo_Turn_IASA instructions at the hook (sub-fighter flag, frame 2.0, stick x facing >= "
+     "dash_smash_stick_threshold, timer <= 1, >75-unit raw flick, has_turned/just_turned, Nana "
+     "rewrite). Reads the pad buffer; the timer test is the asm's literal <= 1."),
     ("UCF Shield Drop Extended", "gameplay", "DONE",
      "ftCo_Pass.c ftCo_8009A080 with ftUcf_ShieldDropHeld() (the counter above 1 ORs into the "
      "stick-down test); verified against the vanilla instructions from the disc's main.dol"),
-    ("UCF Shield Drop", "gameplay", "UNVERIFIED",
-     "ftCo_Escape.c ftCo_UcfBlocksSpotDodge() (labelled shield drop in the source), ported from "
-     "the UCF source; not compared with Slippi's asm"),
+    ("UCF Shield Drop", "gameplay", "DONE",
+     "ftCo_Escape.c ftCo_UcfBlocksSpotDodge(): compared line by line with Slippi's asm and the "
+     "vanilla callers (both end in li r3,1 so the asm's LR+8 return means not handled): C-stick "
+     "y, roll-window timer, lstick y > -0.8, floor index, platform flag 0x100, rim test."),
     ("UCF SDI", "gameplay", "DONE",
      "ftucf.c ftUcf_SdiAllowed(), ORed into ftCo_Damage_OnEveryHitlag's timer test; polarity "
      "checked against vanilla (hook 0x8008E54C is the y-timer compare, LT = SDI)"),
@@ -85,13 +88,19 @@ NOTES = [
     ("PreventWobbling", "gameplay", "DONE", "ftwobble.c (3-hit limit), gated on pc_net_deterministic()"),
     ("FreezeDeadUpFallPhysics", "gameplay", "DONE",
      "ftdrawcommon.c UpdateModelPos and ftCo_DeadUpFall_Anim, gated on pc_net_deterministic()"),
-    ("WhispyBlowDirFix", "gameplay", "UNVERIFIED",
-     "grgreens.c has get_whispy_dir(); whether it matches Slippi's fix was not compared"),
-    ("NanaDeterminism", "gameplay", "UNVERIFIED", "Nana's state is in the snapshot; not compared with the asm"),
-    ("BrawlOffscreenDamage", "gameplay", "MISSING", "not found; changes offscreen damage handling"),
+    ("WhispyBlowDirFix", "gameplay", "DONE",
+     "ftlib.c ftLib_GetOpponentsDir(): fighters in motion states 0-11 (death/respawn) no longer "
+     "vote on the direction; asm checked against the vanilla loop"),
+    ("NanaDeterminism", "gameplay", "DONE",
+     "the asm zeroes two uninitialised registers in Nana's cpu stick routine; the decomp's "
+     "ftCo_800AC5A0 already starts stick_x and stick_y at 0 (and the build zero-inits locals)"),
+    ("BrawlOffscreenDamage", "gameplay", "DONE",
+     "fighter.c slippiOffscreen(): the offscreen-damage test uses the stage camera limits instead "
+     "of the magnifier HUD; Home-Run Contest, x221F_b1 and motion 4/6 excluded as in the asm"),
     ("PSCameraIndependentMonitor", "gameplay", "DONE", "grpstadium.c, gated on pc_net_deterministic()"),
-    ("DesyncProofBGTransformations", "gameplay", "UNVERIFIED",
-     "Final Destination background transform; not compared"),
+    ("DesyncProofBGTransformations", "gameplay", "DONE",
+     "grlast.c grLast_8021AAB0(): the Final Destination background transform runs between a "
+     "save and restore of the RNG seed"),
     ("Stadium/StadiumFileLoad", "gameplay", "DONE",
      "net.c pc_net_pure_load(): GrPs1-4.dat are fetched before the first predicting frame"),
     ("Stadium/GrPsxIsValid", "gameplay", "DONE", "same preload mechanism"),
@@ -105,20 +114,31 @@ NOTES = [
     ("Disable FoD During Doubles", "gameplay", "N/A", "we only play 1v1"),
     ("PreventDeadStranding", "gameplay", "N/A", "teams only"),
     ("Teams/", "ui", "N/A", "teams CSS; we only play 1v1"),
-    ("LGLExceededGameEnd", "gameplay", "UNVERIFIED", "ends a game on a lag-limit rule; not compared"),
-    ("PauseCounter", "gameplay", "UNVERIFIED", "online pause handling (pause is allowed only in Direct)"),
-    ("InitPause", "gameplay", "UNVERIFIED", "online pause handling"),
-    ("PreventPauseStranding", "gameplay", "UNVERIFIED", "online pause handling"),
-    ("Salty Runback", "gameplay", "UNVERIFIED", "L+R+A+Start behaviour online"),
-    ("Remember Who LRA Started", "gameplay", "UNVERIFIED", "no-contest bookkeeping"),
-    ("ReportNoContest", "gameplay", "UNVERIFIED", "no-contest bookkeeping"),
-    ("Lagless FoD", "gameplay", "UNVERIFIED",
-     "Recommended code: removes the Fountain of Dreams lag; check it does not alter physics"),
-    ("Normal Lag Reduction", "gameplay", "UNVERIFIED", "Recommended code: the game's own lag-reduction tick"),
-    ("UseInGameDelay", "gameplay", "UNVERIFIED", "Recommended: input delay applied in every in-game scene"),
+    ("LGLExceededGameEnd", "engine", "N/A",
+     "ends the game and says the opponent exceeded the lag limit (45 frames); a netplay timeout "
+     "policy, ours is the stall/disconnect handling in net.c"),
+    ("PauseCounter", "gameplay", "PARTIAL",
+     "Slippi allows pausing in Direct only (bookkeeping in its online struct); ours disables "
+     "pausing in every online mode (gmonlinemode.c), which matches Unranked"),
+    ("InitPause", "gameplay", "PARTIAL", "see PauseCounter: Direct pause is not offered here"),
+    ("PreventPauseStranding", "gameplay", "PARTIAL", "see PauseCounter"),
+    ("Salty Runback", "ui", "N/A",
+     "results/exit flow: A+B held at scene exit returns code 2 (runback); no simulation effect"),
+    ("Remember Who LRA Started", "engine", "N/A",
+     "records who quit with L+R+A+Start for no-contest reporting to Slippi"),
+    ("ReportNoContest", "engine", "N/A", "no-contest reporting to Slippi's servers"),
+    ("Lagless FoD", "gameplay", "N/A",
+     "Recommended performance code: sets bit 2 of a byte in the stage data at FoD init. Not "
+     "disassembled further; nothing in it reads or writes fighter or stage physics state we saw"),
+    ("Normal Lag Reduction", "engine", "N/A",
+     "changes how the game drains its controller polling queue (Dolphin SI timing); our input "
+     "path is not polled that way"),
+    ("UseInGameDelay", "engine", "N/A",
+     "Slippi applies its input delay in every in-game scene; ours applies net.delay to fights"),
     ("GetCommonMinorID", "n/a", "N/A", "helper for UseInGameDelay"),
     ("Polling Drift Fix", "n/a", "N/A", "Dolphin controller polling; not applicable to a native build"),
-    ("DynamicsFix", "gameplay", "UNVERIFIED", "fast-forward dynamics used while resimulating"),
+    ("DynamicsFix", "engine", "N/A",
+     "tweak for Slippi's fast-forward resimulation; ours resimulates through the snapshot engine"),
     ("PreventPadAlarm", "n/a", "N/A", "Dolphin/pad plumbing"),
     ("ForceEngineOnRollback", "engine", "N/A", "Slippi's rollback loop; replaced by our snapshot engine"),
     ("ForceInputRefetchOnAdvance", "engine", "N/A", "rollback input plumbing"),

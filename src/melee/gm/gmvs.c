@@ -1840,7 +1840,10 @@ static bool neutralSpawn(int i, Vec3* v)
     size_t k;
     int n = 0;
     int j;
-    if (!pc_is_slippi_fixes_enabled() || gm_IsCurrently1PMode() || i >= 5 ||
+    /* The asm leaves retail spawns in Training (mode 0x1C) and Target Test
+     * (0x0F); gm_IsCurrently1PMode covers the latter. */
+    if (!pc_is_slippi_fixes_enabled() || gm_IsCurrently1PMode() ||
+        gm_GetCurrentGameMode() == GM_TRAINING || i >= 5 ||
         tmp->state.fighters[i].spawn_point != -1 || tmp->start.is_teams == true)
     {
         return false;

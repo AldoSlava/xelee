@@ -16,8 +16,6 @@ PadLibData HSD_PadLibData;
 HSD_PadStatus HSD_PadMasterStatus[4];
 HSD_PadStatus HSD_PadCopyStatus[4];
 #ifdef TARGET_PC
-s8 pc_pad_master_raw_x[4];
-s8 pc_pad_game_raw_x[4];
 PcRawSticks pc_pad_master_raw[4];
 PcRawSticks pc_pad_game_raw[4];
 #endif
@@ -378,7 +376,6 @@ void HSD_PadRenewMasterStatus(void)
             mp->err = qread->err;
             if (mp->err == 0) {
 #ifdef TARGET_PC
-                pc_pad_master_raw_x[i] = qread->stickX;
                 pc_pad_master_raw[i].x = qread->stickX;
                 pc_pad_master_raw[i].y = qread->stickY;
                 pc_pad_master_raw[i].cx = qread->substickX;
@@ -401,7 +398,6 @@ void HSD_PadRenewMasterStatus(void)
                 mp->err = 0;
             } else {
 #ifdef TARGET_PC
-                pc_pad_master_raw_x[i] = 0;
                 memset(&pc_pad_master_raw[i], 0, sizeof pc_pad_master_raw[i]);
 #endif
                 mp->button = 0;
@@ -546,7 +542,6 @@ void HSD_PadRenewGameStatus(void)
             HSD_PadClearStatusFields(gs);
         }
 #ifdef TARGET_PC
-        pc_pad_game_raw_x[i] = gs->err == 0 ? pc_pad_master_raw_x[i] : 0;
         if (gs->err == 0) {
             pc_pad_game_raw[i] = pc_pad_master_raw[i];
         } else {

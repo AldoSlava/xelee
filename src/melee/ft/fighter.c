@@ -66,6 +66,10 @@
 #include <melee/gm/gm_unsplit.h>
 #include <melee/gr/ground.h>
 #include <melee/gr/stage.h>
+
+#ifdef TARGET_PC
+static bool slippiOffscreen(Fighter* fp);
+#endif
 #include <melee/if/ifmagnify.h>
 #include <melee/it/it_26B1.h>
 #include <melee/it/it_279C.h>
@@ -1611,7 +1615,14 @@ void Fighter_procAnim(Fighter_GObj* gobj)
 
         if (!fp->is_sub_fighter && Camera_80031144() == 1.0f) {
             if (fp->dmg.x1830_percent < p_ftCommonData->x7B0) {
-                if (ifMagnify_802FC998(fp->player_idx) &&
+                if (
+#ifdef TARGET_PC
+                    (pc_is_slippi_fixes_enabled() ? slippiOffscreen(fp) :
+                                                    ifMagnify_802FC998(
+                                                        fp->player_idx)) &&
+#else
+                    ifMagnify_802FC998(fp->player_idx) &&
+#endif
                     (Player_GetMoreFlagsBit3(fp->player_idx) != 0))
                 {
                     fp->dmg.x1910++;
@@ -1834,10 +1845,6 @@ void Fighter_procInput(Fighter_GObj* gobj)
                 fp->input.triggers[0] = (tempf0 > tempf1) ? tempf0 : tempf1;
 
             } else {
-                s8* h = ftCo_ucf_raw_x[fp->player_idx];
-                h[2] = h[1];
-                h[1] = h[0];
-                h[0] = pc_pad_game_raw_x[fp->player_idx];
                 SET_STICKS(fp->input.lstick[0].x, fp->input.lstick[0].y,
                            HSD_PadGameStatus[fp->pad_port].nml_stickX,
                            HSD_PadGameStatus[fp->pad_port].nml_stickY);
@@ -2179,6 +2186,27 @@ void Fighter_procInput(Fighter_GObj* gobj)
         float c = 0;                                                          \
         vecLocal->x = vecLocal->y = vecLocal->z = c;                          \
     } while (0)
+
+#ifdef TARGET_PC
+/* Slippi's BrawlOffscreenDamage (Required: Slippi Online, hook 0x8006A880,
+ * replacing the call to ifMagnify_802FC998). Vanilla asks the magnifying-glass
+ * HUD whether the fighter is offscreen, which depends on the camera and the
+ * screen shape. Slippi asks the stage instead: is the fighter outside the
+ * stage's camera limits. Home-Run Contest, a flagged fighter (x221F_b1) and
+ * the dead-up states (motion 4 and 6) never count. */
+static bool slippiOffscreen(Fighter* fp)
+{
+    if (gm_GetCurrentGameMode() == GM_HOME_RUN_CONTEST || fp->x221F_b1 ||
+        fp->motion_id == 4 || fp->motion_id == 6)
+    {
+        return false;
+    }
+    return fp->cur_pos.x < Stage_GetCamBoundsLeftOffset() ||
+           fp->cur_pos.x > Stage_GetCamBoundsRightOffset() ||
+           fp->cur_pos.y > Stage_GetCamBoundsTopOffset() ||
+           fp->cur_pos.y < Stage_GetCamBoundsBottomOffset();
+}
+#endif
 
 void Fighter_procUpdate(Fighter_GObj* gobj)
 {
