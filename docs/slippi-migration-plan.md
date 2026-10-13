@@ -440,6 +440,13 @@ live online match cannot be frozen, so the XR pre-fight hold is off in netplay
 and stages would otherwise use their default placement; placements made in the
 menu must be what the fight uses (presentation only, same invariant as the hold).
 
+Parked (user's call, 2026-10-13): Slippi's **Teams** (2v2, mode 3) and **Party**
+(mode 4; fixed rules like Unranked, 5-minute timer) modes. Everything built so
+far is 1v1: the rollback engine, `net.local/remote`, the ticket parse (it
+rejects anything but one remote), the CSS panels and the results flow. They
+need multi-remote ENet sessions and the teams parts of the Neutral Spawn code
+and CSS first. The Online menu offers Slippi > Unranked / Direct and LAN only.
+
 Not done: the four dark name bars under the CSS doors are still drawn (a
 structure outside the joints hidden so far); the Direct screen still takes the
 DHT `#XXXXXXXX` code, not a Slippi connect code (`ABCD#123`); results-screen

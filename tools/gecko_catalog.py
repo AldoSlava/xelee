@@ -57,18 +57,29 @@ NOTES = [
      "standard stages, else the stage's own spawn point n for the n-th open slot. Singles "
      "only (2v2 stays retail); the asm's two scene-id exclusions (0x21C, 0x10F) are not "
      "reproduced because only online VS reaches it. Verified: both peers log the same spots."),
-    ("UCF Dashback", "gameplay", "DONE", "ftCo_Turn.c ftCo_UcfDashback()"),
-    ("UCF Shield Drop Extended", "gameplay", "MISSING", "only the base shield-drop rule is ported"),
-    ("UCF Shield Drop", "gameplay", "DONE",
-     "ftCo_Escape.c ftCo_UcfBlocksSpotDodge() (labelled shield drop in the source)"),
-    ("UCF SDI", "gameplay", "MISSING", "no UCF SDI handling found in src/melee/ft"),
-    ("UCF Shield SDI", "gameplay", "MISSING", "no UCF shield-SDI handling found"),
-    ("UCF Tumble", "gameplay", "MISSING", "no UCF tumble handling found"),
+    ("UCF Dashback", "gameplay", "UNVERIFIED",
+     "ftCo_Turn.c ftCo_UcfDashback(), ported from AltimorTASDK/ucf; not compared with the "
+     "asm in Slippi's set (the vanilla disassembly route used for SDI/tumble would do it)"),
+    ("UCF Shield Drop Extended", "gameplay", "DONE",
+     "ftCo_Pass.c ftCo_8009A080 with ftUcf_ShieldDropHeld() (the counter above 1 ORs into the "
+     "stick-down test); verified against the vanilla instructions from the disc's main.dol"),
+    ("UCF Shield Drop", "gameplay", "UNVERIFIED",
+     "ftCo_Escape.c ftCo_UcfBlocksSpotDodge() (labelled shield drop in the source), ported from "
+     "the UCF source; not compared with Slippi's asm"),
+    ("UCF SDI", "gameplay", "DONE",
+     "ftucf.c ftUcf_SdiAllowed(), ORed into ftCo_Damage_OnEveryHitlag's timer test; polarity "
+     "checked against vanilla (hook 0x8008E54C is the y-timer compare, LT = SDI)"),
+    ("UCF Shield SDI", "gameplay", "DONE",
+     "ftucf.c ftUcf_ShieldSdiAllowed(), ORed into ftCo_80093240's timer test (X axis only)"),
+    ("UCF Tumble", "gameplay", "DONE",
+     "ftucf.c ftUcf_TumbleAllowed(): replaces the x214 window test in ftCo_DamageFall_IASA "
+     "(timer 0 always, timer 1 only on a >75-unit flick from inside the threshold)"),
     ("UCF Pad Buffer", "gameplay", "DONE",
      "ftucf.c ftUcf_Update(): per-port raw stick history, the 1.0 cardinals snap and the "
      "flick counter, called from Fighter_procInput before the trigger timers. Offline too "
      "(ucf pref, default on). The SDI, shield-SDI and tumble rules below read this history."),
-    ("UCF DBOOC SquatRv Fix", "gameplay", "MISSING", "not found"),
+    ("UCF DBOOC SquatRv Fix", "gameplay", "DONE",
+     "ftCo_SquatRv.c: stand-up threshold 0.59 on the first rim frame"),
     ("UCF Text", "ui", "N/A", "the on-screen UCF indicator; cosmetic"),
     ("FreezeGlitchFix", "gameplay", "DONE", "ftnanaspecials.c, gated on pc_net_deterministic()"),
     ("PreventWobbling", "gameplay", "DONE", "ftwobble.c (3-hit limit), gated on pc_net_deterministic()"),

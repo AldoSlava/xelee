@@ -100,7 +100,7 @@ static u16 mn_803EAE7C[] = {
     0x2, 0x3, 0x4, 0x9, 0xB, 0xC, 0xD, 0x0,
 };
 #ifdef TARGET_PC
-#define MENU_KIND_TABLE_LEN (MENU_KIND_ONLINE + 1)
+#define MENU_KIND_TABLE_LEN (MENU_KIND_ONLINE_SLIPPI + 1)
 #else
 #define MENU_KIND_TABLE_LEN 0x22
 #endif
@@ -282,6 +282,11 @@ static AnimLoopSettings mn_803EAE8C[MENU_KIND_TABLE_LEN][3] = {
         { 450, 499, 450 },
         { 500, 599, 500 },
     },
+    { /* MENU_KIND_ONLINE_SLIPPI: same */
+        { 400, 449, 400 },
+        { 450, 499, 450 },
+        { 500, 599, 500 },
+    },
 #endif
 };
 
@@ -329,8 +334,10 @@ static AnimLoopSettings mn_803EB48C[] = {
 
 #ifdef TARGET_PC
 /* MENU_KIND_ONLINE preview pane: the Melee (CSS) preview for every item */
-static AnimLoopSettings mn_OnlinePreview[5] = {
-    { 700, 749, 720 }, { 700, 749, 720 }, { 700, 749, 720 },
+static AnimLoopSettings mn_OnlinePreview[2] = {
+    { 700, 749, 720 }, { 700, 749, 720 },
+};
+static AnimLoopSettings mn_OnlineSlippiPreview[2] = {
     { 700, 749, 720 }, { 700, 749, 720 },
 };
 #endif
@@ -650,6 +657,13 @@ MenuKindData mn_803EB6B0[MENU_KIND_TABLE_LEN] = {
         NULL,
         ARRAY_SIZE(mn_OnlinePreview),
         mnOnline_Think,
+    },
+    { /* MENU_KIND_ONLINE_SLIPPI */
+        mn_OnlineSlippiPreview,
+        40,
+        NULL,
+        ARRAY_SIZE(mn_OnlineSlippiPreview),
+        mnOnline_SlippiThink,
     },
 #endif
 };
@@ -1986,6 +2000,7 @@ int mn_8022C010(int menu_kind, int selection)
     case MENU_KIND_NAME_ENTRY:
 #ifdef TARGET_PC
     case MENU_KIND_ONLINE:
+    case MENU_KIND_ONLINE_SLIPPI:
 #endif
         return 1;
     case MENU_KIND_TOY:
@@ -2752,7 +2767,7 @@ void mn_8022D594(HSD_GObj* gp)
 #ifdef TARGET_PC
         case SEL_VS_ONLINE:
             sfxForward();
-            mn_80229894(MENU_KIND_ONLINE, SEL_ONLINE_LAN, 1);
+            mn_80229894(MENU_KIND_ONLINE, SEL_ONLINE_SLIPPI, 1);
             break;
 #endif
         case SEL_VS_SPECIAL:

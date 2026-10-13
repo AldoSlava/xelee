@@ -24,6 +24,22 @@ void ftUcf_Update(Fighter* fp);
 /// before it: the flick measure the SDI, shield SDI and tumble rules use.
 int ftUcf_FlickSq(int port);
 int ftUcf_FlickYSq(int port);
+int ftUcf_FlickXSq(int port);
+
+/// UCF "SDI" and "Shield SDI": an extra way into smash DI, taken when the
+/// stick was flicked past the threshold (see ftucf.c). Both are only asked
+/// after the vanilla timer test has already said no.
+bool ftUcf_SdiAllowed(Fighter* fp);
+bool ftUcf_ShieldSdiAllowed(Fighter* fp);
+
+/// UCF "Tumble": the test for wiggling out of tumble (DamageFall) with a
+/// sideways stick. It replaces the vanilla window test rather than adding to it.
+bool ftUcf_TumbleAllowed(Fighter* fp);
+
+/// UCF "Shield Drop Extended": the downward flick counter has run for more
+/// than one frame, which lets a shield drop through even when the stick has
+/// already drifted back above the vanilla threshold.
+bool ftUcf_ShieldDropHeld(Fighter* fp);
 #endif
 
 #endif

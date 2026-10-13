@@ -2,6 +2,9 @@
 
 #include <Runtime/platform.h>
 
+#include <melee/ft/ftucf.h>
+#include <pc/pc.h>
+
 #include <math.h>
 #include <placeholder.h>
 
@@ -510,7 +513,11 @@ void ftCo_Damage_OnEveryHitlag(Fighter_GObj* gobj)
         VEC2_SQ_LEN(fp->input.lstick[0]) >=
             SQ(p_ftCommonData->sdi_min_stick_mag) &&
         (fp->active_timer.lstick.x < p_ftCommonData->sdi_stick_window ||
-         fp->active_timer.lstick.y < p_ftCommonData->sdi_stick_window))
+         fp->active_timer.lstick.y < p_ftCommonData->sdi_stick_window
+#ifdef TARGET_PC
+         || (pc_is_ucf_enabled() && ftUcf_SdiAllowed(fp))
+#endif
+             ))
     {
         float scaled_lstick_x =
             fp->input.lstick[0].x * p_ftCommonData->sdi_pos_scale;

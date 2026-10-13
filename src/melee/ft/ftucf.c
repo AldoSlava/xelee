@@ -112,6 +112,88 @@ int ftUcf_FlickSq(int port)
     return dx * dx + dy * dy;
 }
 
+int ftUcf_FlickXSq(int port)
+{
+    const FtUcfPad* b = &ftUcf_pad[port];
+    int dx = b->hist[b->idx][0] - b->hist[(b->idx - 2) & 3][0];
+    return dx * dx;
+}
+
+/* UCF 0.84 "SDI" (UCF SDI.asm, hook 0x8008E54C in ftCo_Damage_OnEveryHitlag,
+ * replacing the compare of the stick timer with the SDI window). Vanilla lets a
+ * stick SDI only while a timer that counts from the stick crossing the smash
+ * threshold is inside the window, which a quick flick on some controllers
+ * misses. UCF adds: the stick crossed a threshold within the last frame on
+ * either axis, last frame's stick was inside the dead zone, and the raw stick
+ * moved more than 62 units over the last two frames. The result is the OR
+ * with the vanilla test, so this is only asked once that has failed. */
+bool ftUcf_SdiAllowed(Fighter* fp)
+{
+    float lx = fp->input.lstick[1].x;
+    float ly = fp->input.lstick[1].y;
+    float thr = p_ftCommonData->sdi_min_stick_mag;
+    int port = fp->pad_port;
+    if (port >= 4) {
+        return false;
+    }
+    if (fp->active_sticky.lstick.x > 1 && fp->active_sticky.lstick.y > 1) {
+        return false;
+    }
+    /* fmuls y*y, then fmadds x*x + that: one rounding for the sum */
+    if (thr * thr <= fmaf(lx, lx, ly * ly)) {
+        return false;
+    }
+    return ftUcf_FlickSq(port) > 0xF04;
+}
+
+/* UCF 0.84 "Shield SDI" (hook 0x80093294 in ftCo_80093240): the same idea on
+ * the X axis alone. Last frame's X is compared signed, as in the asm. */
+bool ftUcf_ShieldSdiAllowed(Fighter* fp)
+{
+    int port = fp->pad_port;
+    if (port >= 4) {
+        return false;
+    }
+    if (fp->active_sticky.lstick.x > 1) {
+        return false;
+    }
+    if (fp->input.lstick[1].x >= p_ftCommonData->sdi_min_stick_mag) {
+        return false;
+    }
+    return ftUcf_FlickXSq(port) > 0xF04;
+}
+
+/* UCF 0.84 "Tumble" (UCF Tumble.asm, hook 0x800908F4 in ftCo_DamageFall_IASA,
+ * replacing `cmpw timer, window` with `cmpwi timer, 1`). Vanilla lets a stick
+ * past the x210 threshold escape tumble while its timer is under the x214
+ * window. UCF tightens that: on the first frame (timer 0) it always does; on
+ * the second (timer 1) only if last frame's stick was still inside the
+ * threshold and the raw stick moved more than 75 units over two frames (a
+ * real flick, not a drift); later frames never do. */
+bool ftUcf_TumbleAllowed(Fighter* fp)
+{
+    int t = fp->active_timer.lstick.x;
+    int port = fp->pad_port;
+    if (t != 1) {
+        return t < 1;
+    }
+    if (port >= 4) {
+        return false;
+    }
+    if (fabsf(fp->input.lstick[1].x) >= p_ftCommonData->x210) {
+        return false;
+    }
+    return ftUcf_FlickXSq(port) > 0x15F9;
+}
+
+/* UCF 0.84 "Shield Drop Extended" (hook 0x8009A0B8, the stick-down compare
+ * inlined into ftCo_8009A080): vanilla OR the counter being above 1. */
+bool ftUcf_ShieldDropHeld(Fighter* fp)
+{
+    int port = fp->pad_port;
+    return port < 4 && ftUcf_pad[port].flag > 1;
+}
+
 int ftUcf_FlickYSq(int port)
 {
     const FtUcfPad* b = &ftUcf_pad[port];

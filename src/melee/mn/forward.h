@@ -120,6 +120,8 @@ typedef enum MenuKind {
 #ifdef TARGET_PC
     /* PC: VS Mode > Online. Its row is appended to mnmain.c's tables. */
     MENU_KIND_ONLINE = 34,
+    /* PC: VS Mode > Online > Slippi (Unranked, Direct, ...). */
+    MENU_KIND_ONLINE_SLIPPI = 35,
 #endif
 } MenuKind;
 
@@ -172,13 +174,17 @@ typedef enum VsMenuSelection {
 } VsMenuSelection;
 
 #ifdef TARGET_PC
+/* VS Mode > Online: Slippi (a submenu of its modes) or LAN. */
 typedef enum OnlineMenuSelection {
-    SEL_ONLINE_LAN = 0,
-    SEL_ONLINE_DIRECT = 1,
-    SEL_ONLINE_RANKED = 2,
-    SEL_ONLINE_UNRANKED = 3,
-    SEL_ONLINE_PROFILE = 4,
+    SEL_ONLINE_SLIPPI = 0,
+    SEL_ONLINE_LAN = 1,
 } OnlineMenuSelection;
+
+/* VS Mode > Online > Slippi: only Slippi's own modes. */
+typedef enum SlippiMenuSelection {
+    SEL_SLIPPI_UNRANKED = 0,
+    SEL_SLIPPI_DIRECT = 1,
+} SlippiMenuSelection;
 #endif
 
 typedef enum SpecialVsMenuSelection {

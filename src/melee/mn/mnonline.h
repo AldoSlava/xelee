@@ -11,6 +11,8 @@
 
 /* 22D594-style think proc, see mn_803EB6B0[MENU_KIND_ONLINE]. */
 void mnOnline_Think(HSD_GObj*);
+/* The Slippi submenu (MENU_KIND_ONLINE_SLIPPI). */
+void mnOnline_SlippiThink(HSD_GObj*);
 
 /* Literal label / bottom-bar text for PC-only entries; NULL = stock. */
 const char* mnOnline_Label(MenuKind, int selection);
