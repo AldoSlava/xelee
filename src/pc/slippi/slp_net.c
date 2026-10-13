@@ -51,6 +51,17 @@ void pc_slippi_net_global_shutdown(void) {
     }
 }
 
+void pc_slippi_net_set_callbacks(PcSlippiNet* n, const PcSlippiNetCallbacks* cb) {
+    if (n == NULL) {
+        return;
+    }
+    if (cb != NULL) {
+        n->cb = *cb;
+    } else {
+        memset(&n->cb, 0, sizeof n->cb);
+    }
+}
+
 PcSlippiNet* pc_slippi_net_create(const PcSlippiSessionConfig* cfg, uint16_t local_udp_port,
                                   const PcSlippiNetCallbacks* cb) {
     if (local_udp_port != 0 && g_enet_refs == 0) {
@@ -176,6 +187,20 @@ bool pc_slippi_net_send_pad(PcSlippiNet* n, int32_t frame,
     return true;
 }
 
+bool pc_slippi_net_resend_pad(PcSlippiNet* n) {
+    if (n == NULL || n->host == NULL || n->peer == NULL
+        || n->status != PC_SLIPPI_NET_CONNECTED) {
+        return false;
+    }
+    uint8_t buf[PKT_MAX];
+    size_t len = 0;
+    if (!pc_slippi_session_resend(&n->session, buf, sizeof buf, &len)) {
+        return false;
+    }
+    send_raw(n, buf, len, buf[0]);
+    return true;
+}
+
 bool pc_slippi_net_send_selections(PcSlippiNet* n, const PcSlippiSelections* s) {
     if (n == NULL || n->host == NULL || n->peer == NULL || n->status != PC_SLIPPI_NET_CONNECTED) {
         return false;
@@ -218,6 +243,42 @@ bool pc_slippi_net_send_conn_selected(PcSlippiNet* n) {
     PcSlippiWriter w;
     pc_slippi_writer_init(&w, buf, sizeof buf);
     pc_slippi_put_u8(&w, PC_SLIPPI_MSG_CONN_SELECTED);
+    send_raw(n, buf, w.len, buf[0]);
+    return true;
+}
+
+bool pc_slippi_net_send_setup(PcSlippiNet* n, uint32_t seed, int32_t start_frame) {
+    if (n == NULL || n->host == NULL || n->peer == NULL || n->status != PC_SLIPPI_NET_CONNECTED) {
+        return false;
+    }
+    uint8_t buf[16];
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_u8(&w, PC_SLIPPI_MSG_SETUP);
+    pc_slippi_put_u32(&w, seed);
+    pc_slippi_put_i32(&w, start_frame);
+    send_raw(n, buf, w.len, buf[0]);
+    return true;
+}
+
+bool pc_slippi_net_send_rel(PcSlippiNet* n, uint8_t type, const void* payload, int len) {
+    if (n == NULL || n->host == NULL || n->peer == NULL || n->status != PC_SLIPPI_NET_CONNECTED) {
+        return false;
+    }
+    if (len < 0 || len > 255) {
+        return false;
+    }
+    uint8_t buf[1 + 1 + 255];
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, buf, sizeof buf);
+    pc_slippi_put_u8(&w, PC_SLIPPI_MSG_REL);
+    pc_slippi_put_u8(&w, type);
+    if (len > 0) {
+        pc_slippi_put_bytes(&w, payload, (size_t)len);
+    }
+    if (!w.ok) {
+        return false;
+    }
     send_raw(n, buf, w.len, buf[0]);
     return true;
 }
@@ -337,6 +398,24 @@ static void on_message(PcSlippiNet* n, uint8_t mid, PcSlippiReader* r, uint64_t 
             n->cb.on_conn_selected(n->cb.user);
         }
         break;
+    case PC_SLIPPI_MSG_SETUP: {
+        /* melee-pc direct-session setup: seed + start frame (see slp_proto.h). */
+        uint32_t seed = pc_slippi_get_u32(r);
+        int32_t start_frame = pc_slippi_get_i32(r);
+        if (r->ok && n->cb.on_setup != NULL) {
+            n->cb.on_setup(n->cb.user, seed, start_frame);
+        }
+        break;
+    }
+    case PC_SLIPPI_MSG_REL: {
+        /* Tunnelled engine reliable message: type u8, then raw payload. */
+        uint8_t type = pc_slippi_get_u8(r);
+        size_t remaining = pc_slippi_reader_remaining(r);
+        if (r->ok && remaining <= PC_SLIPPI_PACKET_MAX && n->cb.on_rel != NULL) {
+            n->cb.on_rel(n->cb.user, type, r->data + r->pos, (int)remaining);
+        }
+        break;
+    }
     default:
         /* Unknown or Ranked-only id: ignored, exactly as the reference does. */
         break;

@@ -44,9 +44,14 @@ extern "C" {
 typedef void (*PcSlippiFrameFn)(void* user, int remote_slot, int32_t frame,
                                 const uint8_t pad[PC_SLIPPI_PAD_DATA_SIZE]);
 
+/* melee-pc direct-session setup from the peer (seed + start frame). Interim
+ * until M4's selections flow. */
+typedef void (*PcSlippiSetupFn)(void* user, uint32_t seed, int32_t start_frame);
+
 typedef struct PcSlippiAdapter {
     PcSlippiNet* net;
     PcSlippiFrameFn on_frame;
+    PcSlippiSetupFn on_setup;
     void* user;
     /* Newest frame handed to the game per remote. Starts at 0 (nothing
      * delivered); a packet carrying frames 1..N walks 1..N and leaves this at
@@ -56,10 +61,10 @@ typedef struct PcSlippiAdapter {
     bool started; /* start_game clears delivery bookkeeping */
 } PcSlippiAdapter;
 
-/* Bind an adapter to a connected (or connecting) driver. `on_frame` may be NULL
- * if the caller only wants the send/query surface. */
+/* Bind an adapter to a connected (or connecting) driver. Either callback may be
+ * NULL if the caller does not want that surface. */
 void pc_slippi_adapter_init(PcSlippiAdapter* a, PcSlippiNet* net, PcSlippiFrameFn on_frame,
-                            void* user);
+                            PcSlippiSetupFn on_setup, void* user);
 
 /* Service ENet once (no wait) and deliver every newly-arrived contiguous remote
  * frame through on_frame. Returns true if any frame was delivered. `now_us`
@@ -74,6 +79,19 @@ bool pc_slippi_adapter_send_local(PcSlippiAdapter* a, int32_t frame, const void*
 /* Set the finalized-frame and Slippi wire checksum carried on outgoing pad
  * packets. The adapter forwards to the session. */
 void pc_slippi_adapter_set_checksum(PcSlippiAdapter* a, int32_t frame, uint32_t checksum);
+
+/* Newest finalized wire checksum the remote reported (its pad packet's
+ * checksum_frame/checksum), for the desync check. Returns false until one has
+ * arrived. */
+bool pc_slippi_adapter_remote_checksum(const PcSlippiAdapter* a, int remote_slot,
+                                       int32_t* frame, uint32_t* value);
+
+/* Send the melee-pc direct-session setup (seed/start frame). Interim. */
+bool pc_slippi_adapter_send_setup(PcSlippiAdapter* a, uint32_t seed, int32_t start_frame);
+
+/* Re-send the current unacked local pad window without adding a pad (see
+ * pc_slippi_session_resend): keeps a waiting peer fed. */
+bool pc_slippi_adapter_resend_local(PcSlippiAdapter* a);
 
 /* Reset per-game delivery state and the session's receive queues, as a match
  * starting does. */

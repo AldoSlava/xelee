@@ -65,6 +65,12 @@ typedef struct PcSlippiNetCallbacks {
     void (*on_selections)(void* user, int remote_slot, const PcSlippiSelections* s);
     void (*on_chat)(void* user, int remote_slot, int message_id);
     void (*on_conn_selected)(void* user);
+    /* melee-pc direct-session setup (PC_SLIPPI_MSG_SETUP): the host's agreed
+     * seed and start frame. Interim until M4's selections flow. */
+    void (*on_setup)(void* user, uint32_t seed, int32_t start_frame);
+    /* A tunnelled engine reliable message (PC_SLIPPI_MSG_REL): the engine's
+     * own lane-1 type and payload. */
+    void (*on_rel)(void* user, uint8_t type, const void* payload, int len);
     void* user;
 } PcSlippiNetCallbacks;
 
@@ -73,6 +79,11 @@ typedef struct PcSlippiNet PcSlippiNet;
 /* Initialise the ENet library. Idempotent; returns false if it cannot. */
 bool pc_slippi_net_global_init(void);
 void pc_slippi_net_global_shutdown(void);
+
+/* Replace the driver's callbacks after creation. The adapter uses this to
+ * receive setup/selection/chat/connection events, which arrive through the
+ * net's callback struct rather than a direct poll. */
+void pc_slippi_net_set_callbacks(PcSlippiNet* n, const PcSlippiNetCallbacks* cb);
 
 /* Create a driver for one remote. `local_udp_port` of 0 lets ENet pick one
  * (fine for tests and direct connects); a matchmaking hole punch needs the
@@ -108,6 +119,14 @@ bool pc_slippi_net_send_chat(PcSlippiNet* n, int message_id);
 /* Send NP_MSG_SLIPPI_CONN_SELECTED (reliable): this is the connection we keep
  * when several came up during a hole punch. */
 bool pc_slippi_net_send_conn_selected(PcSlippiNet* n);
+
+/* Send the melee-pc direct-session setup (reliable). Interim: lets two
+ * melee-pc peers agree seed/start-frame without the custom handshake. */
+bool pc_slippi_net_send_setup(PcSlippiNet* n, uint32_t seed, int32_t start_frame);
+
+/* Send a tunnelled engine reliable message (REL_SCENE/REL_DELAY/REL_CHAT/...)
+ * on ENet's reliable channel: type u8, then the raw payload. */
+bool pc_slippi_net_send_rel(PcSlippiNet* n, uint8_t type, const void* payload, int len);
 
 /* Tell ENet to disconnect with `reason` in the disconnect data field. */
 void pc_slippi_net_disconnect(PcSlippiNet* n, int reason);

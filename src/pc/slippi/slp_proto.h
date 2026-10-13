@@ -85,6 +85,16 @@ enum PcSlippiMsg {
     /* Not Slippi: melee-pc/melee-unlocked build identity, safe to send because
      * stock Slippi Dolphin logs an unknown id and ignores it. */
     PC_SLIPPI_MSG_BUILD = 0xE0,
+    /* Not Slippi: a melee-pc-only direct-session setup (seed + start frame),
+     * so two melee-pc peers can agree the match without the custom RULES/READY
+     * handshake, which rides the custom socket. Interim: Slippi's own
+     * selections/game-start flow replaces this in M4 (Dolphin interop). Same
+     * safety as BUILD: an unknown id is logged and ignored by stock Slippi. */
+    PC_SLIPPI_MSG_SETUP = 0xE1,
+    /* Not Slippi: a melee-pc-only tunnel for the engine's own reliable lane
+     * (REL_SCENE, REL_DELAY, REL_CHAT, ...), which otherwise rides the custom
+     * socket. Carried on ENet's reliable channel. Same safety as BUILD. */
+    PC_SLIPPI_MSG_REL = 0xE2,
 };
 
 /* ---- receive limits (upstream SlippiNetplay.cpp) ----------------------

@@ -31,6 +31,7 @@
 #include "pc/net_internal.h"
 #include "pc/net_sfx.h"
 #include "pc/slippi/slp_adapter.h"
+#include "pc/slippi/slp_checksum.h"
 
 #include <dolphin/ar.h>
 #include <dolphin/os.h>
@@ -90,7 +91,12 @@ static struct {
     uint32_t ck;
 } s_rck[RING];
 static int32_t s_ck_checked = -1; /* newest frame compared against the peer's */
+static bool s_slippi_ck_checked_once;
 static uint32_t s_ck_ring[RING];  /* our checksum entering each frame */
+/* Per-frame Slippi wire checksum, computed the same place s_ck_ring is. The
+ * wire carries Slippi's formula, not our FNV one, so the desync check under
+ * Slippi compares against this ring (see check_desync). */
+static uint32_t s_wire_ck_ring[RING];
 static bool s_heard;              /* any packet from the peer yet */
 static uint64_t s_last_rx_ns;     /* when the last accepted datagram arrived */
 /* When the contiguous remote mark last moved, 0 before the first time. The
@@ -769,7 +775,6 @@ static void on_inputs(const Packet* pk, bool reordered) {
 static void slp_frame_cb(void* user, int remote_slot, int32_t frame,
                          const uint8_t pad[PC_SLIPPI_PAD_DATA_SIZE]) {
     (void)user;
-    (void)remote_slot;
     /* The local peer occupies one port, so in a 1v1 there is a single remote
      * pad per frame; WirePad and the 8 wire bytes are the same layout. */
     WirePad wp;
@@ -788,11 +793,57 @@ static void slp_frame_cb(void* user, int remote_slot, int32_t frame,
     if (frame > s_remote_newest) {
         s_remote_newest = frame;
     }
+    /* The peer stamps every pad packet with its newest finalized Slippi
+     * checksum. Record it under its own frame so check_desync can compare it
+     * with our s_wire_ck_ring entry for that frame (the legacy path does the
+     * same from each packet's ck_frame/ck). */
+    int32_t ckf = -1;
+    uint32_t ckv = 0;
+    if (pc_slippi_adapter_remote_checksum(&s_slippi, remote_slot, &ckf, &ckv) && ckf >= 0) {
+        int i = ckf & (RING - 1);
+        if (s_rck[i].frame < ckf) { /* never let an older report overwrite */
+            s_rck[i].frame = ckf;
+            s_rck[i].ck = ckv;
+        }
+    }
 }
 
 /* Monotonic microseconds for the Slippi clock-offset sample. */
 static uint64_t s_slippi_now_us(void) {
     return SDL_GetTicksNS() / 1000ull;
+}
+
+/* The Slippi direct-session setup (seed + start frame) from the peer. The host
+ * sends PC_SLIPPI_MSG_SETUP; the guest applies it and marks the handshake done.
+ * Interim: M4's selections flow replaces this for Dolphin interop. */
+static void slp_setup_cb(void* user, uint32_t seed, int32_t start_frame) {
+    (void)user;
+    if (net.hs == HS_DONE) {
+        return;
+    }
+    net.seed = seed;
+    *HSD_RandSeedPtr = seed;
+    net.start_frame = start_frame;
+    net.hs = HS_DONE;
+    net.hs_host = false;
+    net.ck_from = start_frame;
+    net.desync_reported = false;
+    pc_log_line("net: Slippi setup from host: seed=%u start_frame=%d (frame %d)", seed,
+        start_frame, net.tick_frame);
+}
+
+/* A tunnelled engine reliable message from the peer (scene hand-off, delay,
+ * chat): hand it to the same consumer the custom transport's lane 1 uses. */
+static void slp_rel_cb(void* user, uint8_t type, const void* payload, int len) {
+    (void)user;
+    rel_dispatch(type, payload, len);
+}
+
+bool pc_net_slippi_send_rel(uint8_t type, const void* payload, int len) {
+    if (!s_slippi_on) {
+        return false;
+    }
+    return pc_slippi_net_send_rel(s_slippi.net, type, payload, len);
 }
 
 /* One Slippi pump: service ENet and deliver any new contiguous frames through
@@ -816,8 +867,14 @@ static void s_slippi_send_inputs(void) {
         return;
     }
     /* The finalized-frame checksum the peer compares (Slippi's formula, not
-     * our frame_checksum). Computed once here, before the pads go out. */
-    pc_slippi_adapter_set_checksum(&s_slippi, confirmed_frame(), pc_slippi_wire_checksum());
+     * our frame_checksum). Taken from the ring, not sampled live: the value
+     * for a frame must be the one computed when that frame was simulated,
+     * or prediction makes the two peers label different states with the
+     * same frame. */
+    int32_t cf = confirmed_frame();
+    if (cf >= 0) {
+        pc_slippi_adapter_set_checksum(&s_slippi, cf, s_wire_ck_ring[cf & (RING - 1)]);
+    }
     uint64_t now = s_slippi_now_us();
     for (int32_t f = s_slippi_sent_upto + 1; f <= s_wrote; f++) {
         const WirePad* w = &s_local_ring[f & (RING - 1)];
@@ -862,6 +919,31 @@ static bool s_slippi_recv(void) {
     return got;
 }
 
+bool pc_net_slippi_active(void) {
+    return s_slippi_on;
+}
+
+bool pc_net_slippi_send_setup(uint32_t seed, int32_t start_frame) {
+    if (!s_slippi_on) {
+        return false;
+    }
+    return pc_slippi_adapter_send_setup(&s_slippi, seed, start_frame);
+}
+
+int pc_net_slippi_conn_state(void) {
+    if (!s_slippi_on) {
+        return 2;
+    }
+    int st = pc_slippi_adapter_status(&s_slippi);
+    if (st == PC_SLIPPI_NET_CONNECTED) {
+        return 1;
+    }
+    if (st == PC_SLIPPI_NET_DISCONNECTED || st == PC_SLIPPI_NET_FAILED) {
+        return 2;
+    }
+    return 0;
+}
+
 /* The Slippi wait: pump until the needed frame is delivered or the peer goes
  * away/silent. ENet owns reliability and connection state, so the custom
  * transport's reconnect phase has no analogue here; a connected session simply
@@ -876,6 +958,15 @@ static bool s_slippi_wait_remote(int32_t need) {
         if (s_peer_left) {
             return false;
         }
+        /* Resend our unacked inputs, as the legacy wait does: the peer may be
+         * waiting on us, and before the first send actually went out (ENet was
+         * still connecting when fresh_tick called send_inputs) this is what
+         * puts frame 0 on the wire at all. Two calls: send_inputs queues any
+         * NEW local frame, then resend_local rebuilds the whole unacked window
+         * (send_inputs alone sends nothing once s_wrote stops advancing, which
+         * is exactly when a stalled peer most needs the window). */
+        s_slippi_send_inputs();
+        pc_slippi_adapter_resend_local(&s_slippi);
         if (pc_slippi_adapter_status(&s_slippi) == PC_SLIPPI_NET_FAILED) {
             s_status = PC_NET_PEER_TIMEOUT;
             return false;
@@ -1449,10 +1540,33 @@ static void check_desync(void) {
             continue;
         }
         s_ck_checked = f;
-        if (s_ck_ring[i] != s_rck[i].ck) {
+        /* Under Slippi the wire carries Slippi's checksum formula (Dolphin's),
+         * not our FNV frame_checksum, so compare that ring instead; using
+         * s_ck_ring here would flag every frame. The Slippi hard check has a
+         * +/-1 tolerance on the float-sum half, exactly as the ASM does. */
+        bool bad;
+        uint32_t local;
+        if (pc_net_slippi_active()) {
+            local = s_wire_ck_ring[i];
+            bad = pc_slippi_checksum_is_hard_desync(local, s_rck[i].ck);
+            /* One-shot proof the gate is live and comparing real values, not
+             * two zeros (an all-absent checksum set is also 0, and frame 0
+             * before the fight is exactly that). Fire on the first frame the
+             * fight makes both nonzero. */
+            if (!s_slippi_ck_checked_once && (local != 0 || s_rck[i].ck != 0)) {
+                s_slippi_ck_checked_once = true;
+                pc_log_line(
+                    "net: first Slippi desync check at frame %d (local %08x remote %08x)", f, local,
+                    s_rck[i].ck);
+            }
+        } else {
+            local = s_ck_ring[i];
+            bad = local != s_rck[i].ck;
+        }
+        if (bad) {
             net.desync_reported = true;
             pc_log_line(
-                "net: DESYNC at frame %d (local %08x remote %08x)", f, s_ck_ring[i], s_rck[i].ck);
+                "net: DESYNC at frame %d (local %08x remote %08x)", f, local, s_rck[i].ck);
             dump_rings_around(f);
             dump_states_around(f);
             return;
@@ -1952,6 +2066,7 @@ static void session_reset(void) {
     memset(s_local_ring, 0, sizeof s_local_ring);
     memset(s_remote_ring, 0, sizeof s_remote_ring);
     memset(s_ck_ring, 0, sizeof s_ck_ring);
+    memset(s_wire_ck_ring, 0, sizeof s_wire_ck_ring);
     memset(s_sim_n, 0, sizeof s_sim_n);
     memset(s_rb_recent, 0, sizeof s_rb_recent);
     s_rb_recent_n = 0;
@@ -1965,6 +2080,7 @@ static void session_reset(void) {
         s_rck[i].frame = -1;
     }
     net.desync_reported = s_heard = s_peer_left = s_no_progress = false;
+    s_slippi_ck_checked_once = false;
     s_last_rx_ns = 0;
     s_progress_ns = 0;
     s_warn_src = s_warn_sess = s_warn_bad = s_warn_mac = false;
@@ -2428,7 +2544,17 @@ bool pc_net_connect_slippi(
         pc_log_line("net: cannot create the Slippi ENet host");
         return false;
     }
-    pc_slippi_adapter_init(&s_slippi, s_slippi.net, slp_frame_cb, NULL);
+    pc_slippi_adapter_init(&s_slippi, s_slippi.net, slp_frame_cb, NULL, NULL);
+    /* setup/selection/chat/connection events arrive through the driver's own
+     * callback struct, not the adapter's poll, so register them here. The
+     * adapter's on_setup/on_frame are separate (poll-driven) and stay as set. */
+    {
+        PcSlippiNetCallbacks cb;
+        memset(&cb, 0, sizeof cb);
+        cb.on_setup = slp_setup_cb;
+        cb.on_rel = slp_rel_cb;
+        pc_slippi_net_set_callbacks(s_slippi.net, &cb);
+    }
     pc_slippi_adapter_start_game(&s_slippi, s_slippi_now_us());
     s_slippi_sent_upto = -1;
     s_slippi_ever_heard = false;
@@ -2991,6 +3117,9 @@ static bool resim_prepare(int32_t f) {
     write_head(head, f);
     fight_reseed(f);
     s_ck_ring[f & (RING - 1)] = frame_checksum(head);
+    if (net.active && pc_net_slippi_active()) {
+        s_wire_ck_ring[f & (RING - 1)] = pc_slippi_wire_checksum();
+    }
     /* The state ring is the last simulation of each frame, which is the
      * confirmed timeline (the desync dump and the audit's field-level diff
      * both read it); without this it held first-pass values only. The
@@ -3355,6 +3484,13 @@ static void fresh_tick(PADStatus* head, bool raw) {
     fight_reseed(net.frame);
     uint32_t ck = frame_checksum(head);
     s_ck_ring[net.frame & (RING - 1)] = ck;
+    /* Slippi's wire checksum, taken at the same instant as ours, so the
+     * desync check under Slippi compares like for like (the two formulas
+     * never agree). Only when it can be sent: a legacy session has no wire
+     * consumer for it and the gather is not free. */
+    if (net.active && pc_net_slippi_active()) {
+        s_wire_ck_ring[net.frame & (RING - 1)] = pc_slippi_wire_checksum();
+    }
     s_sim_n[net.frame & (RING - 1)] = 1;
     /* No-op unless netplay is running or MELEE_NET_STATE_LOG is set: a solo
      * replay is how a cross-platform divergence is localised. */

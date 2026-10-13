@@ -234,6 +234,14 @@ void on_rel(const Rel* r, int n) {
 void on_rel_ack(const RelAck* k) {
     (void)k;
 }
+/* net.c's Slippi receive path calls rel_dispatch (net_reliable.c). This test
+ * drives the legacy transport, so a stub is enough. */
+bool rel_dispatch(uint8_t type, const void* payload, int len) {
+    (void)type;
+    (void)payload;
+    (void)len;
+    return true;
+}
 void rel_reset(void) {}
 
 /* net_handshake.c / net_sync.c */

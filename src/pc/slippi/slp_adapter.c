@@ -3,9 +3,10 @@
 #include "pc/slippi/slp_adapter.h"
 
 void pc_slippi_adapter_init(PcSlippiAdapter* a, PcSlippiNet* net, PcSlippiFrameFn on_frame,
-                            void* user) {
+                            PcSlippiSetupFn on_setup, void* user) {
     a->net = net;
     a->on_frame = on_frame;
+    a->on_setup = on_setup;
     a->user = user;
     for (int i = 0; i < PC_SLIPPI_REMOTE_PLAYER_MAX; i++) {
         a->delivered_upto[i] = 0;
@@ -91,8 +92,37 @@ bool pc_slippi_adapter_send_local(PcSlippiAdapter* a, int32_t frame, const void*
     return pc_slippi_net_send_pad(a->net, frame, (const uint8_t*)wire_pad8, now_us);
 }
 
+bool pc_slippi_adapter_send_setup(PcSlippiAdapter* a, uint32_t seed, int32_t start_frame) {
+    if (!pc_slippi_adapter_connected(a)) {
+        return false;
+    }
+    return pc_slippi_net_send_setup(a->net, seed, start_frame);
+}
+
+bool pc_slippi_adapter_resend_local(PcSlippiAdapter* a) {
+    if (!pc_slippi_adapter_connected(a)) {
+        return false;
+    }
+    return pc_slippi_net_resend_pad(a->net);
+}
+
 void pc_slippi_adapter_set_checksum(PcSlippiAdapter* a, int32_t frame, uint32_t checksum) {
     pc_slippi_net_set_local_checksum(a->net, frame, checksum);
+}
+
+bool pc_slippi_adapter_remote_checksum(const PcSlippiAdapter* a, int remote_slot,
+                                       int32_t* frame, uint32_t* value) {
+    const PcSlippiSession* s = pc_slippi_net_session(a->net);
+    if (s == NULL || remote_slot < 0 || remote_slot >= s->cfg.remote_count) {
+        return false;
+    }
+    if (frame != NULL) {
+        *frame = s->rx_checksum[remote_slot].frame;
+    }
+    if (value != NULL) {
+        *value = s->rx_checksum[remote_slot].value;
+    }
+    return true;
 }
 
 int32_t pc_slippi_adapter_remote_have(const PcSlippiAdapter* a) {

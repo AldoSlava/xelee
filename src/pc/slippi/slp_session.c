@@ -90,6 +90,59 @@ void pc_slippi_session_set_local_checksum(PcSlippiSession* s, int32_t frame, uin
     s->local_checksum = value;
 }
 
+/* Build the pad packet from the current local queue (newest frame, our port,
+ * our checksum, then every queued pad newest-first). Shared by the queue and
+ * resend paths so the wire image has one definition. */
+static bool build_pad_packet(const PcSlippiSession* s, void* out, size_t out_cap,
+                             size_t* out_len) {
+    if (s->local_count == 0) {
+        return false;
+    }
+    PcSlippiWriter w;
+    pc_slippi_writer_init(&w, out, out_cap);
+    pc_slippi_put_u8(&w, PC_SLIPPI_MSG_PAD);
+    pc_slippi_put_i32(&w, local_at_c(s, 0)->frame);
+    pc_slippi_put_u8(&w, s->cfg.local_port);
+    pc_slippi_put_i32(&w, s->local_checksum_frame);
+    pc_slippi_put_u32(&w, s->local_checksum);
+    for (int i = 0; i < s->local_count; i++) {
+        pc_slippi_put_bytes(&w, local_at_c(s, i)->data, PC_SLIPPI_PAD_DATA_SIZE);
+    }
+    *out_len = w.len;
+    return w.ok;
+}
+
+bool pc_slippi_session_resend(PcSlippiSession* s, void* out, size_t out_cap, size_t* out_len) {
+    *out_len = 0;
+    if (s->local_count == 0) {
+        return false;
+    }
+    /* Trim acked frames the same way a fresh send would, so a peer that has
+     * acked cannot keep the window from shrinking. */
+    int32_t min_ack = INT32_MAX;
+    bool any_active = false;
+    for (int i = 0; i < s->cfg.remote_count; i++) {
+        if (!s->remote_active[i]) {
+            continue;
+        }
+        any_active = true;
+        if (s->last_frame_acked[i] < min_ack) {
+            min_ack = s->last_frame_acked[i];
+        }
+    }
+    if (!any_active) {
+        min_ack = local_at_c(s, 0)->frame;
+    }
+    int32_t floor_frame = local_at_c(s, 0)->frame - PC_SLIPPI_MAX_INPUT_FRAMES;
+    if (min_ack < floor_frame) {
+        min_ack = floor_frame;
+    }
+    while (s->local_count > 1 && local_at_c(s, s->local_count - 1)->frame < min_ack) {
+        s->local_count--;
+    }
+    return build_pad_packet(s, out, out_cap, out_len);
+}
+
 bool pc_slippi_session_queue_local_pad(PcSlippiSession* s, int32_t frame,
                                        const uint8_t pad[PC_SLIPPI_PAD_DATA_SIZE], uint64_t now_us,
                                        void* out, size_t out_cap, size_t* out_len) {

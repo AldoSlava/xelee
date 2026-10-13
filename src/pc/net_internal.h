@@ -488,6 +488,11 @@ void sim_reset(void);
 void rel_service(void); /* caller holds tx_lock */
 void on_rel(const Rel* r, int n);
 void on_rel_ack(const RelAck* k);
+/* Deliver one lane-1 reliable message to its consumer (REL_RESUME, REL_DELAY,
+ * REL_SCENE, REL_CHAT, or a caller-queued type). Shared by the custom
+ * transport's on_rel and the Slippi receive path. False when a caller-queued
+ * message had no room. */
+bool rel_dispatch(uint8_t type, const void* payload, int len);
 void rel_reset(void);
 
 /* ---- net_handshake.c -------------------------------------------------- */
@@ -539,6 +544,19 @@ uint32_t frame_checksum(const PADStatus* head);
 /* Slippi's exact wire desync checksum over the live game (net_snapshot.c),
  * used only on the Slippi transport. Distinct from frame_checksum. */
 uint32_t pc_slippi_wire_checksum(void);
+
+/* True when the Slippi transport is the active session's transport. */
+bool pc_net_slippi_active(void);
+/* Host: send the Slippi direct-session setup (seed + start frame) on ENet's
+ * reliable channel; false until the peer is connected. Guest: false always.
+ * Interim until M4's selections flow (net.c). */
+bool pc_net_slippi_send_setup(uint32_t seed, int32_t start_frame);
+/* Send a tunnelled engine reliable message (lane 1) on ENet's reliable channel
+ * (net.c). */
+bool pc_net_slippi_send_rel(uint8_t type, const void* payload, int len);
+/* The peer connection state for the Slippi setup wait: 0 connecting, 1 up,
+ * 2 gone. */
+int pc_net_slippi_conn_state(void);
 void record_state(const PADStatus* head, int32_t frame);
 void dump_states_around(int32_t frame);
 const char* state_line(int32_t frame); /* one frame's recorded state line, "" if gone */

@@ -120,7 +120,7 @@ def wait_port_free(port, timeout=30):
 
 
 class Instance:
-    def __init__(self, name, exe, disc, work, port, peer_port, env, lan):
+    def __init__(self, name, exe, disc, work, port, peer_port, env, lan, slippi=False):
         self.name = name
         self.port = port
         self.log_path = os.path.join(work, f"{name}.log")
@@ -150,6 +150,13 @@ class Instance:
             e["MELEE_NET_PLAYER"] = "0" if name == "a" else "1"
             e["MELEE_DEBUG_VS"] = "1"
             e["MELEE_NET_KEY"] = NET_KEY
+            if slippi:
+                # The Slippi ENet transport (docs/slippi-migration-plan.md).
+                # No MELEE_NET_KEY: ENet carries its own reliability, and the
+                # Slippi transport handshakes with PC_SLIPPI_MSG_SETUP instead
+                # of the custom RULES/READY the key authenticates.
+                e.pop("MELEE_NET_KEY", None)
+                e["MELEE_NET_STACK"] = "slippi"
         e.update(env)
         e.pop("MELEE_LOG_FILE", None)  # stderr is captured below; avoid double lines
         self.log = open(self.log_path, "wb")
@@ -875,7 +882,7 @@ def summarize(inst, need_match=True):
     # peers that went out of sync.
     if re.search(r"net: bind\(\d+\) failed", text):
         fails.append("netplay never started: bind failed (port still in use?)")
-    elif not re.search(r"net: rollback with ", text):
+    elif not re.search(r"net: (rollback with |Slippi transport: peer )", text):
         fails.append("netplay never started: no session line")
     if inst.proc.returncode != 0:
         fails.append(f"exit code {inst.proc.returncode}")
@@ -1187,6 +1194,9 @@ def parse_args(argv=None):
                     help="MELEE_NET_RECONNECT_MS for --stall (net.c's own default is 3000)")
     ap.add_argument("--fuzz", action="store_true", help="run tools/net_fuzz.py against A")
     ap.add_argument("--fuzz-seconds", type=int, default=30)
+    ap.add_argument("--slippi", action="store_true",
+                    help="use the Slippi ENet transport (MELEE_NET_STACK=slippi) instead of the "
+                         "custom UDP path; direct mode only")
     ap.add_argument("--exe", default=os.path.join(here, "..", "build", "melee"))
     ap.add_argument("--disc", default=os.path.join(here, "..", "..", "melee.ciso"))
     ap.add_argument("--port", type=int, default=42050, help="A's UDP port; B uses +1")
@@ -1246,8 +1256,10 @@ def run(args):
         sim["MELEE_NET_STATE_LOG"] = os.path.join(args.work, "b.state")
     wait_port_free(args.port)
     wait_port_free(args.port + 1)
-    a = Instance("a", args.exe, args.disc, args.work, args.port, args.port + 1, sim_a, args.lan)
-    b = Instance("b", args.exe, args.disc, args.work, args.port + 1, args.port, sim, args.lan)
+    a = Instance("a", args.exe, args.disc, args.work, args.port, args.port + 1, sim_a, args.lan,
+                 args.slippi)
+    b = Instance("b", args.exe, args.disc, args.work, args.port + 1, args.port, sim, args.lan,
+                 args.slippi)
     print(f"net_test: {'lan' if args.lan else 'direct'} loss={args.loss}% delay={args.delay}ms "
           f"rxdelay={args.rxdelay}ms {' '.join(k for k in SIM_ENV if getattr(args, k))} "
           f"minutes={args.minutes} frames={frames} pids={a.proc.pid},{b.proc.pid} "

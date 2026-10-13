@@ -149,6 +149,14 @@ bool pc_slippi_session_queue_local_pad(PcSlippiSession* s, int32_t frame,
 uint32_t pc_slippi_session_on_pad_ack(PcSlippiSession* s, int remote_slot, int32_t frame,
                                       uint64_t now_us);
 
+/* Rebuild and return the current pad packet without adding a pad: every local
+ * frame not yet acked, newest first. Slippi resends the whole unacked window
+ * on every tick (and the legacy transport does too, from wait_remote), so a
+ * peer waiting on us keeps being fed even while no NEW input is sampled. This
+ * is what a stall loop must call; without it both sides wait on a packet the
+ * other never resends. Returns false when there is nothing to send. */
+bool pc_slippi_session_resend(PcSlippiSession* s, void* out, size_t out_cap, size_t* out_len);
+
 /* The checksum to attach to outgoing pad packets. */
 void pc_slippi_session_set_local_checksum(PcSlippiSession* s, int32_t frame, uint32_t value);
 
