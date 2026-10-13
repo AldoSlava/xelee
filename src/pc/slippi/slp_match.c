@@ -221,6 +221,7 @@ bool pc_slippi_ticket_parse(const char* text, size_t len, uint16_t local_port,
     }
     out->player_count = count;
     out->local_player_index = local_index;
+    out->local_port = local_port;
 
     /* Remotes in ticket order, local excluded. */
     for (int i = 0; i < count; i++) {
@@ -559,7 +560,7 @@ done:
 }
 
 PcSlippiMatch* pc_slippi_match_start(const PcSlippiAccount* account, int mode,
-                                     const char* connect_code) {
+                                     const char* connect_code, uint16_t local_port) {
     if (account == NULL || !account->logged_in) {
         return NULL;
     }
@@ -588,7 +589,7 @@ PcSlippiMatch* pc_slippi_match_start(const PcSlippiAccount* account, int mode,
     const char* local = getenv("MELEE_SLIPPI_LOCAL_PEER");
     m->use_local_peer = local != NULL && local[0] == '1';
     const char* lp = getenv("MELEE_SLIPPI_LOCAL_PORT");
-    m->local_port = lp != NULL && lp[0] ? (uint16_t)atoi(lp) : 0;
+    m->local_port = lp != NULL && lp[0] ? (uint16_t)atoi(lp) : local_port;
     SDL_SetAtomicInt(&m->state, m->use_local_peer ? PC_SLIPPI_MATCH_SEARCHING
                                                   : PC_SLIPPI_MATCH_INITIALIZING);
     m->thread = SDL_CreateThread(match_thread, "slippi match", m);

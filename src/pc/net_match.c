@@ -6,6 +6,8 @@
 #include "net_lan.h"
 #include "net_rank_session.h"
 #include "pc.h"
+#include "pc/slippi/slp_match.h"
+#include "pc/slippi/slp_user.h"
 #include <SDL3/SDL_clipboard.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_timer.h>
@@ -27,6 +29,7 @@ typedef int MatchSocket;
 
 extern const char* pc_get_net_name(void);
 extern int pc_get_net_port(void);
+extern int pc_match_local_port(void);
 extern const char* pc_lan_disc_id(void);
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((weak)) void pc_log_line(const char* fmt, ...) {
@@ -100,6 +103,19 @@ static uint64_t publication_deadline;
 static const char* publication_reason;
 static bool publication_record;
 static uint8_t publication_wire[PC_RANK_RECORD_BYTES];
+
+/* ---- Slippi matchmaking backend (M4) ----------------------------------
+ * Unranked and Direct are served by slp_match (ENet + JSON to mm.slippi.gg),
+ * not the DHT. The two backends share the pc_net_match_* surface: a search
+ * produces a peer, then pc_net_connect_slippi brings up the same game session
+ * the DHT path does. LAN never comes through here (gmonlinemode calls
+ * pc_lan_start directly). The Slippi backend is inert until
+ * pc_net_match_start is asked for Unranked/Direct, so the direct-dial path
+ * (pc_net_init) keeps whatever transport it chose. */
+static bool s_slippi_match;         /* this search is the Slippi backend */
+static PcSlippiMatch* s_slippi_search; /* the running search, else NULL */
+static PcSlippiTicket s_slippi_ticket;
+static uint32_t s_slippi_seed;       /* seed for the Slippi game session */
 static int64_t public_sequence(const uint8_t* p) {
     return (int64_t)((uint32_t)p[16] << 24 | (uint32_t)p[17] << 16 | (uint32_t)p[18] << 8 | p[19]);
 }
@@ -602,10 +618,124 @@ static void receive(const void* data, size_t n, const struct pc_dht_endpoint* ep
         accept_ack(data);
 }
 
+/* ---- Slippi backend helpers ------------------------------------------ */
+
+/* True when this mode is served by Slippi rather than the DHT. Ranked is out
+ * of scope (plan §7). pc_slippi_match_start needs a signed-in account for
+ * both Unranked and Direct, so without one the search stays on the DHT. */
+static bool slp_mode(enum PcNetMatchMode m) {
+    if (m == PC_MATCH_RANKED)
+        return false;
+    PcSlippiAccount account;
+    memset(&account, 0, sizeof account);
+    pc_slippi_account_load(&account, false);
+    return account.logged_in;
+}
+
+/* Parse "ip:port". False on anything else (no port, empty host). */
+static bool split_addr(const char* addr, char* ip, size_t ip_cap, uint16_t* port) {
+    const char* colon = addr ? strrchr(addr, ':') : NULL;
+    if (colon == NULL || colon == addr)
+        return false;
+    size_t n = (size_t)(colon - addr);
+    if (n >= ip_cap)
+        return false;
+    memcpy(ip, addr, n);
+    ip[n] = 0;
+    *port = (uint16_t)atoi(colon + 1);
+    return *port != 0;
+}
+
+/* Start the Slippi search. The account comes from our store (the launcher's
+ * auth surface loaded it). */
+static bool slp_start(enum PcNetMatchMode m, const char* code) {
+    PcSlippiAccount account;
+    memset(&account, 0, sizeof account);
+    pc_slippi_account_load(&account, false);
+    int mode = m == PC_MATCH_UNRANKED ? PC_SLIPPI_MODE_UNRANKED : PC_SLIPPI_MODE_DIRECT;
+    s_slippi_search = pc_slippi_match_start(
+        &account, mode, code ? code : "", (uint16_t)pc_match_local_port());
+    if (s_slippi_search == NULL)
+        return false;
+    s_slippi_match = true;
+    s_slippi_seed = 0;
+    started_ms = SDL_GetTicks();
+    state = PC_MATCH_SEARCH;
+    return true;
+}
+
+/* Poll the Slippi search; once it yields a ticket, connect the game session
+ * and move to the connect phase. Called from pc_net_match_poll. */
+static void slp_poll(void) {
+    if (s_slippi_search == NULL)
+        return;
+    PcSlippiMatchState st = pc_slippi_match_state(s_slippi_search);
+    if (st == PC_SLIPPI_MATCH_SEARCHING || st == PC_SLIPPI_MATCH_INITIALIZING)
+        return;
+    if (st == PC_SLIPPI_MATCH_ERROR) {
+        fail(pc_slippi_match_error(s_slippi_search));
+        return;
+    }
+    if (st != PC_SLIPPI_MATCH_SUCCESS)
+        return;
+    if (!pc_slippi_match_result(s_slippi_search, &s_slippi_ticket)) {
+        fail("matchmaking returned no ticket");
+        return;
+    }
+    /* The ticket names one local and one remote for 1v1 (the only shape we
+     * play). local_player_index is the local port - 1; the remote is the
+     * other player. is_host is the decider, who sends the setup. */
+    if (s_slippi_ticket.player_count != 2 || s_slippi_ticket.remote_count != 1) {
+        fail("only 1v1 Slippi matches are supported");
+        return;
+    }
+    int local = s_slippi_ticket.local_player_index;
+    int remote = local == 0 ? 1 : 0;
+    host = s_slippi_ticket.is_host;
+    /* The decider picks the seed; it travels in the interim setup message
+     * (PC_SLIPPI_MSG_SETUP) so both peers agree. M5's selections flow carries
+     * it instead of a melee-pc-private message. */
+    if (host && !s_slippi_seed)
+        s_slippi_seed = (uint32_t)SDL_GetTicks() | 1u;
+    snprintf(target, sizeof target, "%.17s", s_slippi_ticket.players[local].connect_code);
+    snprintf(opponent, sizeof opponent, "%.17s", s_slippi_ticket.players[remote].connect_code);
+    char ip[PC_SLIPPI_ADDR_MAX];
+    uint16_t port = 0;
+    if (!split_addr(s_slippi_ticket.remote_addresses[0], ip, sizeof ip, &port)) {
+        fail("bad opponent address");
+        return;
+    }
+    pc_log_line("match: Slippi ticket %s: %s:%u, local port P%d, %s", s_slippi_ticket.match_id,
+        ip, port, local + 1, host ? "decider" : "guest");
+    if (!pc_net_connect_slippi(ip, port, local, s_slippi_seed, s_slippi_ticket.local_port)) {
+        fail("Slippi connect failed");
+        return;
+    }
+    /* After connect: it resets the session and defaults the setup sender to
+     * P1; the decider is not necessarily P1. The handshake runs later. */
+    pc_net_slippi_set_setup_host(host);
+    /* The game session is up; the setup exchange (handshake_direct ->
+     * slp_direct) fills net.start_frame and the lobby releases at it. */
+    start_frame = -1;
+    state = PC_MATCH_CONNECT;
+}
+
 bool pc_net_match_start(enum PcNetMatchMode m, const char* code) {
     pc_net_match_stop();
     failure = NULL;
     mode = m;
+    if (slp_mode(m)) {
+        start_frame = -1;
+        seed = 0;
+        opponent[0] = 0;
+        have_peer = false;
+        handshake_done = false;
+        if (!slp_start(m, code)) {
+            fail("could not start Slippi matchmaking");
+            return false;
+        }
+        return true;
+    }
     start_frame = -1;
     seed = 0;
     opponent[0] = 0;
@@ -674,6 +804,10 @@ bool pc_net_match_start(enum PcNetMatchMode m, const char* code) {
 void pc_net_match_poll(void) {
     uint64_t now = SDL_GetTicks();
     if (state == PC_MATCH_SEARCH) {
+        if (s_slippi_match) {
+            slp_poll();
+            return;
+        }
         pc_dht_poll();
         if (state != PC_MATCH_SEARCH)
             return;
@@ -744,6 +878,22 @@ void pc_net_match_poll(void) {
                                                 "Could not connect to opponent. Searching again...";
         }
     } else if (state == PC_MATCH_CONNECT) {
+        if (s_slippi_match) {
+            /* The Slippi transport agrees the match through the interim setup
+             * message (net_handshake.c slp_direct, driven from pc_net_poll via
+             * handshake_direct), not the custom RULES/READY lane. Pump it and
+             * watch for the handshake to complete. */
+            pc_net_poll();
+            int hs = pc_net_handshake_state(); /* 0 idle, 2 done, 3 failed */
+            if (hs == 2) {
+                seed = pc_net_seed();
+                start_frame = pc_net_start_frame();
+                ready();
+            } else if (hs == 3) {
+                fail("Slippi match setup failed");
+            }
+            return;
+        }
         pc_net_poll();
         if (!handshake_done)
             handshake_done = host ? pc_net_host_match(seed, &start_frame) :
@@ -795,6 +945,11 @@ void pc_net_match_poll(void) {
     }
 }
 void pc_net_match_stop(void) {
+    if (s_slippi_search != NULL) {
+        pc_slippi_match_stop(s_slippi_search);
+        s_slippi_search = NULL;
+    }
+    s_slippi_match = false;
     pc_dht_stop();
     publication = 0;
     publication_reason = NULL;

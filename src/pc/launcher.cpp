@@ -2093,3 +2093,14 @@ extern "C" int pc_get_net_port(void) {
 extern "C" int pc_get_net_delay(void) {
     return prefs.net_delay;
 }
+/* The UDP port a matchmaking lobby binds: the advertised LAN port (so the
+ * peer's hole-punch reaches it). An explicit MELEE_NET_PORT still wins for
+ * the legacy transport (pc_get_net_port), but a Slippi matchmaking search must
+ * not collide with a hardcoded test port, so an unset preference asks the
+ * kernel to pick one (0). */
+extern "C" int pc_match_local_port(void) {
+    const char* env_port = getenv("MELEE_NET_PORT");
+    if (env_port && *env_port)
+        return std::atoi(env_port);
+    return prefs.net_port > 0 ? prefs.net_port : 0;
+}

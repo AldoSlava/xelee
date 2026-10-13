@@ -923,6 +923,17 @@ bool pc_net_slippi_active(void) {
     return s_slippi_on;
 }
 
+/* Which peer sends the Slippi setup. Set at connect (matchmaking passes the
+ * ticket's decider); a MELEE_NET session leaves it unset and the handshake
+ * falls back to controller port. */
+static bool s_slippi_setup_host;
+void pc_net_slippi_set_setup_host(bool host) {
+    s_slippi_setup_host = host;
+}
+bool pc_net_slippi_setup_host(void) {
+    return s_slippi_setup_host;
+}
+
 bool pc_net_slippi_send_setup(uint32_t seed, int32_t start_frame) {
     if (!s_slippi_on) {
         return false;
@@ -2142,6 +2153,7 @@ static void session_reset(void) {
     net.hs_host = false;
     net.direct = false; /* pc_net_init() sets it back for a MELEE_NET session */
     net.seed = 0;
+    s_slippi_setup_host = false;
     net.start_frame = -1;
     net.ck_from = 0;
     snaps_free();
@@ -2522,6 +2534,9 @@ bool pc_net_connect_slippi(
     HSD_PadLibData.qtype = 2;
     net.local = player ? 1 : 0;
     net.remote = 1 - net.local;
+    /* Default: P1 sends the setup. A matchmaking session overrides this from
+     * the ticket's decider flag (pc_net_slippi_set_setup_host). */
+    s_slippi_setup_host = net.local == 0;
     net.connect_timeout_ms = MATCH_CONNECT_TIMEOUT_MS;
     const char* delay = getenv("MELEE_NET_DELAY");
     net.delay_auto = delay ? strcmp(delay, "auto") == 0 : s_configured_delay < 0;

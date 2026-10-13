@@ -68,6 +68,12 @@ bool pc_net_connect_socket(
  * `ip` of NULL or empty listens only. */
 bool pc_net_connect_slippi(
     const char* ip, uint16_t port, int player, uint32_t seed, uint16_t local_udp_port);
+/* Which peer sends the Slippi direct-session setup (seed + start frame). A
+ * MELEE_NET session leaves it unset and the caller's controller port decides
+ * (P1 sends); a matchmaking session sets it from the ticket's decider flag,
+ * since the decider is not necessarily P1. */
+void pc_net_slippi_set_setup_host(bool host);
+bool pc_net_slippi_setup_host(void);
 /* Offered every IPv4 datagram on the session socket before the session sees
  * it; true consumes it. Runs on net.c's receive thread, and
  * pc_net_set_datagram_handler() returns only once no call into the previous

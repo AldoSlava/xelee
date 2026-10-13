@@ -68,6 +68,10 @@ typedef struct PcSlippiTicket {
     int player_count;
     /* The local player's index into players[] (its port - 1). */
     int local_player_index;
+    /* The UDP port this instance advertised in the ticket and bound its
+     * matchmaking host to. The netplay host must re-bind the same port so the
+     * peer's hole-punched address still reaches it. */
+    uint16_t local_port;
     /* Remote addresses in players[] order, local excluded (the netplay client's
      * per-remote input). */
     char remote_addresses[PC_SLIPPI_MATCH_REMOTES_MAX][PC_SLIPPI_ADDR_MAX];
@@ -114,10 +118,12 @@ typedef enum PcSlippiMatchState {
 typedef struct PcSlippiMatch PcSlippiMatch;
 
 /* Begin a search. `mode` is PC_SLIPPI_MODE_UNRANKED or _DIRECT (Ranked is
- * refused). `connect_code` is the Direct target ("" for Unranked). The search
+ * refused). `connect_code` is the Direct target ("" for Unranked).
+ * `local_port` is the UDP port to bind and advertise (0 = kernel picks;
+ * MELEE_SLIPPI_LOCAL_PORT overrides). The search
  * runs on its own thread and is polled with pc_slippi_match_state(). */
 PcSlippiMatch* pc_slippi_match_start(const PcSlippiAccount* account, int mode,
-                                     const char* connect_code);
+                                     const char* connect_code, uint16_t local_port);
 void pc_slippi_match_stop(PcSlippiMatch* m);
 PcSlippiMatchState pc_slippi_match_state(const PcSlippiMatch* m);
 /* The error text for PC_SLIPPI_MATCH_ERROR, else "". */

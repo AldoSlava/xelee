@@ -740,7 +740,7 @@ static void slp_direct(void) {
             return;
         }
         s_direct_idle_ns = 0;
-        if (net.local == 0) {
+        if (pc_net_slippi_setup_host()) {
             net.hs_host = true;
             net.hs = HS_PENDING;
             s_hs_t0 = SDL_GetTicksNS();
@@ -769,7 +769,7 @@ static void slp_direct(void) {
      * retries the send; ENet would resend anyway, but this covers the window
      * before the peer connected. */
     if (net.hs == HS_PENDING) {
-        if (net.hs_host && net.local == 0 && pc_net_slippi_conn_state() == 1) {
+        if (net.hs_host && pc_net_slippi_conn_state() == 1) {
             if (pc_net_slippi_send_setup(net.seed, net.start_frame)) {
                 net.hs = HS_DONE;
                 net.ck_from = net.start_frame;
