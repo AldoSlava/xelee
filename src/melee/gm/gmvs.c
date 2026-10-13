@@ -49,6 +49,8 @@
 #include <stdlib.h>
 #ifdef TARGET_PC
 #include "pc/slp.h"
+#include "pc/net.h"
+#include "pc/pc.h"
 #endif
 
 static u32 lbl_803D5620[] = {
@@ -1768,9 +1770,109 @@ static float direction(float x)
     }
 }
 
+#ifdef TARGET_PC
+/* Slippi's "Neutral Spawn" General Code (GALE01r2.ini, NeutralSpawn.asm, hook
+ * 0x8016E510; docs/slippi-gecko-catalog.md). Retail starts player i on the
+ * stage's spawn point i, i.e. by port. Slippi instead numbers the players
+ * 0, 1, ... in port order among the open slots and, on its six standard stages,
+ * puts them on fixed neutral spots (both on platforms, mirrored); on any other
+ * stage the n-th player takes the stage's own spawn point n. The table below is
+ * decoded from the code's data block (singles set only: the code leaves
+ * teams to retail unless every team has exactly two players, and we only play
+ * 1v1), keyed by external stage id, 4 spots of (x, y) per set. */
+static const struct {
+    u16 stkind;
+    float pos[2][4][2];
+} neutral_spawns[] = {
+    /* Final Destination */
+    { 0x20, {
+        { { -60.0F, 10.0F }, { 60.0F, 10.0F }, { -20.0F, 10.0F }, { 20.0F, 10.0F } },
+        { { -60.0F, 10.0F }, { -20.0F, 10.0F }, { 60.0F, 10.0F }, { 20.0F, 10.0F } }
+    } },
+    /* Battlefield */
+    { 0x1F, {
+        { { -38.7999992F, 35.2000008F }, { 38.7999992F, 35.2000008F }, { 0.0F, 8.0F }, { 0.0F, 62.4000015F } },
+        { { -38.7999992F, 35.2000008F }, { -38.7999992F, 5.0F }, { 38.7999992F, 35.2000008F }, { 38.7999992F, 5.0F } }
+    } },
+    /* Yoshi's Story */
+    { 0x08, {
+        { { -42.0F, 26.6000004F }, { 42.0F, 28.0F }, { 0.0F, 46.9000015F }, { 0.0F, 4.9000001F } },
+        { { -42.0F, 26.6000004F }, { -42.0F, 5.0F }, { 42.0F, 28.0F }, { 42.0F, 5.0F } }
+    } },
+    /* Dream Land */
+    { 0x1C, {
+        { { -46.5999985F, 37.2000008F }, { 47.4000015F, 37.2999992F }, { 0.0F, 7.0F }, { 0.0F, 58.5F } },
+        { { -46.5999985F, 37.2000008F }, { -46.5999985F, 5.0F }, { 47.4000015F, 37.2999992F }, { 47.4000015F, 5.0F } }
+    } },
+    /* Fountain of Dreams */
+    { 0x02, {
+        { { -41.25F, 21.0F }, { 41.25F, 27.0F }, { 0.0F, 5.25F }, { 0.0F, 48.0F } },
+        { { -41.25F, 21.0F }, { -41.25F, 5.0F }, { 41.25F, 27.0F }, { 41.25F, 5.0F } }
+    } },
+    /* Pokemon Stadium */
+    { 0x03, {
+        { { -40.0F, 32.0F }, { 40.0F, 32.0F }, { 70.0F, 7.0F }, { -70.0F, 7.0F } },
+        { { -40.0F, 32.0F }, { -40.0F, 5.0F }, { 40.0F, 32.0F }, { 40.0F, 5.0F } }
+    } },
+};
+
+/* One line per (slot, stage) so a test can see where everyone was put. */
+static void neutralSpawnLog(int slot, int n, int stkind, const Vec3* v)
+{
+    static int seen_slot = -1;
+    static int seen_stage = -1;
+    static int seen_n = -1;
+    if (slot != seen_slot || stkind != seen_stage || n != seen_n) {
+        seen_slot = slot;
+        seen_stage = stkind;
+        seen_n = n;
+        pc_log_line("spawn: slot %d is player %d on stage %d at (%.1f, %.1f)", slot, n, stkind,
+                    v->x, v->y);
+    }
+}
+
+/* True with `v` filled when the Neutral Spawn rule decided where player i
+ * starts. Only online (pc_net_deterministic: netplay and replay record/play),
+ * only in VS, only when the match did not name a spawn point itself. */
+static bool neutralSpawn(int i, Vec3* v)
+{
+    VsSceneController* tmp = &controller;
+    size_t k;
+    int n = 0;
+    int j;
+    if (!pc_net_deterministic() || gm_IsCurrently1PMode() || i >= 5 ||
+        tmp->state.fighters[i].spawn_point != -1 || tmp->start.is_teams == true)
+    {
+        return false;
+    }
+    for (j = 0; j < i; j++) {
+        if (Player_GetPlayerSlotType(j) != Gm_PKind_NA) {
+            n++;
+        }
+    }
+    for (k = 0; k < ARRAY_SIZE(neutral_spawns); k++) {
+        if (neutral_spawns[k].stkind == tmp->start.stkind && n < 4) {
+            v->x = neutral_spawns[k].pos[0][n][0];
+            v->y = neutral_spawns[k].pos[0][n][1];
+            v->z = 0.0F;
+            neutralSpawnLog(i, n, tmp->start.stkind, v);
+            return true;
+        }
+    }
+    Stage_80224E64(n, v);
+    neutralSpawnLog(i, n, tmp->start.stkind, v);
+    return true;
+}
+#endif
+
 static inline void getSpawnPoint(int i, Vec3* v)
 {
     VsSceneController* tmp = &controller;
+#ifdef TARGET_PC
+    if (neutralSpawn(i, v)) {
+        return;
+    }
+#endif
     if (tmp->state.fighters[i].spawn_point == -1) {
         Stage_80224E64(i, v);
     } else {

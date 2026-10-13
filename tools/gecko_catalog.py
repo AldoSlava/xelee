@@ -52,11 +52,11 @@ NOTES = [
     ("No Items", "rules", "DONE", "slippi_rules_force(): item_freq 0xFF"),
     ("Singles Stages", "rules", "DONE", "slippi_rules_force(): stage mask E70000B0"),
     # ---- gameplay changes ---------------------------------------------------
-    ("NeutralSpawn", "gameplay", "MISSING",
-     "Replaces retail's randomised spawn placement with a fixed per-stage "
-     "arrangement (hook 0x8016E510, data table after the code). Nothing in "
-     "our tree does this, so spawn positions and the RNG draws behind them "
-     "differ from Slippi's: a certain cross-play desync. Port before M5."),
+    ("NeutralSpawn", "gameplay", "DONE",
+     "gmvs.c neutralSpawn(): online players take the table's fixed neutral spots on the six "
+     "standard stages, else the stage's own spawn point n for the n-th open slot. Singles "
+     "only (2v2 stays retail); the asm's two scene-id exclusions (0x21C, 0x10F) are not "
+     "reproduced because only online VS reaches it. Verified: both peers log the same spots."),
     ("UCF Dashback", "gameplay", "DONE", "ftCo_Turn.c ftCo_UcfDashback()"),
     ("UCF Shield Drop Extended", "gameplay", "MISSING", "only the base shield-drop rule is ported"),
     ("UCF Shield Drop", "gameplay", "DONE",

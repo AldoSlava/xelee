@@ -465,10 +465,12 @@ missing or unverified here. Findings that change behaviour:
   and the transformation files are preloaded by `pc_net_pure_load()`. Frozen
   Stadium in Direct needs the selections flow.
 - **Pause is allowed only in Direct** (the match flags set bit 3 otherwise).
-- **Missing before M5:** Neutral Spawn (a fixed per-stage spawn arrangement in
-  place of retail's random one, so spawn positions and RNG draws differ) and
-  the UCF SDI, shield-SDI, tumble, pad-buffer and DBOOC fixes. Either one
-  desyncs a match against Slippi Dolphin.
+- **Neutral Spawn is ported** (`gmvs.c neutralSpawn()`): retail puts player i
+  on the stage's spawn point i (by port); Slippi numbers the open slots and uses
+  fixed neutral spots on the six standard stages. Singles only.
+- **Still missing before M5:** the UCF SDI, shield-SDI, tumble, pad-buffer and
+  DBOOC fixes, which desync a match against Slippi Dolphin the first time one
+  of those inputs is made.
 
 ### M5 — Cross-play verification (the whole point)
 1. Our instance vs our instance over the real matchmaking servers, full game.
