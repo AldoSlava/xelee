@@ -26,7 +26,7 @@ bool gmOnline_SlippiFlow(void);
 
 /* The online CSS's status text (src/melee/mn/mnonlinecss.c), drawn by the
  * Slippi flow's state in gmonlinemode.c. */
-void mnOnlineCss_Create(void);
+void mnOnlineCss_Create(int ctx);
 #define CSS_STEPS_MAX 3
 typedef struct OnlineCssStep {
     char mark;      /* '-' done, '+' to do, 'x' in progress, '!' error */

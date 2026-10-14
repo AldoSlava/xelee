@@ -11,9 +11,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <math.h>
+
+#include <dolphin/gx.h>
+#include <dolphin/gx/GXGeometry.h>
 #include <dolphin/gx/GXStruct.h>
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/gobjgxlink.h>
+#include <sysdolphin/baselib/hsd_3915.h>
 #include <sysdolphin/baselib/sislib.h>
 
 #ifdef TARGET_PC
@@ -38,20 +43,70 @@ enum { l_title, l_user_label, l_user_name, l_hint, l_mark, l_text = l_mark + CSS
 
 static HSD_Text* css_text;
 static unsigned css_frame;
-/* A pending step's marker turns between a plus and its 45 degree rotation, a
- * change about every 0.3 s. */
-#define MARK_FLIP_FRAMES 18
+/* A pending step's marker is a plus drawn from two quads that turns to its 45
+ * degree rotation and back, each way in about 0.3 s. The glyph engine cannot
+ * rotate text, so the marker is drawn in the overlay's own render pass. */
+#define MARK_PERIOD_FRAMES 36
+#define MARK_HALF_LEN 4.2f
+#define MARK_HALF_WIDTH 0.95f
+static bool css_pending[CSS_STEPS_MAX];
+static float css_mark_y[CSS_STEPS_MAX];
 static CssLine css_lines[l_count];
 
+/* The overlay lives in the CSS's own text canvas and camera (gx link 1), so
+ * the hand and token (later links) draw over it. Layout is kept in 640x480
+ * screen units, as Slippi's; these map them onto the CSS world, calibrated
+ * against marks at known world positions (x = 0 is the screen centre, about
+ * 9.2 screen units a world unit across, 8.5 down). */
 #define BLOCK_X 380.0f
 #define BLOCK_Y 251.0f
 #define STEP_DY 22.5f
+#define ORG_X 190.0f
+#define ORG_Y 236.0f
+static float world_x(float u) { return (u - 320.0f) / 9.2f; }
+static float world_y(float u) { return (u - 234.0f) / 8.5f; } /* the text's own y: down is positive */
+
+static void drawRotatedRect(float cx, float cy, float hx, float hy, float a, GXColor* c)
+{
+    static const float sx[4] = { -1.0f, 1.0f, 1.0f, -1.0f };
+    static const float sy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+    float cs = cosf(a), sn = sinf(a);
+    int i;
+    GXBegin(0x80, 0, 4);
+    for (i = 0; i < 4; i++) {
+        float px = sx[i] * hx, py = sy[i] * hy;
+        GXPosition2f32(cx + px * cs - py * sn, cy + px * sn + py * cs);
+        GXColor4u8(c->r, c->g, c->b, c->a);
+    }
+    GXEnd();
+}
+
+static void drawMarks(UNUSED HSD_GObj* gobj, int pass)
+{
+    float t, tri, ease, angle;
+    int i;
+    (void) pass; /* opaque either way, so a second pass draws the same pixels */
+    t = (float) (css_frame % MARK_PERIOD_FRAMES) / (float) MARK_PERIOD_FRAMES;
+    tri = t < 0.5f ? t * 2.0f : (1.0f - t) * 2.0f;
+    ease = tri * tri * (3.0f - 2.0f * tri);
+    angle = ease * 0.78539816f; /* 45 degrees */
+    hsd_80391A04(1.0f, 1.0f, 1);
+    for (i = 0; i < CSS_STEPS_MAX; i++) {
+        if (css_pending[i]) {
+            float cx = world_x(BLOCK_X + 4.0f);
+            float cy = -world_y(css_mark_y[i]); /* the world's y is up */
+            float hl = MARK_HALF_LEN / 9.2f, hw = MARK_HALF_WIDTH / 9.2f;
+            drawRotatedRect(cx, cy, hl, hw, angle, &palette[c_blue]);
+            drawRotatedRect(cx, cy, hw, hl, angle, &palette[c_blue]);
+        }
+    }
+}
 
 static void addLine(CssLine* l, float x, float y, float scale, int color)
 {
     l->str[0] = '\0';
     l->color = color;
-    l->entry = HSD_SisLib_803A6B98(css_text, x, y, "%s", l->str);
+    l->entry = HSD_SisLib_803A6B98(css_text, x - ORG_X, (y - ORG_Y) * (9.2f / 8.5f), "%s", l->str);
     HSD_SisLib_803A7548(css_text, l->entry, scale, scale);
     HSD_SisLib_803A74F0(css_text, l->entry, &palette[color]);
 }
@@ -69,17 +124,26 @@ static void setLine(CssLine* l, const char* s, int color)
     }
 }
 
-void mnOnlineCss_Create(void)
+void mnOnlineCss_Create(int ctx)
 {
-    int canvas;
     int i;
     if (css_text != NULL) {
         return;
     }
-    /* Ortho 640x480 canvas above the CSS cameras, as the lobby's. */
-    canvas = HSD_SisLib_803A611C(0, NULL, 9, 0xD, 0, 0xE, 0, 0x13);
-    css_text = HSD_SisLib_803A6754(0, canvas);
+    /* In the CSS's own canvas and camera, on its text link: the hand is a later
+     * link, so it draws over everything here. */
+    GObj_SetupGXLink(GObj_Create(4, 5, 0x80), (GObj_RenderFunc) drawMarks, 1, 0x80);
+    css_text = HSD_SisLib_803A6754(0, ctx);
+    css_text->pos_x = world_x(ORG_X);
+    css_text->pos_y = world_y(ORG_Y);
+    css_text->pos_z = 0.0f;
+    css_text->box_size_x = 500.0f;
+    css_text->box_size_y = 300.0f;
+    css_text->font_size.x = 1.0f / 9.2f;
+    css_text->font_size.y = 1.0f / 9.2f;
+    css_text->x4E = 1;
     css_text->default_kerning = 1;
+    css_text->x4C = 1;
     memset(css_lines, 0, sizeof(css_lines));
     addLine(&css_lines[l_title], BLOCK_X, BLOCK_Y, 0.42f, c_white);
     addLine(&css_lines[l_user_label], 202.0f, BLOCK_Y, 0.3f, c_dim);
@@ -111,11 +175,13 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
         if (i < n) {
             mark[0] = steps[i].mark;
             if (mark[0] == '+' || mark[0] == 'x') {
-                mark[0] = (css_frame / MARK_FLIP_FRAMES) & 1 ? 'x' : '+';
+                mark[0] = 0; /* drawn, not typed */
             }
             color = steps[i].mark == '-' ? c_green : steps[i].mark == '!' ? c_red : c_blue;
             text = steps[i].text;
         }
+        css_pending[i] = i < n && (steps[i].mark == '+' || steps[i].mark == 'x');
+        css_mark_y[i] = BLOCK_Y + 30.0f + STEP_DY * i + 25.5f;
         setLine(&css_lines[l_mark + i], mark, color);
         setLine(&css_lines[l_text + i], text, i < n && steps[i].mark == '!' ? c_red : c_white);
     }
@@ -132,7 +198,7 @@ void mnOnlineCss_Destroy(void)
 
 #else
 
-void mnOnlineCss_Create(void) {}
+void mnOnlineCss_Create(UNUSED int ctx) {}
 void mnOnlineCss_Update(UNUSED const char* title, UNUSED const char* user,
                         UNUSED const OnlineCssStep* steps, UNUSED int n, UNUSED const char* hint)
 {

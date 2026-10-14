@@ -10,6 +10,9 @@ extern bool pc_net_slippi_active(void);
 
 /* The online CSS: Slippi's order puts it before any connection (the local
  * player is port 1), and a session left over from the old order has one too. */
+/* The CSS's own text canvas: the online overlay's text lives in it, in the CSS
+ * world and its gx link, so the hand (a later link) draws over the text. */
+static int css_text_ctx;
 /* Slippi's "Press START to ..." prompt is up: a valid pick is made. */
 bool mnCharSel_SlippiStartReady(void);
 
@@ -4454,6 +4457,9 @@ s32 mnCharSel_802640A0(void)
     gobj->gxlink_prios = 0x1F;
     HSD_GObj_SetupProc(gobj, mn_8022BA1C, 5);
     ctx = HSD_SisLib_803A611C(0, gobj, 7, 8, 0x80, 1, 0x80, 0);
+#ifdef TARGET_PC
+    css_text_ctx = ctx;
+#endif
 
     gobj = GObj_Create(3, 4, 0x80);
     {
@@ -5558,7 +5564,7 @@ void mnCharSel_Scene_OnEnter(void* arg0)
     mnCharSel_802640A0();
 #ifdef TARGET_PC
     if (gmOnline_SlippiFlow()) {
-        mnOnlineCss_Create();
+        mnOnlineCss_Create(css_text_ctx);
     }
 #endif
 }
