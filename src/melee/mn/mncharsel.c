@@ -3851,6 +3851,12 @@ void fn_80262F44(HSD_GObj* gobj)
         }
     }
 
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        /* Slippi replaces the READY TO FIGHT banner with its own prompt. */
+        HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
+    }
+#endif
     {
         u32 p;
         u32 trigger;
@@ -5615,10 +5621,62 @@ static void cssHideDoor(int door)
 /* Slippi's online CSS shows only your own player: the opponent's hand, token,
  * character preview and door stay hidden, as do the unused ports. The picks
  * still sync through the pads, so the match is unchanged. */
+/* Depth-first walk of a joint tree: the n-th joint, or (visit != NULL) every
+ * joint in order. For the CSS models that lb_80011E24 cannot index. */
+static HSD_JObj* cssDfs(HSD_JObj* j, int* n, int target, int depth, bool log)
+{
+    HSD_JObj* hit;
+    for (; j != NULL; j = j->next) {
+        if (log) {
+            Vec3 t;
+            HSD_JObjGetTranslation(j, &t);
+            pc_log_line("cssdfs %3d depth %d x=%7.2f y=%7.2f z=%7.2f flags=%08x dobj=%d", *n, depth,
+                        t.x, t.y, t.z, (unsigned) j->flags, !(j->flags & JOBJ_INSTANCE) && j->u.dobj != NULL);
+        }
+        if (!log && *n == target) {
+            return j;
+        }
+        (*n)++;
+        hit = cssDfs(j->child, n, target, depth + 1, log);
+        if (hit != NULL) {
+            return hit;
+        }
+    }
+    return NULL;
+}
+
 static void mnCharSel_HideOnlineRemote(void)
 {
     int remote;
     int local;
+    {
+        /* MELEE_CSS_HIDE=36,37,40-59: joint trees to hide, for finding which
+         * part of the CSS model is which (pair with MELEE_CSS_DUMP). */
+        const char* list = getenv("MELEE_CSS_HIDE");
+        while (list != NULL && *list) {
+            char* end;
+            long a = strtol(list, &end, 10);
+            long b = a;
+            if (end == list) {
+                break;
+            }
+            if (*end == '-') {
+                b = strtol(end + 1, &end, 10);
+            }
+            for (; a <= b; a++) {
+                int which = (int) (a / 1000); /* 1xxx: model CC4, 2xxx: CC8, 3xxx: CCC (DFS index) */
+                HSD_JObj* model = which == 1 ? mnCharSel_804D6CC4 : which == 2 ? mnCharSel_804D6CC8 :
+                                  which == 3 ? mnCharSel_804D6CCC : NULL;
+                if (which == 0) {
+                    cssHideJoint((int) a);
+                } else if (model != NULL) {
+                    int n = 0;
+                    cssHideTree(cssDfs(model, &n, (int) (a % 1000), 0, false));
+                }
+            }
+            list = *end == ',' ? end + 1 : end;
+        }
+    }
     if (!cssOnline(&local) || mnCharSel_804D6CF5 == 1 ||
         getenv("MELEE_CSS_SHOW_ALL"))
     {
@@ -5683,7 +5741,9 @@ void mnCharSel_Scene_OnFrame(void)
                         mnCharSel_804D6CB0->vs.start.players[2].slot_type,
                         mnCharSel_804D6CB0->vs.start.players[3].slot_type,
                         mnCharSel_804A0BC0[0]->x5, mnCharSel_804A0BD0[0]->x5);
-            for (id = 0; id < 160; id++) {
+            HSD_JObj* models[3] = { mnCharSel_804D6CC4, mnCharSel_804D6CC8, mnCharSel_804D6CCC };
+            int m;
+            for (id = 0; id < 400; id++) {
                 HSD_JObj* j = NULL;
                 lb_80011E24(mnCharSel_804D6CC0, &j, id, -1);
                 if (j != NULL) {
@@ -5693,6 +5753,11 @@ void mnCharSel_Scene_OnFrame(void)
                                 id, t.x, t.y, t.z, (unsigned) j->flags,
                                 j->child != NULL, j->next != NULL);
                 }
+            }
+            for (m = 0; m < 3; m++) {
+                int n = 0;
+                pc_log_line("cssdfs model %d", m + 1);
+                cssDfs(models[m], &n, 0, 0, true);
             }
         }
     }

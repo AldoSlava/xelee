@@ -440,6 +440,13 @@ const char* pc_net_match_slippi_code(void) {
     return code;
 }
 
+const char* pc_net_match_slippi_name(void) {
+    static char name[PC_SLIPPI_DISPLAY_NAME_MAX];
+    PcSlippiAccount a;
+    snprintf(name, sizeof name, "%s", slp_account_cached(&a) ? a.display_name : "");
+    return name;
+}
+
 static PcNetContact s_slippi_contacts[PC_NET_CONTACTS_MAX];
 static int s_slippi_contact_count = -1; /* -1: not loaded */
 

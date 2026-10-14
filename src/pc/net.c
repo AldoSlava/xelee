@@ -782,6 +782,10 @@ static void slp_frame_cb(void* user, int remote_slot, int32_t frame,
      * pad per frame; WirePad and the 8 wire bytes are the same layout. */
     WirePad wp;
     memcpy(&wp, pad, sizeof wp);
+    /* Slippi's pad bytes are the console's PADStatus: the button half-word is
+     * big-endian. (Read as host order, a Dolphin peer's Y reads as D-pad up
+     * and Kirby taunts instead of jumping.) */
+    wp.button = (uint16_t)__builtin_bswap16(wp.button);
     WirePad* slot = &s_remote_ring[frame & (RING - 1)];
     int32_t upto = simulated_upto();
     if (frame <= upto && memcmp(slot, &wp, sizeof wp) != 0 &&
@@ -881,8 +885,9 @@ static void s_slippi_send_inputs(void) {
     }
     uint64_t now = s_slippi_now_us();
     for (int32_t f = s_slippi_sent_upto + 1; f <= s_wrote; f++) {
-        const WirePad* w = &s_local_ring[f & (RING - 1)];
-        if (!pc_slippi_adapter_send_local(&s_slippi, f, w, now)) {
+        WirePad w = s_local_ring[f & (RING - 1)];
+        w.button = (uint16_t)__builtin_bswap16(w.button); /* big-endian on the wire */
+        if (!pc_slippi_adapter_send_local(&s_slippi, f, &w, now)) {
             break;
         }
         s_slippi_sent_upto = f;

@@ -28,7 +28,7 @@ bool gmOnline_SlippiFlow(void);
  * Slippi flow's state in gmonlinemode.c. */
 void mnOnlineCss_Create(void);
 void mnOnlineCss_Update(const char* title, const char* line1, const char* line2,
-                        const char* hint, bool error);
+                        const char* hint, bool error, const char* user);
 void mnOnlineCss_Destroy(void);
 /* Called every CSS frame while the Slippi flow owns the screen; true when the
  * match is agreed and the CSS should leave now. */

@@ -19,7 +19,10 @@
 
 #define CSS_LINE_LEN 64
 
-enum { css_title, css_line1, css_line2, css_hint, css_line_count };
+enum {
+    css_title, css_line1, css_line2, css_hint, css_user_label, css_user_name, css_mark1, css_mark2,
+    css_line_count
+};
 
 typedef struct CssLine {
     int entry;
@@ -33,6 +36,8 @@ static CssLine css_lines[css_line_count];
 static GXColor col_white = { 0xFF, 0xFF, 0xFF, 0xFF };
 static GXColor col_dim = { 0xC8, 0xC8, 0xC8, 0xFF };
 static GXColor col_error = { 0xFF, 0x60, 0x60, 0xFF };
+static GXColor col_green = { 0x40, 0xE0, 0x60, 0xFF };
+static GXColor col_blue = { 0x50, 0xA0, 0xFF, 0xFF };
 
 /* Slippi replaces the rules banner with the mode title; the plate hides ours
  * (the rules text of the stock CSS) under it. */
@@ -83,19 +88,29 @@ void mnOnlineCss_Create(void)
     css_text = HSD_SisLib_803A6754(0, canvas);
     css_text->default_kerning = 1;
     memset(css_lines, 0, sizeof(css_lines));
+    /* Laid out as Slippi's: the user beside the panel, the status lines to
+     * their right, each with a small marker. */
     addLine(&css_lines[css_title], 232.0f, 44.0f, 0.7f, &col_white);
-    addLine(&css_lines[css_line1], 250.0f, 296.0f, 0.6f, &col_white);
-    addLine(&css_lines[css_line2], 250.0f, 326.0f, 0.5f, &col_white);
-    addLine(&css_lines[css_hint], 250.0f, 352.0f, 0.45f, &col_dim);
+    addLine(&css_lines[css_user_label], 214.0f, 288.0f, 0.34f, &col_dim);
+    addLine(&css_lines[css_user_name], 214.0f, 302.0f, 0.46f, &col_white);
+    addLine(&css_lines[css_mark1], 372.0f, 312.0f, 0.42f, &col_green);
+    addLine(&css_lines[css_line1], 388.0f, 312.0f, 0.42f, &col_white);
+    addLine(&css_lines[css_mark2], 372.0f, 334.0f, 0.42f, &col_blue);
+    addLine(&css_lines[css_line2], 388.0f, 334.0f, 0.42f, &col_white);
+    addLine(&css_lines[css_hint], 372.0f, 360.0f, 0.38f, &col_dim);
 }
 
 void mnOnlineCss_Update(const char* title, const char* line1, const char* line2,
-                        const char* hint, bool error)
+                        const char* hint, bool error, const char* user)
 {
     if (css_text == NULL) {
         return;
     }
     setLine(&css_lines[css_title], title, false, &col_white);
+    setLine(&css_lines[css_user_label], user[0] ? "User" : "", false, &col_dim);
+    setLine(&css_lines[css_user_name], user, false, &col_white);
+    setLine(&css_lines[css_mark1], line1[0] ? (error ? "!" : "-") : "", error, &col_green);
+    setLine(&css_lines[css_mark2], line2[0] ? "+" : "", false, &col_blue);
     setLine(&css_lines[css_line1], line1, error, &col_white);
     setLine(&css_lines[css_line2], line2, false, &col_white);
     setLine(&css_lines[css_hint], hint, false, &col_dim);
@@ -113,7 +128,7 @@ void mnOnlineCss_Destroy(void)
 
 void mnOnlineCss_Create(void) {}
 void mnOnlineCss_Update(UNUSED const char* title, UNUSED const char* line1, UNUSED const char* line2,
-                        UNUSED const char* hint, UNUSED bool error) {}
+                        UNUSED const char* hint, UNUSED bool error, UNUSED const char* user) {}
 void mnOnlineCss_Destroy(void) {}
 
 #endif

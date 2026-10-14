@@ -46,6 +46,8 @@ bool pc_net_match_is_slippi(void);
 bool pc_net_match_slippi_ready(void);
 /* The signed-in account's connect code, "" when there is none. */
 const char* pc_net_match_slippi_code(void);
+/* ... and its display name. */
+const char* pc_net_match_slippi_name(void);
 /* The external stage ids a Slippi Unranked ticket allows (0 when the match is
  * not an Unranked Slippi one: players pick). */
 int pc_net_match_slippi_stages(uint16_t* out, int max);

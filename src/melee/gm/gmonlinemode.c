@@ -436,7 +436,7 @@ bool gmOnline_SlippiCssFrame(void)
             slpcss_state = SLPCSS_SELECT;
         }
     }
-    mnOnlineCss_Update(title, l1, l2, hint, error);
+    mnOnlineCss_Update(title, l1, l2, hint, error, pc_net_match_slippi_name());
     return false;
 }
 
