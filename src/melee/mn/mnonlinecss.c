@@ -37,6 +37,10 @@ enum { l_title, l_user_label, l_user_name, l_hint, l_mark, l_text = l_mark + CSS
        l_count = l_text + CSS_STEPS_MAX };
 
 static HSD_Text* css_text;
+static unsigned css_frame;
+/* A pending step's marker turns between a plus and its 45 degree rotation, a
+ * change about every 0.3 s. */
+#define MARK_FLIP_FRAMES 18
 static CssLine css_lines[l_count];
 
 #define BLOCK_X 380.0f
@@ -96,6 +100,7 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
     if (css_text == NULL) {
         return;
     }
+    css_frame++;
     setLine(&css_lines[l_title], title, c_white);
     setLine(&css_lines[l_user_label], user[0] ? "User" : "", c_dim);
     setLine(&css_lines[l_user_name], user, c_white);
@@ -105,6 +110,9 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
         const char* text = "";
         if (i < n) {
             mark[0] = steps[i].mark;
+            if (mark[0] == '+' || mark[0] == 'x') {
+                mark[0] = (css_frame / MARK_FLIP_FRAMES) & 1 ? 'x' : '+';
+            }
             color = steps[i].mark == '-' ? c_green : steps[i].mark == '!' ? c_red : c_blue;
             text = steps[i].text;
         }
