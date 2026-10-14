@@ -152,29 +152,63 @@ static inline float getNameTagFrame(int slot)
 }
 
 #ifdef TARGET_PC
-/* A Slippi match tags each fighter with their connect code, whatever tag the
- * local save has: the opponent's name is theirs, not ours. */
-static const char* slippiTagText(int slot)
+/* A Slippi match shows the stock port marker (P1, P2) over each fighter, as
+ * Slippi's does, and the players' display names under their percentages (the
+ * HUD pills below), whatever tag the local save has. */
+static bool slippiMatch(void)
 {
-    const char* code;
-    if (!pc_net_active() || !pc_net_slippi_active() || !pc_net_match_is_slippi()) {
+    return pc_net_active() && pc_net_slippi_active() && pc_net_match_is_slippi();
+}
+
+static const char* slippiHudName(int slot)
+{
+    static PcNetSlippiMatch sm;
+    if (!slippiMatch() || slot < 0 || slot > 1 || !pc_net_match_slippi_match(&sm)) {
         return NULL;
     }
-    code = slot == pc_net_local_player() ? pc_net_match_local_code()
-                                         : pc_net_match_opponent_code();
-    return code != NULL && code[0] != '\0' ? code : NULL;
+    return sm.name[slot][0] != '\0' ? sm.name[slot] : NULL;
+}
+
+static HSD_Text* un_hud_names[2];
+
+/* The pill under a percentage, in the nametag canvas's screen units: Slippi's
+ * spots for the two ports (measured in Dolphin), the name centred in it. */
+static void slippiHudNameShow(int slot, bool show)
+{
+    const char* name = slippiHudName(slot);
+    HSD_Text* t;
+    if (slot < 0 || slot > 1) {
+        return;
+    }
+    t = un_hud_names[slot];
+    if (!show || name == NULL) {
+        if (t != NULL) {
+            t->hidden = 1;
+        }
+        return;
+    }
+    if (t == NULL) {
+        const float w = 100.0f, h = 17.0f;
+        t = HSD_SisLib_803A6754(2, un_804D6D7C);
+        t->default_alignment = 1;
+        t->default_kerning = 1;
+        t->pos_z = -10.0f;
+        t->box_size_x = w;
+        t->box_size_y = h;
+        t->bg_color.r = t->bg_color.g = t->bg_color.b = 0x10;
+        t->bg_color.a = 0x90;
+        t->pos_x = 102.0f + 150.7f * (float) slot - w * 0.5f;
+        t->pos_y = 439.5f - h * 0.5f;
+        HSD_SisLib_803A6B98(t, w * 0.5f, 2.0f, "%s", name);
+        HSD_SisLib_803A7548(t, 0, 0.4f, 0.4f);
+        un_hud_names[slot] = t;
+    }
+    t->hidden = 0;
 }
 #endif
 
 static inline bool has_nametag(int slot)
 {
-#ifdef TARGET_PC
-    if (Player_GetPlayerSlotType(slot) == Gm_PKind_Human &&
-        slippiTagText(slot) != NULL)
-    {
-        return true;
-    }
-#endif
     if (Player_GetPlayerSlotType(slot) != Gm_PKind_Human ||
         Player_GetNametagSlotID(slot) == NAMETAG_DISABLED)
     {
@@ -240,14 +274,20 @@ void fn_802FCC44(HSD_GObj* gobj)
         Player_GetPlayerState(*slot) && Player_GetStocks(*slot) &&
         (un_804D6D70[*slot] ||
 #ifdef TARGET_PC
-         slippiTagText(*slot) != NULL ||
+         slippiMatch() ||
 #endif
          Player_GetNametagSlotID(*slot) != NAMETAG_DISABLED ||
          Player_80036058(*slot) || gm_8016B258(*slot)))
     {
         HSD_JObjClearFlags(HSD_JObjGetChild(jobj), JOBJ_HIDDEN);
+#ifdef TARGET_PC
+        slippiHudNameShow(*slot, !ifAll_IsHUDHidden() && !un_804D6D6C);
+#endif
     } else {
         HSD_JObjSetFlags(HSD_JObjGetChild(jobj), JOBJ_HIDDEN);
+#ifdef TARGET_PC
+        slippiHudNameShow(*slot, false);
+#endif
         if (has_nametag(*slot)) {
             HSD_SisLib_803A746C(un_804D6D78, un_804A1EF8[*slot], -5000.0f,
                                 0.0f);
@@ -279,11 +319,6 @@ static inline float getNametagColorFrame(float frame)
 static inline void createNameText(int slot)
 {
     const char* text = GetNameText(Player_GetNametagSlotID(slot));
-#ifdef TARGET_PC
-    if (slippiTagText(slot) != NULL) {
-        text = slippiTagText(slot);
-    }
-#endif
     un_804A1EF8[slot] =
         HSD_SisLib_803A6B98(un_804D6D78, -5000.0f, 0.0f, text);
     HSD_SisLib_803A7548(un_804D6D78, un_804A1EF8[slot], 0.4f, 0.55f);
@@ -363,6 +398,14 @@ void un_802FD45C(void)
 void un_802FD468(void)
 {
     int i;
+#ifdef TARGET_PC
+    for (i = 0; i < 2; i++) {
+        if (un_hud_names[i] != NULL) {
+            HSD_SisLib_803A5CC4(un_hud_names[i]);
+            un_hud_names[i] = NULL;
+        }
+    }
+#endif
     for (i = 0; i < Gm_Player_NumMax; i++) {
         if (un_804A1EE0[i]) {
             HSD_GObjFree(un_804A1EE0[i]);
@@ -398,6 +441,9 @@ void un_802FD4C8(void)
     }
     un_804D6D68 = NULL;
     un_804D6D6C = 0;
+#ifdef TARGET_PC
+    un_hud_names[0] = un_hud_names[1] = NULL;
+#endif
     memzero(un_804D6D70, i = sizeof(un_804D6D70));
     un_804D6D68 = (gobj = un_802FD4C8_inline(15));
     DP_SET(nametag_CObjDesc.eyepos, &nametag_eyepos);
