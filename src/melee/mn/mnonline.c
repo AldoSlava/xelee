@@ -28,8 +28,8 @@ static const char* const online_descriptions[] = {
 };
 
 static const char* const slippi_descriptions[] = {
-    "Find an opponent over the internet.",
-    "Connect to a friend using a connect code.",
+    "Play unranked matches.",
+    "Play a specific person.",
 };
 
 static const char* notice;

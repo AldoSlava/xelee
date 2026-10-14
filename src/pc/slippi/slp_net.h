@@ -112,6 +112,10 @@ bool pc_slippi_net_service(PcSlippiNet* n, uint64_t now_us, uint32_t timeout_ms)
 bool pc_slippi_net_send_pad(PcSlippiNet* n, int32_t frame,
                             const uint8_t pad[PC_SLIPPI_PAD_DATA_SIZE], uint64_t now_us);
 
+/* Send the pad window again without a new frame (the peer asked, or the link
+ * went quiet). Returns false if nothing is queued or not connected. */
+bool pc_slippi_net_resend_pad(PcSlippiNet* n);
+
 /* Send a selections message (reliable). Records it as the merged local pick. */
 bool pc_slippi_net_send_selections(PcSlippiNet* n, const PcSlippiSelections* s);
 /* Send a chat message (reliable). Refuses an id Slippi does not allow. */
