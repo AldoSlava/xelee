@@ -169,6 +169,14 @@ else ()
             HAS_MSGHDR_FLAGS=1 HAS_SOCKLEN_T=1)
 endif ()
 
+# A local stand-in for Slippi's matchmaking server, for testing netplay
+# without the real one (tools/slippi_mm_server.c). Not part of the default build.
+add_executable(slippi_mm_server EXCLUDE_FROM_ALL
+        tools/slippi_mm_server.c
+        src/pc/slippi/slp_json.c)
+target_include_directories(slippi_mm_server PRIVATE src)
+target_link_libraries(slippi_mm_server PRIVATE melee_enet)
+
 # ---- Game code (decomp, compiled as C) -------------------------------------
 include(cmake/GameSources.cmake)
 

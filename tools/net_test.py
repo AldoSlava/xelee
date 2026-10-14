@@ -1243,6 +1243,9 @@ def parse_args(argv=None):
     ap.add_argument("--mm", action="store_true",
                     help="Slippi matchmaking path: boot into the Unranked lobby with a synthesized "
                          "local-peer ticket (MELEE_SLIPPI_LOCAL_PEER) and a fake account, then CSS/SSS")
+    ap.add_argument("--mm-server", action="store_true",
+                    help="with --mm: queue both instances on a real local matchmaking server "
+                         "(build-container/slippi_mm_server) instead of the synthesized ticket")
     ap.add_argument("--mm-decider", choices=("a", "b"), default="a",
                     help="with --mm: which instance the ticket names the decider (a is P1, b is P2)")
     ap.add_argument("--exe", default=os.path.join(here, "..", "build", "melee"))
@@ -1264,6 +1267,8 @@ def run(args):
     if args.scenes:
         args.lan = True  # the set flow is the online one: lobby, CSS, SSS, VS, results
     global MM_RUN
+    if args.mm_server:
+        args.mm = True
     MM_RUN = bool(args.mm)
     # A matchmaking session counts frames from the match start, so there is no
     # boot to budget for; and under Slippi's rules (4 stocks) a match can end
@@ -1304,6 +1309,15 @@ def run(args):
         sim_a["MELEE_FROZEN_STADIUM"] = sim["MELEE_FROZEN_STADIUM"] = "0"
     shutil.rmtree(args.work, ignore_errors=True)
     os.makedirs(args.work)
+    mm_server = None
+    if args.mm_server:
+        args.mm = True
+        exe = os.path.join(os.path.dirname(os.path.abspath(args.exe)), "slippi_mm_server")
+        mm_port = args.port + 100
+        mm_server = subprocess.Popen([exe, "-p", str(mm_port), "-v"],
+                                     stdout=open(os.path.join(args.work, "mm_server.log"), "w"),
+                                     stderr=subprocess.STDOUT)
+        time.sleep(0.5)
     if args.mm:
         for name, env, port, peer in (("a", sim_a, args.port, args.port + 1),
                                       ("b", sim, args.port + 1, args.port)):
@@ -1316,13 +1330,19 @@ def run(args):
                 "MELEE_NET_STACK": "slippi",
                 "MELEE_BOOT_SCENE": "unranked",
                 "MELEE_SLIPPI_DIR": slp_dir,
-                "MELEE_SLIPPI_LOCAL_PEER": "1",
                 "MELEE_SLIPPI_LOCAL_PORT": str(port),
-                "MELEE_SLIPPI_PEER_PORT": str(peer),
-                "MELEE_SLIPPI_LOCAL_INDEX": "0" if name == "a" else "1",
-                "MELEE_SLIPPI_LOCAL_HOST": "1" if name == args.mm_decider else "0",
                 "MELEE_CSS_PICK": "2,0" if name == "a" else "9,1",  # Fox vs Marth
             })
+            if mm_server is not None:
+                env.update({"MELEE_SLIPPI_MM_HOST": "127.0.0.1",
+                            "MELEE_SLIPPI_MM_PORT": str(mm_port)})
+            else:
+                env.update({
+                    "MELEE_SLIPPI_LOCAL_PEER": "1",
+                    "MELEE_SLIPPI_PEER_PORT": str(peer),
+                    "MELEE_SLIPPI_LOCAL_INDEX": "0" if name == "a" else "1",
+                    "MELEE_SLIPPI_LOCAL_HOST": "1" if name == args.mm_decider else "0",
+                })
     if args.state_log:
         # Per-frame state dumps beside the logs, so a DESYNC can be diffed
         # field by field (src/pc/net_snapshot.c).
@@ -1411,6 +1431,8 @@ def run(args):
         # SIGKILL only what is still running after that.
         a.kill(20)
         b.kill(20)
+        if mm_server is not None:
+            mm_server.terminate()
         if a.proc.returncode == -9 or b.proc.returncode == -9:
             print("net_test: killed a run that would not exit (per-instance FAIL below)",
                   flush=True)

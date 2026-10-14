@@ -1,0 +1,324 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* A local stand-in for Slippi's matchmaking server (mm.slippi.gg:43113), for
+ * testing netplay without Slippi's backend: our own builds and a Slippi
+ * Dolphin can queue against it and be paired.
+ *
+ * The protocol is Ishiiruka's SlippiMatchmaking.cpp, from the server's side:
+ * an ENet host, one reliable JSON packet per message.
+ *   client -> "create-ticket" {user{uid,playKey,connectCode,displayName},
+ *             search{mode, connectCode:[bytes]}, appVersion, ipAddressLan}
+ *   server -> "create-ticket-resp" (or {"error": "..."})
+ *   server -> "get-ticket-resp" once paired: matchId, isHost (the decider),
+ *             players[] (uid, displayName, connectCode, port 1..4,
+ *             isLocalPlayer, ipAddress "ip:port", ipAddressLan), stages[].
+ * Modes: 1 Unranked pairs any two tickets; 2 Direct pairs two tickets that
+ * name each other's connect codes. Ranked, Teams and Party are refused.
+ * Players' game ports are the ones the clients advertise in ipAddressLan
+ * (the port their ENet netplay host is bound to).
+ *
+ * To point a Slippi Dolphin here, which has the host name compiled in, map
+ * mm.slippi.gg to this machine in /etc/hosts (127.0.0.1 for the same machine).
+ * Our own builds take MELEE_SLIPPI_MM_HOST / MELEE_SLIPPI_MM_PORT.
+ *
+ *   slippi_mm_server [-p port] [-v]
+ */
+#include "pc/slippi/slp_json.h"
+
+#include <enet/enet.h>
+
+#include <ctype.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#define MAX_TICKETS 64
+#define CODE_MAX 24
+
+typedef struct Ticket {
+    bool used;
+    ENetPeer* peer;
+    int mode;
+    char uid[40], display[40], code[CODE_MAX], want[CODE_MAX];
+    char ip[48];
+    unsigned game_port; /* from ipAddressLan: where the client's game host listens */
+    char lan[80];
+    time_t queued;
+} Ticket;
+
+static Ticket tickets[MAX_TICKETS];
+static volatile sig_atomic_t stop_flag;
+static bool verbose;
+static unsigned match_serial;
+
+static void on_signal(int sig) {
+    (void)sig;
+    stop_flag = 1;
+}
+
+static void logf_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void logf_(const char* fmt, ...) {
+    char ts[16];
+    time_t t = time(NULL);
+    strftime(ts, sizeof ts, "%H:%M:%S", localtime(&t));
+    printf("[%s] ", ts);
+    va_list ap;
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    printf("\n");
+    fflush(stdout);
+}
+
+static void send_json(ENetPeer* peer, const char* body) {
+    ENetPacket* p = enet_packet_create(body, strlen(body), ENET_PACKET_FLAG_RELIABLE);
+    enet_peer_send(peer, 0, p);
+    if (verbose) {
+        logf_("-> %s", body);
+    }
+}
+
+static void json_escape(char* out, size_t cap, const char* in) {
+    size_t w = 0;
+    for (; *in && w + 7 < cap; in++) {
+        unsigned char c = (unsigned char)*in;
+        if (c == '"' || c == '\\') {
+            out[w++] = '\\';
+            out[w++] = (char)c;
+        } else if (c < 0x20) {
+            w += (size_t)snprintf(out + w, cap - w, "\\u%04x", c);
+        } else {
+            out[w++] = (char)c;
+        }
+    }
+    out[w] = '\0';
+}
+
+/* The target code arrives as game bytes: ASCII, or Shift-JIS full-width for
+ * the '#' and letters/digits the game's own keyboard produces. */
+static void decode_code(const PcSlippiJson* arr, char* out, size_t cap) {
+    size_t w = 0;
+    int n = pc_slippi_json_is_array(arr) ? arr->child_count : 0;
+    for (int i = 0; i < n && w + 1 < cap; i++) {
+        int b = pc_slippi_json_int(pc_slippi_json_at(arr, i), 0);
+        if (b == 0) {
+            break;
+        }
+        if (b == 0x81 && i + 1 < n && pc_slippi_json_int(pc_slippi_json_at(arr, i + 1), 0) == 0x94) {
+            out[w++] = '#';
+            i++;
+        } else if (b == 0x82 && i + 1 < n) {
+            int c = pc_slippi_json_int(pc_slippi_json_at(arr, ++i), 0);
+            if (c >= 0x4F && c <= 0x58) {
+                out[w++] = (char)('0' + c - 0x4F);
+            } else if (c >= 0x60 && c <= 0x79) {
+                out[w++] = (char)('A' + c - 0x60);
+            } else if (c >= 0x81 && c <= 0x9A) {
+                out[w++] = (char)('A' + c - 0x81);
+            }
+        } else if (b > 0 && b < 0x80) {
+            out[w++] = (char)toupper(b);
+        }
+    }
+    out[w] = '\0';
+}
+
+static bool code_eq(const char* a, const char* b) {
+    return strcasecmp(a, b) == 0;
+}
+
+static void drop_ticket(Ticket* t) {
+    t->used = false;
+    t->peer = NULL;
+}
+
+static void player_json(char* out, size_t cap, const Ticket* t, int port, bool local) {
+    char uid[96], disp[96], code[64];
+    json_escape(uid, sizeof uid, t->uid);
+    json_escape(disp, sizeof disp, t->display);
+    json_escape(code, sizeof code, t->code);
+    snprintf(out, cap,
+             "{\"uid\":\"%s\",\"displayName\":\"%s\",\"connectCode\":\"%s\",\"port\":%d,"
+             "\"isLocalPlayer\":%s,\"ipAddress\":\"%s:%u\",\"ipAddressLan\":\"%s\"}",
+             uid, disp, code, port, local ? "true" : "false", t->ip, t->game_port, t->lan);
+}
+
+static void pair(Ticket* a, Ticket* b) {
+    /* a queued first and is the decider. Both see the same player order. */
+    for (int side = 0; side < 2; side++) {
+        Ticket* me = side ? b : a;
+        char pa[600], pb[600], body[2048];
+        player_json(pa, sizeof pa, a, 1, me == a);
+        player_json(pb, sizeof pb, b, 2, me == b);
+        snprintf(body, sizeof body,
+                 "{\"type\":\"get-ticket-resp\",\"matchId\":\"mode.%s.local-%u\","
+                 "\"isHost\":%s,\"players\":[%s,%s],\"stages\":[3,8,28,31,32,2],\"items\":0}",
+                 a->mode == 1 ? "unranked" : "direct", match_serial, me == a ? "true" : "false",
+                 pa, pb);
+        send_json(me->peer, body);
+    }
+    logf_("matched %s (%s) with %s (%s), match %u, %s decides", a->code, a->ip, b->code, b->ip,
+          match_serial, a->code);
+    match_serial++;
+    drop_ticket(a);
+    drop_ticket(b);
+}
+
+static void try_match(Ticket* t) {
+    Ticket* best = NULL;
+    for (int i = 0; i < MAX_TICKETS; i++) {
+        Ticket* o = &tickets[i];
+        if (!o->used || o == t || o->mode != t->mode || o->peer == t->peer) {
+            continue;
+        }
+        if (t->mode == 2 && !(code_eq(o->code, t->want) && code_eq(o->want, t->code))) {
+            continue;
+        }
+        if (best == NULL || o->queued < best->queued) {
+            best = o;
+        }
+    }
+    if (best != NULL) {
+        /* The earlier ticket is the decider. */
+        if (best->queued <= t->queued) {
+            pair(best, t);
+        } else {
+            pair(t, best);
+        }
+    }
+}
+
+static void handle_message(ENetPeer* peer, const char* text, size_t len) {
+    PcSlippiJson* root = NULL;
+    char err[64];
+    if (!pc_slippi_json_parse(text, len, &root, err, sizeof err)) {
+        logf_("bad json from %x: %s", peer->address.host, err);
+        return;
+    }
+    char type[40];
+    pc_slippi_json_string(pc_slippi_json_get(root, "type"), type, sizeof type);
+    if (strcmp(type, "create-ticket") != 0) {
+        logf_("ignoring message type '%s'", type);
+        pc_slippi_json_free(root);
+        return;
+    }
+    const PcSlippiJson* user = pc_slippi_json_get(root, "user");
+    const PcSlippiJson* search = pc_slippi_json_get(root, "search");
+    Ticket t;
+    memset(&t, 0, sizeof t);
+    t.peer = peer;
+    t.queued = time(NULL);
+    pc_slippi_json_string(pc_slippi_json_get(user, "uid"), t.uid, sizeof t.uid);
+    pc_slippi_json_string(pc_slippi_json_get(user, "connectCode"), t.code, sizeof t.code);
+    pc_slippi_json_string(pc_slippi_json_get(user, "displayName"), t.display, sizeof t.display);
+    t.mode = pc_slippi_json_int(pc_slippi_json_get(search, "mode"), -1);
+    decode_code(pc_slippi_json_get(search, "connectCode"), t.want, sizeof t.want);
+    pc_slippi_json_string(pc_slippi_json_get(root, "ipAddressLan"), t.lan, sizeof t.lan);
+    enet_address_get_host_ip(&peer->address, t.ip, sizeof t.ip);
+    const char* colon = strrchr(t.lan, ':');
+    t.game_port = colon != NULL ? (unsigned)atoi(colon + 1) : 0;
+    char app[32];
+    pc_slippi_json_string(pc_slippi_json_get(root, "appVersion"), app, sizeof app);
+    pc_slippi_json_free(root);
+
+    if (t.mode != 1 && t.mode != 2) {
+        logf_("%s asked for unsupported mode %d", t.code, t.mode);
+        send_json(peer, "{\"type\":\"create-ticket-resp\",\"error\":\"This mode is not supported by the local server\"}");
+        return;
+    }
+    if (t.code[0] == '\0' || t.game_port == 0) {
+        logf_("refusing ticket without a connect code or game port (lan '%s')", t.lan);
+        send_json(peer, "{\"type\":\"create-ticket-resp\",\"error\":\"Missing user or address\"}");
+        return;
+    }
+    if (t.mode == 2 && t.want[0] == '\0') {
+        send_json(peer, "{\"type\":\"create-ticket-resp\",\"error\":\"No connect code given\"}");
+        return;
+    }
+    /* One ticket per connection: a new one replaces the old. */
+    Ticket* slot = NULL;
+    for (int i = 0; i < MAX_TICKETS; i++) {
+        if (tickets[i].used && tickets[i].peer == peer) {
+            slot = &tickets[i];
+            break;
+        }
+    }
+    for (int i = 0; slot == NULL && i < MAX_TICKETS; i++) {
+        if (!tickets[i].used) {
+            slot = &tickets[i];
+        }
+    }
+    if (slot == NULL) {
+        send_json(peer, "{\"type\":\"create-ticket-resp\",\"error\":\"Queue full\"}");
+        return;
+    }
+    t.used = true;
+    *slot = t;
+    logf_("ticket: %s (%s) mode %d%s%s, game port %u, app %s", t.code, t.display, t.mode,
+          t.mode == 2 ? " wants " : "", t.mode == 2 ? t.want : "", t.game_port, app);
+    send_json(peer, "{\"type\":\"create-ticket-resp\"}");
+    try_match(slot);
+}
+
+int main(int argc, char** argv) {
+    unsigned port = 43113;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+            port = (unsigned)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-v") == 0) {
+            verbose = true;
+        } else {
+            fprintf(stderr, "usage: %s [-p port] [-v]\n", argv[0]);
+            return 2;
+        }
+    }
+    if (enet_initialize() != 0) {
+        fprintf(stderr, "enet_initialize failed\n");
+        return 1;
+    }
+    ENetAddress addr;
+    addr.host = ENET_HOST_ANY;
+    addr.port = (enet_uint16)port;
+    ENetHost* host = enet_host_create(&addr, 64, 3, 0, 0);
+    if (host == NULL) {
+        fprintf(stderr, "cannot listen on UDP %u (already running?)\n", port);
+        return 1;
+    }
+    signal(SIGINT, on_signal);
+    signal(SIGTERM, on_signal);
+    logf_("local Slippi matchmaking listening on UDP %u", port);
+    while (!stop_flag) {
+        ENetEvent ev;
+        while (enet_host_service(host, &ev, 100) > 0) {
+            switch (ev.type) {
+            case ENET_EVENT_TYPE_CONNECT:
+                if (verbose) {
+                    logf_("client connected");
+                }
+                break;
+            case ENET_EVENT_TYPE_RECEIVE:
+                if (verbose) {
+                    logf_("<- %.*s", (int)ev.packet->dataLength, (char*)ev.packet->data);
+                }
+                handle_message(ev.peer, (const char*)ev.packet->data, ev.packet->dataLength);
+                enet_packet_destroy(ev.packet);
+                break;
+            case ENET_EVENT_TYPE_DISCONNECT:
+                for (int i = 0; i < MAX_TICKETS; i++) {
+                    if (tickets[i].used && tickets[i].peer == ev.peer) {
+                        logf_("%s left the queue", tickets[i].code);
+                        drop_ticket(&tickets[i]);
+                    }
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    enet_host_destroy(host);
+    enet_deinitialize();
+    return 0;
+}
