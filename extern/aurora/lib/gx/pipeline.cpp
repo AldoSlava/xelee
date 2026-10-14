@@ -281,6 +281,19 @@ struct XrBatcher {
   std::vector<const DrawData*> members;
   uint32_t memberIndices = 0;
   uint64_t draws = 0, batches = 0, batchedDraws = 0;
+  // Motion replay (AURORA_XR_MOTION_SORT, on by default): the pass writes
+  // only depth and motion, depth-tested, so its draws' order doesn't matter
+  // (but for exact depth ties, where both sides carry the same surface's
+  // motion). Draws go into buckets of joinable ones, emitted at a flush, not
+  // runs of neighbours: half the motion draws were left alone, ~6 us of GPU
+  // each on four-CPU Brinstar.
+  struct Bucket {
+    std::vector<const DrawData*> members;
+    uint32_t indices = 0;
+  };
+  bool sorting = false;
+  std::vector<Bucket> buckets;
+  size_t bucketsUsed = 0;
 } sXrBatch;
 
 gfx::PipelineRef batch_pipeline(const DrawData& d) {
@@ -297,15 +310,24 @@ bool batchable(const DrawData& d) {
          (sXrBatch.motion || d.xrSolidIndexCount == 0);
 }
 
-bool joins(const DrawData& first, const DrawData& d) {
-  if (batch_pipeline(d) != batch_pipeline(first) || sXrBatch.members.size() >= 128 ||
-      sXrBatch.memberIndices + draw_index_count(d) > 65536 * 4)
+constexpr size_t kBatchMaxMembers = 128;
+constexpr uint32_t kBatchMaxIndices = 65536 * 4;
+
+// d could go in one batched draw with first (limits aside).
+bool compatible(const DrawData& first, const DrawData& d) {
+  if (batch_pipeline(d) != batch_pipeline(first))
     return false;
   if (sXrBatch.motion && !d.xrMotionMaterial)
     return true;
   return d.bindGroups.textureBindGroup == first.bindGroups.textureBindGroup && d.dstAlpha == first.dstAlpha &&
          d.uniformSharedKey == first.uniformSharedKey &&
          d.immediateData.fogRangeBase == first.immediateData.fogRangeBase;
+}
+
+bool joins(const DrawData& first, const DrawData& d) {
+  if (sXrBatch.members.size() >= kBatchMaxMembers || sXrBatch.memberIndices + draw_index_count(d) > kBatchMaxIndices)
+    return false;
+  return compatible(first, d);
 }
 
 // Bytes in this frame's slot, 16-aligned (null: full).
@@ -406,9 +428,17 @@ void xr_batch_begin(const gfx::detail::FramePacket& frame, bool multiview, bool 
   }
   b.members.clear();
   b.memberIndices = 0;
+  static const bool sort = [] {
+    const char* v = std::getenv("AURORA_XR_MOTION_SORT");
+    return v == nullptr || *v != '0';
+  }();
+  b.sorting = b.active && motion && sort;
+  b.bucketsUsed = 0;
 }
 
-void xr_batch_flush(const wgpu::RenderPassEncoder& pass) {
+namespace {
+// The current run (b.members) as one draw, or alone if it's one.
+void emit_members(const wgpu::RenderPassEncoder& pass) {
   auto& b = sXrBatch;
   if (b.members.empty())
     return;
@@ -418,6 +448,47 @@ void xr_batch_flush(const wgpu::RenderPassEncoder& pass) {
     emit_batch(pass);
   b.members.clear();
   b.memberIndices = 0;
+}
+
+void emit_bucket(XrBatcher::Bucket& bucket, const wgpu::RenderPassEncoder& pass) {
+  auto& b = sXrBatch;
+  b.members.swap(bucket.members);
+  b.memberIndices = bucket.indices;
+  emit_members(pass);
+  bucket.members.clear();
+  bucket.indices = 0;
+}
+
+// Motion replay, sorting: d joins the first bucket it's compatible with (a
+// full one goes out first), else starts one.
+void bucket_add(const DrawData& d, const wgpu::RenderPassEncoder& pass) {
+  auto& b = sXrBatch;
+  const uint32_t count = draw_index_count(d);
+  for (size_t k = 0; k < b.bucketsUsed; ++k) {
+    auto& bucket = b.buckets[k];
+    if (!compatible(*bucket.members.front(), d))
+      continue;
+    if (bucket.members.size() >= kBatchMaxMembers || bucket.indices + count > kBatchMaxIndices) {
+      emit_bucket(bucket, pass);
+    }
+    bucket.members.push_back(&d);
+    bucket.indices += count;
+    return;
+  }
+  if (b.bucketsUsed == b.buckets.size())
+    b.buckets.emplace_back();
+  auto& bucket = b.buckets[b.bucketsUsed++];
+  bucket.members.assign(1, &d);
+  bucket.indices = count;
+}
+} // namespace
+
+void xr_batch_flush(const wgpu::RenderPassEncoder& pass) {
+  auto& b = sXrBatch;
+  emit_members(pass);
+  for (size_t k = 0; k < b.bucketsUsed; ++k)
+    emit_bucket(b.buckets[k], pass);
+  b.bucketsUsed = 0;
 }
 
 void xr_batch_end() {
@@ -446,6 +517,14 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
   auto& b = sXrBatch;
   if (b.active) {
     ++b.draws;
+    if (b.sorting && gfx::xr_multiview_replay()) {
+      // Order doesn't matter here: what can't batch goes out now.
+      if (batchable(data))
+        bucket_add(data, pass);
+      else
+        render_direct(data, pass);
+      return;
+    }
     if (!gfx::xr_multiview_replay() || !batchable(data) ||
         (!gfx::xr_motion_replay() && xr_link_filter(data))) {
       xr_batch_flush(pass);

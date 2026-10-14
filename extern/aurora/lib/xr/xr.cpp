@@ -6183,10 +6183,13 @@ wgpu::Texture begin_frame(uint32_t width, uint32_t height) noexcept {
     }
     // AURORA_XR_MSAA=<1|2|4>: samples for the 3D eyes alone (the flat frame
     // keeps its own), resolved into the shared image at the end of the pass.
-    // 4 by default on Android, where it's measured.
+    // 2 by default on Android: every sample sits in tile memory, so 4x means
+    // twice the bins of 2x, and every draw is replayed per bin. Four-CPU
+    // Brinstar's eye pass at GPU level 2: 10.7 ms at 4x, 9.4 at 2x, 7.6 at 1x
+    // (2x needs the Dawn fork's sample count 2, 051c687).
     {
 #ifdef __ANDROID__
-      constexpr float kDefaultSamples = 4.f;
+      constexpr float kDefaultSamples = 2.f;
 #else
       constexpr float kDefaultSamples = 1.f;
 #endif
