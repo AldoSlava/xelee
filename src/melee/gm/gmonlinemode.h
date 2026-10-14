@@ -37,6 +37,10 @@ typedef struct OnlineCssStep {
     char mark;      /* '-' done, '+' to do, 'x' in progress, '!' error */
     char text[56];
 } OnlineCssStep;
+/* Direct shows the player's own connect code under the name; "" hides it. */
+void mnOnlineCss_SetCode(const char* code);
+/* "Playing: <name>" across the top while connected; "" hides it. */
+void mnOnlineCss_SetPlaying(const char* name);
 void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep* steps, int n,
                         const char* hint);
 void mnOnlineCss_Destroy(void);

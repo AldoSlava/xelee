@@ -32,14 +32,17 @@ typedef struct CssLine {
     int color; /* index into the palette, -1 unset */
 } CssLine;
 
-enum { c_white, c_dim, c_green, c_blue, c_red, c_count };
+enum { c_white, c_dim, c_green, c_blue, c_red, c_gray, c_count };
 
 static GXColor palette[c_count] = {
     { 0xFF, 0xFF, 0xFF, 0xFF }, { 0xC8, 0xC8, 0xC8, 0xFF }, { 0x40, 0xE0, 0x60, 0xFF },
     { 0x50, 0xA0, 0xFF, 0xFF }, { 0xFF, 0x60, 0x60, 0xFF },
+    { 0x8E, 0x91, 0x96, 0xFF }, /* Slippi's label gray (UserDisplayFunctions.asm) */
 };
 
-enum { l_title, l_user_label, l_user_name, l_hint, l_hint2, l_mark, l_text = l_mark + CSS_STEPS_MAX,
+enum { l_title, l_user_label, l_user_name, l_code_label, l_code, l_play_label, l_play_name,
+       l_hint, l_hint2, l_mark,
+       l_text = l_mark + CSS_STEPS_MAX,
        l_count = l_text + CSS_STEPS_MAX };
 
 static HSD_Text* css_text;
@@ -52,7 +55,7 @@ static unsigned css_frame;
 #define MARK_HALF_WIDTH 0.95f
 static bool css_pending[CSS_STEPS_MAX];
 static bool css_hint_z; /* the hint is "Press <Z> to ...": the icon stands for the Z */
-#define HINT_Y_FROM_STEPS (BLOCK_Y + STEP_OFF + STEP_DY * CSS_STEPS_MAX + 12.0f)
+#define HINT_Y_FROM_STEPS (BLOCK_Y + 94.5f) /* under the last step's room (Dolphin) */
 #define HINT_ICON_X 43.0f /* from the hint's left edge to the icon's centre, in screen units */
 #define HINT_ICON_W 30.0f
 #define HINT_REST_X 64.0f
@@ -66,12 +69,31 @@ static CssLine css_lines[l_count];
  * 9.2 screen units a world unit across, 8.5 down). */
 #define BLOCK_X 384.0f
 #define BLOCK_Y 251.0f
-/* Measured on Slippi's CSS (Dolphin): the first step sits 25.6 units under the
- * title, and the steps are 19 apart. */
-#define STEP_OFF 25.5f
-#define STEP_DY 19.0f
+/* Measured on Slippi's CSS (Dolphin, same window size, pixel rows of the
+ * same strings): where the steps start under the title and how far apart. */
+#define STEP_OFF 26.1f
+#define STEP_DY 19.3f
+#define STEP_TEXT_DX 18.7f /* from the marker to the step's text */
+#define TITLE_DY 1.2f
+/* Slippi's user block (UserDisplayFunctions.asm): "User", the name, then in
+ * Direct "Connect Code" and the code; labels gray and smaller than values.
+ * Sizes and spacing measured against Dolphin (same strings, same window). */
+#define USER_X 217.0f
+#define USER_Y (BLOCK_Y - 1.2f)
+#define USER_NAME_DY 17.4f
+#define USER_CODE_DY 38.6f
+#define USER_CODE_VALUE_DY 16.1f
+#define LABEL_SCALE 0.365f
+#define VALUE_SCALE 0.46f
+/* "Playing: <name>" across the top, beside the 1-P badge, while connected. */
+#define PLAY_X 200.7f
+#define PLAY_NAME_X 273.4f
+#define PLAY_Y 23.6f
+#define TITLE_SCALE 0.466f
+#define STEP_SCALE 0.367f
+#define HINT_SCALE 0.368f
 #define ORG_X 190.0f
-#define ORG_Y 236.0f
+#define ORG_Y 10.0f /* above every line: SIS drops lines above its origin */
 static float world_x(float u) { return (u - 320.0f) / 9.2f; }
 static float world_y(float u) { return (u - 234.0f) / 8.5f; } /* the text's own y: down is positive */
 
@@ -153,23 +175,28 @@ void mnOnlineCss_Create(int ctx)
     css_text->pos_y = world_y(ORG_Y);
     css_text->pos_z = 0.0f;
     css_text->box_size_x = 500.0f;
-    css_text->box_size_y = 300.0f;
+    css_text->box_size_y = 480.0f;
     css_text->font_size.x = 1.0f / 9.2f;
     css_text->font_size.y = 1.0f / 9.2f;
     css_text->x4E = 1;
     css_text->default_kerning = 1;
     css_text->x4C = 1;
     memset(css_lines, 0, sizeof(css_lines));
-    addLine(&css_lines[l_title], BLOCK_X, BLOCK_Y, 0.42f, c_white);
-    addLine(&css_lines[l_user_label], 217.0f, BLOCK_Y, 0.3f, c_dim);
-    addLine(&css_lines[l_user_name], 217.0f, BLOCK_Y + 18.0f, 0.38f, c_white);
+    addLine(&css_lines[l_title], BLOCK_X, BLOCK_Y + TITLE_DY, TITLE_SCALE, c_white);
+    addLine(&css_lines[l_user_label], USER_X, USER_Y, LABEL_SCALE, c_gray);
+    addLine(&css_lines[l_user_name], USER_X, USER_Y + USER_NAME_DY, VALUE_SCALE, c_white);
+    addLine(&css_lines[l_code_label], USER_X, USER_Y + USER_CODE_DY, LABEL_SCALE, c_gray);
+    addLine(&css_lines[l_code], USER_X, USER_Y + USER_CODE_DY + USER_CODE_VALUE_DY, VALUE_SCALE,
+            c_white);
+    addLine(&css_lines[l_play_label], PLAY_X, PLAY_Y, VALUE_SCALE, c_gray);
+    addLine(&css_lines[l_play_name], PLAY_NAME_X, PLAY_Y, VALUE_SCALE, c_white);
     for (i = 0; i < CSS_STEPS_MAX; i++) {
         float y = BLOCK_Y + STEP_OFF + STEP_DY * i;
-        addLine(&css_lines[l_mark + i], BLOCK_X, y, 0.34f, c_blue);
-        addLine(&css_lines[l_text + i], BLOCK_X + 16.0f, y, 0.34f, c_white);
+        addLine(&css_lines[l_mark + i], BLOCK_X, y, STEP_SCALE, c_blue);
+        addLine(&css_lines[l_text + i], BLOCK_X + STEP_TEXT_DX, y, STEP_SCALE, c_white);
     }
-    addLine(&css_lines[l_hint], BLOCK_X, HINT_Y_FROM_STEPS, 0.3f, c_dim);
-    addLine(&css_lines[l_hint2], BLOCK_X + HINT_REST_X, HINT_Y_FROM_STEPS, 0.3f, c_dim);
+    addLine(&css_lines[l_hint], BLOCK_X, HINT_Y_FROM_STEPS, HINT_SCALE, c_dim);
+    addLine(&css_lines[l_hint2], BLOCK_X + HINT_REST_X, HINT_Y_FROM_STEPS, HINT_SCALE, c_dim);
 }
 
 void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep* steps, int n,
@@ -181,7 +208,7 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
     }
     css_frame++;
     setLine(&css_lines[l_title], title, c_white);
-    setLine(&css_lines[l_user_label], user[0] ? "User" : "", c_dim);
+    setLine(&css_lines[l_user_label], user[0] ? "User" : "", c_gray);
     setLine(&css_lines[l_user_name], user, c_white);
     for (i = 0; i < CSS_STEPS_MAX; i++) {
         char mark[2] = { 0, 0 };
@@ -207,6 +234,24 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
     setLine(&css_lines[l_hint2], "", c_dim);
 }
 
+void mnOnlineCss_SetCode(const char* code)
+{
+    if (css_text == NULL) {
+        return;
+    }
+    setLine(&css_lines[l_code_label], code != NULL && code[0] ? "Connect Code" : "", c_gray);
+    setLine(&css_lines[l_code], code != NULL ? code : "", c_white);
+}
+
+void mnOnlineCss_SetPlaying(const char* name)
+{
+    if (css_text == NULL) {
+        return;
+    }
+    setLine(&css_lines[l_play_label], name != NULL && name[0] ? "Playing:" : "", c_gray);
+    setLine(&css_lines[l_play_name], name != NULL ? name : "", c_white);
+}
+
 void mnOnlineCss_Destroy(void)
 {
     if (css_text != NULL) {
@@ -222,6 +267,8 @@ void mnOnlineCss_Update(UNUSED const char* title, UNUSED const char* user,
                         UNUSED const OnlineCssStep* steps, UNUSED int n, UNUSED const char* hint)
 {
 }
+void mnOnlineCss_SetCode(UNUSED const char* code) {}
+void mnOnlineCss_SetPlaying(UNUSED const char* name) {}
 void mnOnlineCss_Destroy(void) {}
 
 #endif

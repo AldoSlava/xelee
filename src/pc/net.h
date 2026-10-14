@@ -84,8 +84,9 @@ int pc_net_slippi_link_state(void);
 bool pc_net_slippi_link_send_selections(const struct PcSlippiSelections* s);
 bool pc_net_slippi_link_remote_selections(struct PcSlippiSelections* out);
 void pc_net_slippi_link_close(void);
-/* Apply Slippi's fixed rules (4 stocks, 8 minutes, ...) to this process. */
-void pc_net_slippi_rules_force(void);
+/* Apply Slippi's fixed rules (4 stocks, 8 minutes, ...) to this process;
+ * `frozen_stadium` is the match's alt stage mode (Direct only). */
+void pc_net_slippi_rules_force(bool frozen_stadium);
 /* Pin / release the all-unlocked save image outside a session (the Slippi
  * CSS); the player's own progress is kept aside and put back on release. */
 void pc_net_unlock_pin(void);
@@ -93,6 +94,10 @@ void pc_net_unlock_release(void);
 /* Start the rollback engine on the open link for a match; `rng_offset` is the
  * decider's value. Call before the VS scene's first tick. */
 bool pc_net_slippi_adopt(int local_player, uint32_t rng_offset);
+/* The match is over and the peer is still there: stop the engine and keep the
+ * ENet peer as the link (Direct's lobby, where the next game is agreed).
+ * False, with nothing changed, when there is no healthy match to give back. */
+bool pc_net_slippi_unadopt(void);
 /* Which peer sends the Slippi direct-session setup (seed + start frame). A
  * MELEE_NET session leaves it unset and the caller's controller port decides
  * (P1 sends); a matchmaking session sets it from the ticket's decider flag,

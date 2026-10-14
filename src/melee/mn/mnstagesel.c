@@ -283,6 +283,37 @@ static int netStageSel_Resolve(void)
     return pick;
 }
 
+/* Slippi Direct's Frozen Pokemon Stadium toggle (FrozenStadiumToggle/*.asm):
+ * Z on any port flips it while the stage select is up for Direct's stage
+ * pick. Like Slippi's static byte it stays as set for later picks. */
+static bool sss_frozen_enabled;
+static bool sss_frozen;
+
+void mnStageSel_SetFrozenToggle(bool enabled)
+{
+    sss_frozen_enabled = enabled;
+}
+
+bool mnStageSel_FrozenToggled(void)
+{
+    return sss_frozen;
+}
+
+static void frozenToggleFrame(void)
+{
+    int i;
+    if (!sss_frozen_enabled || mnStageSel_804D6CAF != 0) {
+        return;
+    }
+    for (i = 0; i < 4; i++) {
+        if (HSD_PadCopyStatus[i].trigger & HSD_PAD_Z) {
+            sss_frozen = !sss_frozen;
+            pc_log_line("sss: Frozen Stadium %s", sss_frozen ? "on" : "off");
+            break;
+        }
+    }
+}
+
 /* "Random" online: the offline roll uses the live RNG and a per-machine
  * cooldown table, neither of which is in sync at this point (the peer's
  * pick lands on a different frame on each side). Draw from the seed
@@ -1162,6 +1193,9 @@ void mnStageSel_Scene_OnFrame(void)
         rankStageFrame();
         return;
     }
+#endif
+#ifdef TARGET_PC
+    frozenToggleFrame();
 #endif
     if (sss_data->force_stage_id >= 0) {
         mnStageSel_804D6CAF = 2;

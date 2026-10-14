@@ -25,6 +25,7 @@ int pc_net_slippi_link_state(void) { return 2; }
 bool pc_net_slippi_link_send_selections(const struct PcSlippiSelections* s) { (void) s; return false; }
 bool pc_net_slippi_link_remote_selections(struct PcSlippiSelections* o) { (void) o; return false; }
 void pc_net_slippi_link_close(void) {}
+bool pc_net_slippi_unadopt(void) { return false; }
 void pc_slippi_selections_reset(PcSlippiSelections* s) { memset(s, 0, sizeof *s); }
 bool pc_slippi_account_load(PcSlippiAccount* a, bool rediscover) {
     (void) rediscover; memset(a, 0, sizeof *a); return false;

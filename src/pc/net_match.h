@@ -67,12 +67,24 @@ typedef struct PcNetSlippiMatch {
     bool decider;
 } PcNetSlippiMatch;
 bool pc_net_match_slippi_match(PcNetSlippiMatch* out);
+/* Direct's lobby. After a game the link stays up (rearm, called as the
+ * match ends; false when it cannot, and the caller ends the session), and
+ * the next game starts once both sides lock in from the CSS. */
+enum { PC_SLIPPI_STAGE_RANDOM = -2, PC_SLIPPI_STAGE_NONE = -1 };
+bool pc_net_match_slippi_rearm(void);
+bool pc_net_match_slippi_lobby(void);
+/* Send our selections: `stage` is an external stage id, or one of the two
+ * behaviours above; `alt` is the alt stage mode (Frozen Stadium). */
+bool pc_net_match_slippi_lock_in(int stage, uint8_t alt);
+bool pc_net_match_slippi_locked_in(void);
 /* The local pick, made on the CSS before the search starts (Slippi's order). */
 void pc_net_match_set_slippi_pick(uint8_t character, uint8_t color);
 const char* pc_net_match_profile_error(void);
 const char* pc_net_match_profile_directory(void);
 enum PcNetMatchMode pc_net_match_mode(void);
 const char* pc_net_match_opponent_code(void);
+/* The opponent's Slippi display name (ASCII), else their code. */
+const char* pc_net_match_opponent_name(void);
 const PcNetIdentity* pc_net_match_identity(void);
 const uint8_t* pc_net_match_peer_key(void);
 #ifdef __cplusplus

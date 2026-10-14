@@ -20,4 +20,11 @@
 /* 25BBD4 */ int mnSelStageRandom(void);
 /* 25BC08 */ int mnStageSel_8025BC08(int);
 
+#ifdef TARGET_PC
+#include <stdbool.h>
+/* Slippi Direct's Frozen Pokemon Stadium toggle on the stage select. */
+void mnStageSel_SetFrozenToggle(bool enabled);
+bool mnStageSel_FrozenToggled(void);
+#endif
+
 #endif

@@ -748,7 +748,7 @@ static bool rules_ready(void) {
  * Both peers apply the same constants, so no RULES message is needed and the
  * local settings never reach the sim (a peer with 3 stocks would otherwise
  * desync at the first KO). Restored with the rest at disconnect. */
-void pc_net_slippi_rules_force(void) {
+void pc_net_slippi_rules_force(bool frozen_stadium) {
     const struct GamePrefs* p = gmMainLib_GetGamePrefs();
     Rules ru;
     memset(&ru, 0, sizeof ru);
@@ -768,7 +768,8 @@ void pc_net_slippi_rules_force(void) {
     ru.item_freq = 0xFF; /* items off */
     ru.item_mask = p->item_mask;
     ru.stage_mask = 0xE70000B0; /* Slippi's "Singles Stages" */
-    ru.frozen_stadium = 0;      /* alt_stage_mode 0: Stadium transforms, see the catalogue */
+    /* alt_stage_mode: Direct's Frozen Stadium toggle, else 0 (Stadium transforms). */
+    ru.frozen_stadium = frozen_stadium ? 1 : 0;
     unlock_force();
     rules_apply(&ru, true);
 }
@@ -790,7 +791,7 @@ static void slp_direct(void) {
         }
         s_direct_idle_ns = 0;
         if (!s_rules_on) {
-            pc_net_slippi_rules_force();
+            pc_net_slippi_rules_force(false);
         }
         if (pc_net_slippi_setup_host()) {
             net.hs_host = true;

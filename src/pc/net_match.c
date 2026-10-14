@@ -121,6 +121,12 @@ static uint32_t s_slippi_seed;
 static uint8_t s_pick_char, s_pick_color; /* the CSS pick, set before the search */
 static bool s_pick_set;
 static bool s_sel_sent;
+/* Direct's lobby: a game was played on this link and it stayed up, so the
+ * next game's selections wait for the player to lock in (Slippi sends them
+ * from the CSS, not at connect). */
+static bool s_direct_lobby;
+static bool s_my_stage_selected; /* what our last selections said */
+static uint8_t s_my_alt;
 static uint64_t s_link_started_ms;
 static PcNetSlippiMatch s_slippi_built;
 #define SLIPPI_CONNECT_TIMEOUT_MS 20000       /* seed for the Slippi game session */
@@ -844,36 +850,50 @@ static void slp_poll(void) {
     state = PC_MATCH_CONNECT;
 }
 
-/* Our selections, sent as soon as the link is up (Slippi's CSS picks first,
- * so there is nothing left to choose). Unranked takes the stage from the
- * ticket's list at random (Slippi's clients each roll one and the lower port's
- * wins); until Direct has its own stage select it does the same from the
- * standard six. */
-static void slp_send_selections(void) {
+/* Our selections: the pick and a stage behaviour, Slippi's lock-in.
+ * PC_SLIPPI_STAGE_RANDOM rolls one of the ticket's stages (Unranked) or the
+ * standard six (Direct's first game): each client rolls and the lower port's
+ * wins. PC_SLIPPI_STAGE_NONE says no stage (Direct's winner takes the
+ * loser's); any other value is the external stage id picked. The first game
+ * locks in at connect, random, as Slippi's CSS does when the search starts. */
+static bool slp_send_selections_as(int stage, uint8_t alt) {
     PcSlippiSelections s;
     pc_slippi_selections_reset(&s);
     s.player_idx = (uint8_t)s_slippi_ticket.local_player_index;
     s.character_id = s_pick_char;
     s.character_color = s_pick_color;
     s.character_selected = true;
-    uint16_t ids[16];
-    int n = pc_net_match_slippi_stages(ids, 16);
-    static const uint16_t standard[] = {2, 3, 8, 28, 31, 32};
-    uint32_t r = (uint32_t)SDL_GetTicksNS();
-    r ^= r >> 13;
-    r *= 0x9E3779B1u;
-    s.stage_id = n > 0 ? ids[(r >> 8) % (uint32_t)n] : standard[(r >> 8) % 6];
-    s.stage_selected = true;
-    s.alt_stage_mode = 0;
-    s.rng_offset = (uint32_t)(SDL_GetTicksNS() * 2654435761u >> 7) % 0xFFFFu;
-    if (pc_net_slippi_link_send_selections(&s)) {
-        s_sel_sent = true;
-        s_slippi_seed = s.rng_offset; /* kept for the decider's choice below */
-        s_slippi_built.rng_offset = s.rng_offset;
-        s_slippi_built.stage = s.stage_id; /* ours, until theirs arrives */
-        pc_log_line("match: sent selections: char %u color %u stage %u rng %u", s.character_id,
-            s.character_color, s.stage_id, s.rng_offset);
+    if (stage == PC_SLIPPI_STAGE_RANDOM) {
+        uint16_t ids[16];
+        int n = pc_net_match_slippi_stages(ids, 16);
+        static const uint16_t standard[] = {2, 3, 8, 28, 31, 32};
+        uint32_t r = (uint32_t)SDL_GetTicksNS();
+        r ^= r >> 13;
+        r *= 0x9E3779B1u;
+        s.stage_id = n > 0 ? ids[(r >> 8) % (uint32_t)n] : standard[(r >> 8) % 6];
+        s.stage_selected = true;
+    } else if (stage != PC_SLIPPI_STAGE_NONE) {
+        s.stage_id = (uint16_t)stage;
+        s.stage_selected = true;
+        s.alt_stage_mode = alt;
     }
+    s.rng_offset = (uint32_t)(SDL_GetTicksNS() * 2654435761u >> 7) % 0xFFFFu;
+    if (!pc_net_slippi_link_send_selections(&s))
+        return false;
+    s_sel_sent = true;
+    s_my_stage_selected = s.stage_selected;
+    s_my_alt = s.alt_stage_mode;
+    s_slippi_seed = s.rng_offset; /* kept for the decider's choice below */
+    s_slippi_built.rng_offset = s.rng_offset;
+    s_slippi_built.stage = s.stage_id; /* ours, until theirs arrives */
+    pc_log_line("match: sent selections: char %u color %u stage %u%s alt %u rng %u",
+        s.character_id, s.character_color, s.stage_id, s.stage_selected ? "" : " (none)",
+        s.alt_stage_mode, s.rng_offset);
+    return true;
+}
+
+static void slp_send_selections(void) {
+    slp_send_selections_as(PC_SLIPPI_STAGE_RANDOM, 0);
 }
 
 /* Both sides' selections are in: build the match the same way on both. The
@@ -905,10 +925,10 @@ static void slp_build_match(const PcSlippiSelections* theirs) {
     uint8_t alt = 0;
     for (int port = 0; port < 2; port++) {
         bool ours = port == local;
-        bool chosen = ours ? true : theirs->stage_selected;
+        bool chosen = ours ? s_my_stage_selected : theirs->stage_selected;
         if (chosen) {
             stage = ours ? my_stage : theirs->stage_id;
-            alt = ours ? 0 : theirs->alt_stage_mode;
+            alt = ours ? s_my_alt : theirs->alt_stage_mode;
             break;
         }
     }
@@ -937,6 +957,32 @@ static void slp_build_match(const PcSlippiSelections* theirs) {
     ready();
 }
 
+bool pc_net_match_slippi_rearm(void) {
+    if (!s_slippi_match || mode != PC_MATCH_DIRECT || state != PC_MATCH_READY ||
+        !pc_net_slippi_unadopt())
+        return false;
+    s_direct_lobby = true;
+    s_sel_sent = false;
+    memset(&s_slippi_built, 0, sizeof s_slippi_built);
+    state = PC_MATCH_CONNECT;
+    pc_log_line("match: Direct lobby with %s: next game", opponent);
+    return true;
+}
+
+bool pc_net_match_slippi_lobby(void) {
+    return s_slippi_match && s_direct_lobby && state == PC_MATCH_CONNECT;
+}
+
+bool pc_net_match_slippi_lock_in(int stage, uint8_t alt) {
+    if (!pc_net_match_slippi_lobby() || s_sel_sent || pc_net_slippi_link_state() != 1)
+        return false;
+    return slp_send_selections_as(stage, alt);
+}
+
+bool pc_net_match_slippi_locked_in(void) {
+    return s_slippi_match && s_sel_sent;
+}
+
 bool pc_net_match_slippi_match(PcNetSlippiMatch* out) {
     if (!s_slippi_match || state != PC_MATCH_READY)
         return false;
@@ -955,6 +1001,7 @@ bool pc_net_match_start(enum PcNetMatchMode m, const char* code) {
     failure = NULL;
     mode = m;
     if (slp_mode(m)) {
+        s_direct_lobby = false;
         start_frame = -1;
         seed = 0;
         opponent[0] = 0;
@@ -1119,7 +1166,7 @@ void pc_net_match_poll(void) {
                 if (SDL_GetTicks() - s_link_started_ms > SLIPPI_CONNECT_TIMEOUT_MS)
                     fail("Could not connect to opponent");
             } else {
-                if (!s_sel_sent)
+                if (!s_sel_sent && !s_direct_lobby)
                     slp_send_selections();
                 PcSlippiSelections theirs;
                 if (s_sel_sent && pc_net_slippi_link_remote_selections(&theirs) &&
@@ -1185,6 +1232,7 @@ void pc_net_match_stop(void) {
     }
     pc_net_slippi_link_close();
     s_slippi_match = false;
+    s_direct_lobby = false;
     pc_dht_stop();
     publication = 0;
     publication_reason = NULL;
@@ -1239,6 +1287,20 @@ enum PcNetMatchMode pc_net_match_mode(void) {
 }
 const char* pc_net_match_opponent_code(void) {
     return opponent;
+}
+const char* pc_net_match_opponent_name(void) {
+    static char name[24];
+    if (!s_slippi_match || !s_slippi_ticket.ok || s_slippi_ticket.player_count != 2)
+        return opponent;
+    const char* src =
+        s_slippi_ticket.players[s_slippi_ticket.local_player_index ? 0 : 1].display_name;
+    size_t n = 0;
+    for (; src[n] != '\0' && n < sizeof name - 1; n++) {
+        unsigned char c = (unsigned char)src[n];
+        name[n] = c >= 0x20 && c < 0x7F ? (char)c : '?';
+    }
+    name[n] = '\0';
+    return n > 0 ? name : opponent;
 }
 const PcNetIdentity* pc_net_match_identity(void) {
     return &identity;

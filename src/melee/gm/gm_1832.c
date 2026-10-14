@@ -1036,8 +1036,17 @@ static void splashOnlineText(void)
         int id;
         const char* name;
     } stages[] = {
-        { 2, "Fountain of Dreams" }, { 3, "Pokemon Stadium" }, { 8, "Yoshi's Story" },
-        { 28, "Dream Land" },        { 31, "Battlefield" },    { 32, "Final Destination" },
+        /* External stage ids; Direct can play any of them. */
+        { 2, "Fountain of Dreams" }, { 3, "Pokemon Stadium" },    { 4, "Peach's Castle" },
+        { 5, "Kongo Jungle" },       { 6, "Brinstar" },           { 7, "Corneria" },
+        { 8, "Yoshi's Story" },      { 9, "Onett" },              { 10, "Mute City" },
+        { 11, "Rainbow Cruise" },    { 12, "Jungle Japes" },      { 13, "Great Bay" },
+        { 14, "Hyrule Temple" },     { 15, "Brinstar Depths" },   { 16, "Yoshi's Island" },
+        { 17, "Green Greens" },      { 18, "Fourside" },          { 19, "Mushroom Kingdom" },
+        { 20, "Mushroom Kingdom II" }, { 22, "Venom" },           { 23, "Poke Floats" },
+        { 24, "Big Blue" },          { 25, "Icicle Mountain" },   { 27, "Flat Zone" },
+        { 28, "Dream Land" },        { 29, "Yoshi's Island" },    { 30, "Kongo Jungle" },
+        { 31, "Battlefield" },       { 32, "Final Destination" },
     };
     PcNetSlippiMatch sm;
     HSD_Text* text;
@@ -1068,7 +1077,10 @@ static void splashOnlineText(void)
             text->default_alignment = 1;
             text->font_size.x = 1.0f;
             text->font_size.y = 1.0f;
-            e = HSD_SisLib_803A6B98(text, 320.0f, 440.0f, "%s", stages[k].name);
+            /* Slippi's CheckAltStageName: Direct's Frozen Stadium says so. */
+            e = HSD_SisLib_803A6B98(text, 320.0f, 440.0f, "%s%s",
+                                    sm.stage == 3 && sm.alt_stage_mode ? "Frozen " : "",
+                                    stages[k].name);
             HSD_SisLib_803A7548(text, e, 0.6f, 0.6f);
             HSD_SisLib_803A74F0(text, e, (GXColor*) &white);
             break;

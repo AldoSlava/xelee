@@ -1141,6 +1141,9 @@ extern bool pc_net_slippi_active(void);
  * pad quits the match as a no-contest on both sides. In XR the overlay frees
  * the hands to grab the stage, so it doubles as the way to re-place it. */
 static bool softPaused;
+/* The port whose L+R+A+Start ended the match, -1 when none did: Slippi's
+ * Direct counts it as that player's loss (CheckIfWonLastGame). */
+int gm_vs_slippi_quitter = -1;
 
 bool gm_vs_soft_paused(void)
 {
@@ -1150,6 +1153,7 @@ bool gm_vs_soft_paused(void)
 static void softPauseReset(void)
 {
     softPaused = false;
+    gm_vs_slippi_quitter = -1;
 }
 
 static void slippiSoftPause(VsSceneController* c)
@@ -1169,6 +1173,7 @@ static void slippiSoftPause(VsSceneController* c)
                 softPaused = false;
             }
             pc_log_line("online: match quit with L+R+A+Start from player %d", p);
+            gm_vs_slippi_quitter = p;
             fn_8016CF4C(p, OUTCOME_NO_CONTEST);
             return;
         }

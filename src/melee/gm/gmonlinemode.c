@@ -41,6 +41,8 @@
 #include "pc/xr_place.h"
 extern bool pc_net_slippi_active(void);
 extern const char* pc_get_net_target(void);
+extern int gm_vs_slippi_quitter;
+#include <melee/mn/mnstagesel.h>
 extern void pc_set_net_target(const char* code);
 #include "pc/pc.h"
 #endif
@@ -219,9 +221,22 @@ static VsModeData online_vs;
  * and the lobby searches. A matched lobby goes straight to the VS scene (the
  * selections have already been exchanged, there is nothing left to choose). */
 static bool slippi_picked;
-enum { SLPCSS_SELECT, SLPCSS_SEARCH };
+enum { SLPCSS_SELECT, SLPCSS_SEARCH, SLPCSS_LOBBY };
 static int slpcss_state;
 static bool slpcss_leave; /* the match is agreed, the next exit is for it */
+/* Slippi's Direct lobby (HandleInputsOnCSS.asm, main.asm VSSceneDecide):
+ * after a game both players are back on the CSS, still connected. The loser
+ * of the last game presses START for the stage select and the stage picked
+ * goes with the lock-in; the winner locks in with no stage and plays the
+ * loser's. A draw makes both "losers", and the lower port's pick wins. */
+enum { DIRECT_FIRST = -1, DIRECT_LOST, DIRECT_WON };
+static int direct_result = DIRECT_FIRST;
+static bool direct_chose_stage; /* the loser has picked this game's stage */
+static bool direct_to_sss;      /* the CSS leaves for the stage select */
+static bool direct_picking;     /* that stage select is up */
+static int direct_z_hold;       /* frames Z has been held: hold to disconnect */
+#define DIRECT_DISCONNECT_HOLD 0x30 /* Slippi's DISCONNECT_HOLD_DELAY */
+static void directLobbyEnd(void);
 /* The CSS opens with your last pick already placed (the vanilla CSS puts the
  * token on whatever character the door starts with), so a rematch is START.
  * MELEE_CSS_PICK=<character>,<color> seeds it, for tests. */
@@ -375,7 +390,11 @@ void onEnterCss(GameModeState* state)
          * put back when this screen leaves for the menu. */
         pc_net_unlock_pin();
         slpcss_leave = false;
-        slpcss_state = pc_net_match_is_slippi() ? SLPCSS_SEARCH : SLPCSS_SELECT;
+        direct_to_sss = false;
+        direct_z_hold = 0;
+        slpcss_state = pc_net_match_slippi_lobby() ? SLPCSS_LOBBY :
+                       pc_net_match_is_slippi()    ? SLPCSS_SEARCH :
+                                                     SLPCSS_SELECT;
         /* One human door: the opponent does not exist until a match is found. */
         online_vs.start.players[0].slot_type = Gm_PKind_Human;
         online_vs.start.players[1].slot_type = Gm_PKind_NA;
@@ -416,6 +435,7 @@ void onExitCss(GameModeState* state)
         if (css->pending_scene_change == CSSPendingSceneChange_2) {
             pc_net_match_stop();
             pc_net_unlock_release();
+            directLobbyEnd();
             gm_ChangeGameModeAfterCurrentScene(GM_MENU);
         } else if (pc_net_peer_status() != PC_NET_PEER_OK) {
             /* A failure (a timeout while searching, a late desync) ended this
@@ -425,6 +445,12 @@ void onExitCss(GameModeState* state)
         } else if (slpcss_leave) {
             online_vs = css->vs;
             gm_SetNextGameModeStateId(state_sss); /* forced stage: it exits at once */
+        } else if (direct_to_sss) {
+            /* Direct's loser picks the next stage on the real stage select. */
+            online_vs = css->vs;
+            direct_to_sss = false;
+            direct_picking = true;
+            gm_SetNextGameModeStateId(state_sss);
         } else {
             online_vs = css->vs;
             const PlayerInitData* me = &online_vs.start.players[0];
@@ -471,10 +497,17 @@ static const char* slpcssModeName(void)
 
 bool gmOnline_SlippiCssLocked(void)
 {
-    return slippiFlow() && slpcss_state == SLPCSS_SEARCH;
+    return slippiFlow() && (slpcss_state == SLPCSS_SEARCH ||
+                            (slpcss_state == SLPCSS_LOBBY && pc_net_match_slippi_locked_in()));
 }
 
 static void directCall(const char* code);
+static void directLobbyEnd(void)
+{
+    direct_result = DIRECT_FIRST;
+    direct_chose_stage = direct_to_sss = direct_picking = false;
+    direct_z_hold = 0;
+}
 extern void mnCharSel_SlippiKeyboard(const char* initial, int max_len, const char* description,
                                      MnNameNewDoneFn done, MnNameNewFillFn fill, void* user);
 static char slpcss_code[16]; /* the last code typed, so a refused one can be fixed */
@@ -523,7 +556,19 @@ bool gmOnline_SlippiCssStart(int character, int color)
     last_pick_color = color;
     pc_net_match_set_slippi_pick((uint8_t) character, (uint8_t) color);
     slippi_picked = true;
+    if (slpcss_state == SLPCSS_LOBBY) {
+        if (pc_net_match_slippi_locked_in()) {
+            return true;
+        }
+        if (direct_result == DIRECT_LOST && !direct_chose_stage) {
+            direct_to_sss = true; /* the CSS leaves on its next frame */
+        } else if (pc_net_match_slippi_lock_in(PC_SLIPPI_STAGE_NONE, 0)) {
+            pc_log_line("css: locked in, playing the opponent's stage");
+        }
+        return true;
+    }
     if (online_kind == ONLINE_KIND_DIRECT) {
+        directLobbyEnd();
         /* The code is typed on Melee's Name Entry screen, straight from here. */
         mnCharSel_SlippiKeyboard(slpcss_code, 11, "Enter your opponent's connect code.",
                                  slpDirectDone, slpDirectFill, NULL);
@@ -554,8 +599,67 @@ bool gmOnline_SlippiCssFrame(void)
     PcNetSlippiMatch sm;
 
     snprintf(title, sizeof title, "%s Mode", slpcssModeName());
+    mnOnlineCss_SetCode(online_kind == ONLINE_KIND_DIRECT ? pc_net_match_slippi_code() : "");
+    /* Slippi's "Playing: <name>" line, whenever the opponent is connected. */
+    mnOnlineCss_SetPlaying(slpcss_state == SLPCSS_LOBBY || slpcss_leave ||
+                                   (slpcss_state == SLPCSS_SEARCH &&
+                                    pc_net_match_state(NULL) == PC_MATCH_READY) ?
+                               pc_net_match_opponent_name() :
+                               "");
     for (int p = 0; p < PAD_MAX_CONTROLLERS; p++) {
         z |= HSD_PadCopyStatus[p].trigger & HSD_PAD_Z;
+    }
+    if (slpcss_state == SLPCSS_LOBBY) {
+        const char* why = NULL;
+        const char* opp = pc_net_match_opponent_code();
+        bool zheld = false;
+        int st;
+        for (int p = 0; p < PAD_MAX_CONTROLLERS; p++) {
+            zheld |= (HSD_PadCopyStatus[p].button & HSD_PAD_Z) != 0;
+        }
+        pc_net_match_poll();
+        st = pc_net_match_state(&why);
+        if (st == PC_MATCH_FAIL || pc_net_peer_status() != PC_NET_PEER_OK) {
+            /* The opponent left the lobby: the error stands until Z, then the
+             * CSS is a fresh one, as after a failed search. */
+            directLobbyEnd();
+            slpcss_state = SLPCSS_SEARCH;
+            return gmOnline_SlippiCssFrame();
+        }
+        if (slpcss_leave || pc_net_match_slippi_match(&sm)) {
+            slpcss_leave = true;
+            cssStep(steps, &n, '-', "Character selected", NULL);
+            cssStep(steps, &n, '-', "Locked in", NULL);
+            mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
+            return true;
+        }
+        if (direct_to_sss) {
+            mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
+            return true;
+        }
+        if (mnCharSel_SlippiStartReady() || pc_net_match_slippi_locked_in()) {
+            cssStep(steps, &n, '-', "Character selected", NULL);
+        } else {
+            cssStep(steps, &n, 'x', "Select your character", NULL);
+        }
+        if (pc_net_match_slippi_locked_in()) {
+            cssStep(steps, &n, '-', "Locked in", NULL);
+            cssStep(steps, &n, 'x', "Waiting on opponent", NULL); /* Slippi's words */
+        } else if (n > 0 && steps[0].mark == '-') {
+            cssStep(steps, &n, '+', "Press START to %s",
+                    direct_result == DIRECT_LOST && !direct_chose_stage ? "select stage" : "lock in");
+        }
+        snprintf(hint, sizeof hint, "Hold Z to disconnect");
+        direct_z_hold = zheld ? direct_z_hold + 1 : 0;
+        if (direct_z_hold > DIRECT_DISCONNECT_HOLD) {
+            pc_log_line("css: Direct lobby left (Z held)");
+            pc_net_match_stop();
+            pc_net_peer_status_clear();
+            directLobbyEnd();
+            slpcss_state = SLPCSS_SELECT;
+        }
+        mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
+        return false;
     }
     if (slpcss_state == SLPCSS_SELECT) {
         if (slpcss_notice[0]) {
@@ -583,7 +687,7 @@ bool gmOnline_SlippiCssFrame(void)
         cssStep(steps, &n, '-', "Character selected", NULL);
         cssStep(steps, &n, '-', "Locked in", NULL);
         if (slpcss_leave) {
-            cssStep(steps, &n, '-', "Playing: %.17s", opp);
+            /* agreed: the CSS is on its way out */
         } else if (pc_net_peer_status() != PC_NET_PEER_OK || st == PC_MATCH_FAIL) {
             cssStep(steps, &n, '!', "Error: %.48s", why != NULL ? why : "Connection lost");
             snprintf(hint, sizeof hint, "Press Z to clear error");
@@ -595,7 +699,6 @@ bool gmOnline_SlippiCssFrame(void)
             mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
             return false;
         } else if (pc_net_match_slippi_match(&sm)) {
-            cssStep(steps, &n, '-', "Playing: %.17s", opp);
             slpcss_leave = true;
             mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
             return true;
@@ -603,7 +706,7 @@ bool gmOnline_SlippiCssFrame(void)
             cssStep(steps, &n, 'x', "Connecting to %.17s", opp);
             snprintf(hint, sizeof hint, "Press Z to disconnect");
         } else if (st == PC_MATCH_READY) {
-            cssStep(steps, &n, 'x', "Waiting on %.17s", opp != NULL && opp[0] ? opp : "opponent");
+            cssStep(steps, &n, 'x', "Waiting on opponent", NULL); /* Slippi's words */
             snprintf(hint, sizeof hint, "Press Z to disconnect");
         } else {
             if (online_kind == ONLINE_KIND_DIRECT && direct_calling[0]) {
@@ -630,7 +733,7 @@ bool gmOnline_SlippiCssFrame(void)
  * game's own preloading and heap handling run between the CSS and the VS. */
 static void slippiPrepareMatch(const PcNetSlippiMatch* sm)
 {
-    pc_net_slippi_rules_force();
+    pc_net_slippi_rules_force(sm->alt_stage_mode != 0);
     for (int port = 0; port < 2; port++) {
         PlayerInitData* p = &online_vs.start.players[port];
         p->slot_type = Gm_PKind_Human;
@@ -662,6 +765,14 @@ void onEnterSss(GameModeState* state)
 {
 #ifdef TARGET_PC
     pc_log_line("online: enter SSS at frame %d", pc_net_frame());
+    if (direct_picking) {
+        /* Nothing is agreed yet: an ordinary pick, with Slippi's Frozen
+         * Stadium toggle (Z) on. */
+        gmVsMelee_EnterSss(state, &online_vs);
+        ((SSSData*) gm_GetGameModeStateEnterData(state))->no_lras = true;
+        mnStageSel_SetFrozenToggle(true);
+        return;
+    }
     {
         PcNetSlippiMatch sm;
         if (slippiFlow() && pc_net_match_slippi_match(&sm)) {
@@ -688,6 +799,24 @@ void onEnterSss(GameModeState* state)
 void onExitSss(GameModeState* state)
 {
 #ifdef TARGET_PC
+    if (direct_picking) {
+        SSSData* sss = gm_GetGameModeStateExitData(state);
+        bool frozen = mnStageSel_FrozenToggled();
+        direct_picking = false;
+        mnStageSel_SetFrozenToggle(false);
+        if (sss->start_game) {
+            int stage = sss->vs.start.rules.stkind;
+            uint8_t alt = stage == 3 && frozen ? 1 : 0; /* Pokemon Stadium */
+            direct_chose_stage = true;
+            if (pc_net_match_slippi_lock_in(stage, alt)) {
+                pc_log_line("css: locked in with stage %d%s", stage, alt ? " (frozen)" : "");
+            }
+        }
+        /* Back to the CSS either way: it waits there for the opponent (B on
+         * the stage select only goes back to choose again). */
+        gm_SetNextGameModeStateId(state_css);
+        return;
+    }
     if (pc_net_peer_status() != PC_NET_PEER_OK) {
         routeAfterFailure();
         return;
@@ -842,7 +971,29 @@ void onExitVs(GameModeState* state)
          * vanilla sudden death would begin at 300 percent. */
         gm_SetNextGameModeStateId(state_results);
     }
-    if (slippiFlow() && online_kind == ONLINE_KIND_UNRANKED && pc_net_slippi_active() &&
+    if (slippiFlow() && online_kind == ONLINE_KIND_DIRECT && pc_net_slippi_active()) {
+        /* Slippi's Direct: no results and no sudden death, back to the CSS
+         * with the link up; who won decides who picks the next stage. */
+        MatchEnd* end = &mei->match_end;
+        PcNetSlippiMatch sm;
+        int me = pc_net_match_slippi_match(&sm) ? sm.local_player : pc_net_local_player();
+        if (end->outcome == OUTCOME_NO_CONTEST && gm_vs_slippi_quitter >= 0) {
+            direct_result = gm_vs_slippi_quitter == me ? DIRECT_LOST : DIRECT_WON;
+        } else if (end->n_winners == 1 && !gm_WasMatchCanceled(end->outcome)) {
+            direct_result = end->winners[0] == me ? DIRECT_WON : DIRECT_LOST;
+        } else {
+            direct_result = DIRECT_LOST; /* a draw: both pick, the lower port's counts */
+        }
+        direct_chose_stage = false;
+        pc_log_line("online: Direct game over at frame %d, we %s", pc_net_frame(),
+                    direct_result == DIRECT_WON ? "won" : "lost or drew");
+        if (!pc_net_match_slippi_rearm()) {
+            pc_net_disconnect();
+            pc_net_match_stop();
+            directLobbyEnd();
+        }
+        gm_SetNextGameModeStateId(state_css);
+    } else if (slippiFlow() && online_kind == ONLINE_KIND_UNRANKED && pc_net_slippi_active() &&
         !gm_MatchHasMultipleWinners(&mei->match_end)) {
         /* Slippi's Unranked has no results screen: the set is over, so the
          * link closes and the next search starts from the CSS. A tie still

@@ -2761,6 +2761,33 @@ bool pc_net_slippi_adopt(int local_player, uint32_t rng_offset) {
 #endif
 }
 
+bool pc_net_slippi_unadopt(void) {
+#ifdef __EMSCRIPTEN__
+    return false;
+#else
+    if (!s_slippi_on || s_slippi.net == NULL || s_status != PC_NET_PEER_OK ||
+        pc_slippi_net_status(s_slippi.net) != PC_SLIPPI_NET_CONNECTED) {
+        return false;
+    }
+    /* The engine stops; the ENet peer stays up and goes back to being the
+     * link the next game's selections cross (Slippi's Direct lobby). */
+    s_link = s_slippi.net;
+    s_slippi.net = NULL;
+    s_slippi_on = false;
+    s_slippi_match_only = false;
+    net.slippi = false;
+    net.active = false;
+    net.resim = false;
+    net.hs = HS_IDLE;
+    rules_restore();
+    HSD_PadLibData.qtype = 0;
+    snaps_free();
+    pc_log_line("net: Slippi game over at frame %d; the link stays up for the next one",
+        net.tick_frame);
+    return true;
+#endif
+}
+
 bool pc_net_connect_socket(
     intptr_t socket, const char* ip, uint16_t port, int player, uint32_t seed) {
     if (socket == -1)
