@@ -1202,7 +1202,8 @@ void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
     u8 var_r4;
 
 #ifdef TARGET_PC
-    if (pc_net_slippi_active()) {
+    if (pc_net_slippi_active() && arg0->start.disable_pausing) {
+        /* Slippi's client pause, in matches with the real pause off. */
         slippiSoftPause(arg0);
         return;
     }
@@ -1458,6 +1459,9 @@ void fn_8016CFE0(void)
                 {
                     u64 masked_buttons = no_contest_buttons & buttons;
                     if (masked_buttons == no_contest_buttons) {
+#ifdef TARGET_PC
+                        gm_vs_slippi_quitter = tmp->state.pauser;
+#endif
                         fn_8016CF4C_dontinline(unpauser_slot,
                                                OUTCOME_NO_CONTEST);
                         return;

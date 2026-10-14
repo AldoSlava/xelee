@@ -338,9 +338,12 @@ static void rankedRules(StartMeleeData* start, UNUSED StartMeleeData* previous)
  * pause synced, which is not built). */
 static void slippiOrRankedRules(StartMeleeData* start, StartMeleeData* previous)
 {
-    if (slippiFlow() && pc_net_slippi_active()) {
-        /* The real pause stays off; Slippi's own (the overlay with the match
-         * running on, L+R+A+Start to quit) is gmvs.c's slippiSoftPause. */
+    if (slippiFlow() && pc_net_slippi_active() && online_kind != ONLINE_KIND_DIRECT) {
+        /* Unranked: the real pause stays off; Slippi's own (the overlay with
+         * the match running on, L+R+A+Start to quit) is gmvs.c's
+         * slippiSoftPause. Direct keeps Melee's pause (InitPause.asm only
+         * installs the client pause when pausing is off): the pads are
+         * synced, so Start pauses both games on the same frame. */
         start->rules.disable_pausing = true;
     }
     rankedRules(start, previous);
