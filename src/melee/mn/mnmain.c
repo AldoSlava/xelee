@@ -51,6 +51,12 @@
 #include <sysdolphin/baselib/lobj.h>
 #include <sysdolphin/baselib/memory.h>
 #include <sysdolphin/baselib/mobj.h>
+#ifdef TARGET_PC
+#include "pc/xr_scene.h"
+#else
+#define pc_xr_menu_window_render HSD_GObj_803910D8
+#define pc_xr_menu_pop_render HSD_GObj_JObjCallback
+#endif
 
 /* 22C068 */ static void mn_8022C068(HSD_LObj*, int, int);
 
@@ -1663,7 +1669,7 @@ HSD_GObj* mn_8022B3A0(u8 state)
     gobj = GObj_Create(6, 7, 0x80);
     root_jobj = HSD_JObjLoadJoint(DP(HSD_Joint, model->joint));
     HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, root_jobj);
-    GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 4, 0x80);
+    GObj_SetupGXLink(gobj, pc_xr_menu_pop_render, 4, 0x80);
     HSD_GObj_SetupProc(gobj, fn_8022AFEC, 0);
     HSD_JObjAddAnimAll(root_jobj, DP(HSD_AnimJoint, model->animjoint),
                        DP(HSD_MatAnimJoint, model->matanim_joint),
@@ -1890,8 +1896,14 @@ void fn_8022BDB4(HSD_GObj* gobj, intptr_t unused)
         HSD_SetEraseColor(fog->color.r, fog->color.g, fog->color.b,
                           fog->color.a);
         HSD_CObjEraseScreen(GET_COBJ(gobj), 1, 0, 1);
+#ifdef TARGET_PC
+        pc_xr_menu_window_begin(GET_COBJ(gobj));
+#endif
         HSD_GObj_80390ED0(gobj, 7);
         HSD_CObjEndCurrent();
+#ifdef TARGET_PC
+        pc_xr_mono_camera();
+#endif
     }
 }
 
@@ -1936,7 +1948,7 @@ void mn_8022BEDC(HSD_GObj* gobj)
     mn_804D6BB0 = temp_r3;
     cobj = HSD_CObjLoadDesc(MenMain_cam);
     HSD_GObjObject_80390A70(temp_r3, HSD_GObj_CameraKind, cobj);
-    GObj_SetupGXLinkMax(temp_r3, HSD_GObj_803910D8, 0);
+    GObj_SetupGXLinkMax(temp_r3, pc_xr_menu_window_render, 0);
     temp_r3->gxlink_prios = 0x80;
     HSD_GObj_SetupProc(temp_r3, mn_8022BA1C, 0);
     mn_804D6BB4 = HSD_SisLib_803A611C(0, temp_r3, 7, 8, 0x80, 7, 0x80, 0);

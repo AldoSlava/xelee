@@ -936,15 +936,13 @@ static bool menu_window_wanted(void) {
     return on && aurora_xr_active() && !s_flat_view;
 }
 
-void pc_xr_menu_window_render(HSD_GObj* gobj, intptr_t pass) {
-    HSD_CObj* cobj = gobj->hsd_obj;
+bool pc_xr_menu_window_begin(HSD_CObj* cobj) {
     /* A perspective camera looking at a point: the plane through its
      * interest is what sits at the screen. */
     if (!menu_window_wanted() || cobj == NULL || cobj->projection_type != PROJ_PERSPECTIVE) {
-        HSD_GObj_803910D8(gobj, pass);
-        return;
+        return false;
     }
-    if (HSD_CObjSetCurrent(cobj)) {
+    {
         Vec3 eye, interest;
         HSD_CObjGetEyePosition(cobj, &eye);
         HSD_CObjGetInterest(cobj, &interest);
@@ -956,6 +954,18 @@ void pc_xr_menu_window_render(HSD_GObj* gobj, intptr_t pass) {
         aurora_xr_world_clip(NULL);
         aurora_xr_world_transform(NULL);
         aurora_xr_menu_window(dist, 2.f * dist * tanf(fov * 0.5f));
+    }
+    return true;
+}
+
+void pc_xr_menu_window_render(HSD_GObj* gobj, intptr_t pass) {
+    HSD_CObj* cobj = gobj->hsd_obj;
+    if (cobj == NULL || cobj->projection_type != PROJ_PERSPECTIVE || !menu_window_wanted()) {
+        HSD_GObj_803910D8(gobj, pass);
+        return;
+    }
+    if (HSD_CObjSetCurrent(cobj)) {
+        pc_xr_menu_window_begin(cobj);
         HSD_GObj_80390ED0(gobj, 7);
         HSD_CObjEndCurrent();
         pc_xr_mono_camera();
