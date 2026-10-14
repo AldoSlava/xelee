@@ -324,6 +324,8 @@ static void rankedRules(StartMeleeData* start, UNUSED StartMeleeData* previous)
 static void slippiOrRankedRules(StartMeleeData* start, StartMeleeData* previous)
 {
     if (slippiFlow() && pc_net_slippi_active()) {
+        /* The real pause stays off; Slippi's own (the overlay with the match
+         * running on, L+R+A+Start to quit) is gmvs.c's slippiSoftPause. */
         start->rules.disable_pausing = true;
     }
     rankedRules(start, previous);

@@ -1132,11 +1132,76 @@ static inline s8 gm_GetSlotByPlayerId(int pauserId)
     return -1;
 }
 
+#ifdef TARGET_PC
+extern bool pc_net_slippi_active(void);
+
+/* Slippi's pause (InitPause.asm): in a Slippi match Start only shows the pause
+ * overlay, for the player who pressed it, and hides their HUD; the game does
+ * not stop and nothing is sent. Holding L+R+A+Start on any player's (synced)
+ * pad quits the match as a no-contest on both sides. In XR the overlay frees
+ * the hands to grab the stage, so it doubles as the way to re-place it. */
+static bool softPaused;
+
+bool gm_vs_soft_paused(void)
+{
+    return softPaused;
+}
+
+static void softPauseReset(void)
+{
+    softPaused = false;
+}
+
+static void slippiSoftPause(VsSceneController* c)
+{
+    const u32 quit = HSD_PAD_L | HSD_PAD_R | HSD_PAD_A | HSD_PAD_START;
+    const int port = pc_net_local_player();
+    int p;
+    if (c->state.hud_enabled == 0) {
+        return;
+    }
+    for (p = 0; p < PAD_MAX_CONTROLLERS; p++) {
+        HSD_PadStatus* pad = &HSD_PadCopyStatus[(u8) p];
+        if (pad->err == 0 && (pad->button & quit) == quit) {
+            if (softPaused) {
+                ifAll_802F33CC();
+                gm_801A10FC(port);
+                softPaused = false;
+            }
+            pc_log_line("online: match quit with L+R+A+Start from player %d", p);
+            fn_8016CF4C(p, OUTCOME_NO_CONTEST);
+            return;
+        }
+    }
+    if (port >= 0 && port < PAD_MAX_CONTROLLERS && HSD_PadCopyStatus[(u8) port].err == 0 &&
+        (HSD_PadCopyStatus[(u8) port].trigger & HSD_PAD_START))
+    {
+        softPaused = !softPaused;
+        pc_log_line("online: pause overlay %s (the match runs on)", softPaused ? "on" : "off");
+        if (softPaused) {
+            lbAudioAx_80024030(5);
+            ifAll_802F3394();
+            gm_801A0FEC(port, 5);
+        } else {
+            ifAll_802F33CC();
+            gm_801A10FC(port);
+        }
+    }
+}
+#endif
+
 void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
 {
     int pauser;
     s8 pauserSlot;
     u8 var_r4;
+
+#ifdef TARGET_PC
+    if (pc_net_slippi_active()) {
+        slippiSoftPause(arg0);
+        return;
+    }
+#endif
 
     if (arg0->state.unpause_timer == 0 && arg0->state.hud_enabled != 0 &&
         !arg0->start.disable_pausing)
@@ -2313,6 +2378,9 @@ void fn_8016E730(StartMeleeData* arg0)
 void gm_Scene_Vs_OnEnter(void* arg0)
 {
     StartMeleeData* tmp = arg0;
+#ifdef TARGET_PC
+    softPauseReset();
+#endif
     fn_8016E730(tmp);
     if (tmp->rules.x1_2) {
         ifStatus_802F6EA4(8, -1, -1, 0, fn_8016B7B4, fn_8016B7F8);
