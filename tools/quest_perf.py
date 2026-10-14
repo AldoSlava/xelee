@@ -2,7 +2,8 @@
 """Unattended performance runs on a Quest over adb.
 
   quest_perf.py run [--stage N] [--players 2|4] [--phases mr:40,vr:40] [--env K=V ...]
-                    [--warmup S] [--label NAME]
+                    [--warmup S] [--label NAME] [--cpu-level N] [--gpu-level N]
+                    [--record NAME | --replay NAME]
       Boots a four-CPU match on stage N (StKind, gr/forward.h; 31 is
       Battlefield), then holds each phase (mode:seconds) in turn in the same
       session and prints the runtime's frame stats for each one. The arena is
@@ -11,6 +12,14 @@
       build/quest-perf/<label>-<phase>.log.
   quest_perf.py mode mr|vr      switch the running game (MELEE_XR_CONTROL)
   quest_perf.py summarize LOG   summarize a saved logcat
+
+Benchmarks: --cpu-level / --gpu-level pin the clocks for the run
+(debug.oculus.cpuLevel / gpuLevel, cleared after), e.g. 3 and 2, the caps
+Meta documents for apps showing passthrough, so numbers don't ride on clock
+levels the runtime may not grant. --record NAME saves the match's seed and
+pads (MELEE_NET_RECORD) to the app's files dir; --replay NAME plays them back
+(MELEE_NET_REPLAY), so runs simulate the same frames and are comparable; the
+summary says whether the replay stayed in step.
 
 The game reads its knobs from melee-env.txt (src/pc/main.c,
 pc_env_file_bootstrap), which this rewrites on every run. The disc comes from
@@ -40,6 +49,10 @@ PKG = "dev.melee.game"
 FILES = f"/sdcard/Android/data/{PKG}/files"
 ENV_FILE = f"{FILES}/melee-env.txt"
 CTL_FILE = f"{FILES}/melee-ctl.txt"
+# The game's own log (MELEE_LOG_FILE) for record/replay runs: logcat on a
+# Quest turns over within seconds, taking the replay's verdict with it.
+GAME_LOG = f"{FILES}/melee-log.txt"
+LOG_BUFFER = "64M"  # logcat ring size for a run (adb logcat -G)
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "build", "quest-perf")
 
 
@@ -60,7 +73,7 @@ def pick_device():
     os.environ["ANDROID_SERIAL"] = (by_addr or devs)[0]
 
 
-RUN_SCREEN_TIMEOUT_MS = 1800000  # during a run: the display stays on unworn
+RUN_SCREEN_TIMEOUT_MS = 14400000  # during a batch: the display stays on unworn, 4 h (gaps between runs too)
 IDLE_SCREEN_TIMEOUT_MS = 60000   # after it: the headset's usual
 
 
@@ -195,12 +208,29 @@ def view_coverage():
     return f"  view: the 3D view covers {covered * 100:.1f}% of the left eye{warn}"
 
 
+def set_levels(cpu, gpu):
+    """Pins (or, with None, releases) the CPU and GPU clock levels."""
+    for prop, lvl in (("debug.oculus.cpuLevel", cpu), ("debug.oculus.gpuLevel", gpu)):
+        adb("shell", "setprop", prop, "''" if lvl is None else str(lvl), check=False)
+
+
+def replay_status(text):
+    """What the game said about a replay: whether it diverged, and where."""
+    lines = [l for l in text.splitlines() if "REPLAY DIVERGED" in l or "replay finished" in l or "net: replaying" in l
+             or "net: recording" in l or "cannot open" in l]
+    return "\n".join("  " + re.sub(r".*?net: ", "net: ", l) for l in lines[-3:])
+
+
 def run(args):
     try:
+        if args.cpu_level is not None or args.gpu_level is not None:
+            set_levels(args.cpu_level, args.gpu_level)
         run_phases(args)
     finally:
         adb("shell", "am", "force-stop", PKG, check=False)
         adb("shell", "rm", "-f", ENV_FILE, CTL_FILE, check=False)
+        if args.cpu_level is not None or args.gpu_level is not None:
+            set_levels(None, None)
         if args.hand_back:
             hand_back()
 
@@ -229,6 +259,12 @@ def run_phases(args):
         # measuring, to check the stage is in view.
         env["AURORA_XR_DUMP"] = DUMP_DIR
         env["AURORA_XR_DUMP_AFTER"] = str(max(args.warmup - 15, 5) * 60)
+    if args.record:
+        env["MELEE_NET_RECORD"] = f"{FILES}/{args.record}"
+    if args.replay:
+        env["MELEE_NET_REPLAY"] = f"{FILES}/{args.replay}"
+    if args.record or args.replay:
+        env["MELEE_LOG_FILE"] = GAME_LOG
     for kv in args.env:
         k, _, v = kv.partition("=")
         env[k] = v
@@ -242,6 +278,9 @@ def run_phases(args):
     adb("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close")
     adb("shell", "settings", "put", "system", "screen_off_timeout", str(RUN_SCREEN_TIMEOUT_MS))
     adb("shell", "am", "force-stop", PKG)
+    # The headset logs so much that the default buffer turned over in ~20 s:
+    # a phase's log held only its last two stats windows.
+    adb("logcat", "-G", LOG_BUFFER, check=False)
     adb("logcat", "-c")
     adb("shell", "am", "start", "-n", f"{PKG}/dev.melee.MeleeXrActivity", "--es", "disc", disc)
     print(f"{args.label}: stage {args.stage}, {args.players} CPUs, {' '.join(args.env) or 'default env'}; "
@@ -263,6 +302,11 @@ def run_phases(args):
         with open(path, "w") as f:
             f.write(text)
         print(f"[{mode}] {path}\n{summarize(text)}")
+        if args.record or args.replay:
+            game_log = adb("shell", "cat", GAME_LOG, check=False)
+            with open(os.path.join(OUT_DIR, f"{args.label}-game.log"), "w") as f:
+                f.write(game_log)
+            print(replay_status(game_log) or "  record/replay: no word from the game (not started?)")
 
 
 def main():
@@ -276,6 +320,11 @@ def main():
     r.add_argument("--warmup", type=int, default=50, help="seconds from launch to the first phase")
     r.add_argument("--settle", type=int, default=12, help="seconds after a mode switch before measuring")
     r.add_argument("--label", default="run")
+    r.add_argument("--cpu-level", type=int, help="pin the CPU clock level for the run (e.g. 3)")
+    r.add_argument("--gpu-level", type=int, help="pin the GPU clock level for the run (e.g. 2)")
+    rr = r.add_mutually_exclusive_group()
+    rr.add_argument("--record", help="record the match (seed and pads) to this file in the app's files dir")
+    rr.add_argument("--replay", help="replay a match recorded with --record")
     r.add_argument("--no-view-check", dest="view_check", action="store_false",
                    help="skip dumping an eye image to check the stage is in view")
     r.add_argument("--hand-back", action="store_true",

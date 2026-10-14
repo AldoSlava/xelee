@@ -1002,13 +1002,30 @@ static XrClipClass classify_xr_clip(const ShaderConfig& config, const u8* raw, u
   return result;
 }
 
+// The eye pipelines' config. AURORA_XR_EYE_NOLIGHT=1 (a measurement, it
+// looks wrong): no GX lighting in the eyes, to see what the vertex stage's
+// lighting costs there (it runs once per eye with multiview).
+static const PipelineConfig& xr_eye_config() noexcept {
+  static const bool noLight = std::getenv("AURORA_XR_EYE_NOLIGHT") != nullptr;
+  if (!noLight)
+    return sDrawCache.config;
+  static PipelineConfig c;
+  c = sDrawCache.config;
+  for (auto& ch : c.shaderConfig.colorChannels) {
+    ch.lightingEnabled = false;
+    ch.diffFn = GX_DF_NONE;
+    ch.attnFn = GX_AF_NONE;
+  }
+  return c;
+}
+
 // The multiview twin of the current pipeline for `layout`, cached per
 // (pipeline, layout).
 static gfx::PipelineRef xr_twin(const gfx::RenderTargetLayout& layout, gfx::PipelineRef& ref,
                                 gfx::PipelineRef& forPipeline, uint64_t& forLayout) noexcept {
   auto& cache = sDrawCache;
   if (forPipeline != cache.pipelineRef || forLayout != layout.key) {
-    ref = gfx::find_pipeline(cache.config, layout);
+    ref = gfx::find_pipeline(xr_eye_config(), layout);
     forPipeline = cache.pipelineRef;
     forLayout = layout.key;
   }
@@ -1250,7 +1267,7 @@ static gfx::PipelineRef xr_batch_pipeline(bool motion, XrMotionKind kind = XrMot
   auto& forPipeline = motion ? cache.xrMotionBatchForPipeline : cache.xrBatchForPipeline;
   auto& forLayout = motion ? cache.xrMotionBatchForLayout : cache.xrBatchForLayout;
   if (forPipeline != cache.pipelineRef || forLayout != layout.key) {
-    ref = gfx::find_pipeline(motion ? xr_motion_twin_config(kind) : cache.config, layout);
+    ref = gfx::find_pipeline(motion ? xr_motion_twin_config(kind) : xr_eye_config(), layout);
     forPipeline = cache.pipelineRef;
     forLayout = layout.key;
   }

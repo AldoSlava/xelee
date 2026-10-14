@@ -1882,6 +1882,10 @@ struct HandoverGate {
   bool on = false;
   uint64_t tick = 0; // 0: no set is due
   bool blocked = false;
+  // Ready frames whose tick is missing from one of the three streams (a 3D
+  // image missed while its motion went out, say): no set can ever hold them,
+  // so they're retired. Kept, they filled the rings and the 3D view froze.
+  std::vector<uint64_t> orphans;
 } g_gate;
 
 bool gated_stream(const Stream& st) {
@@ -1905,14 +1909,31 @@ bool has_free_image(Stream& st) {
   return false;
 }
 
+// g_mutex held: st has a frame of `tick` in hand (drawing or finished).
+bool has_tick(const Stream& st, uint64_t tick) {
+  for (const Slot& sl : st.ring)
+    if ((sl.state == SlotState::Rendering || sl.state == SlotState::Ready) && sl.tickFrame == tick)
+      return true;
+  return false;
+}
+
 bool compute_gate() {
-  g_gate = {};
+  g_gate.on = false;
+  g_gate.tick = 0;
+  g_gate.blocked = false;
+  g_gate.orphans.clear();
   if (!g_tweak.set || !appsw_on() || g_displayPerGameFrame <= 0 || !g_streams[kStereo].staged ||
       !g_streams[kMotion].staged || !g_streams[kMotionDepth].staged)
     return true;
   g_gate.on = true;
   {
     std::lock_guard lock{g_mutex};
+    for (const int id : {kStereo, kHud, kMotion, kMotionDepth})
+      for (const Slot& sl : g_streams[id].ring)
+        if (sl.state == SlotState::Ready && sl.tickFrame != 0 &&
+            (!has_tick(g_streams[kStereo], sl.tickFrame) || !has_tick(g_streams[kMotion], sl.tickFrame) ||
+             !has_tick(g_streams[kMotionDepth], sl.tickFrame)))
+          g_gate.orphans.push_back(sl.tickFrame);
     for (Slot& sl : g_streams[kStereo].ring) {
       if (sl.state != SlotState::Ready || sl.tickFrame == 0 || sl.tickFrame <= g_gate.tick ||
           held_for_slot(g_streams[kStereo], sl))
@@ -2127,9 +2148,10 @@ bool release_staged(Stream& st, bool& released) {
         // The set's tick goes out (if its images are there); older frames
         // are retired; none newer than it is due yet.
         const uint64_t tick = st.ring[index].tickFrame;
-        if (g_gate.tick == 0 || tick > g_gate.tick)
+        const bool orphan = std::find(g_gate.orphans.begin(), g_gate.orphans.end(), tick) != g_gate.orphans.end();
+        if (!orphan && (g_gate.tick == 0 || tick > g_gate.tick))
           return true;
-        newerDue = tick < g_gate.tick;
+        newerDue = orphan || tick < g_gate.tick;
         if (!newerDue && g_gate.blocked)
           return true;
       } else {
@@ -5082,6 +5104,13 @@ bool ensure_direct(const gfx::RenderTargetLayout& layout) {
   R.coverSet = make("fs_set", gx::UseReversedZ ? wgpu::CompareFunction::Less : wgpu::CompareFunction::Greater);
   R.directKey = layout.key;
   R.directSamples = g_xrSamples;
+  // What every eye sample carries in tile memory: more bytes, smaller bins,
+  // and every draw is replayed per bin.
+  std::string attachments;
+  for (uint32_t i = 0; i < layout.colorAttachmentCount; ++i)
+    attachments += fmt::format("{}{}", i ? ", " : "", static_cast<int>(layout.colorAttachments[i].format));
+  Log.info("3D eye attachments: color formats [{}], depth format {}, {}x MSAA, {}x{} x{} layers", attachments,
+           static_cast<int>(layout.depthStencilFormat), g_xrSamples, stereo.width, stereo.height, stereo.layers);
   return true;
 }
 
