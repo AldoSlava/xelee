@@ -5,6 +5,9 @@
 #include "jobj.h"
 #include "lobj.h"
 #include "object.h"
+#ifdef TARGET_PC
+#include "pc/menu_probe.h"
+#endif
 
 u8 HSD_GObj_CameraKind;
 s8 HSD_GObj_LightKind;
@@ -33,7 +36,13 @@ void HSD_GObj_LObjCallback(HSD_GObj* gobj, intptr_t unused)
 void HSD_GObj_JObjCallback(HSD_GObj* gobj, intptr_t arg1)
 {
     HSD_JObj* jobj = gobj->hsd_obj;
+#ifdef TARGET_PC
+    pc_menu_probe_gobj(gobj, (long) arg1, 1);
+#endif
     HSD_JObjDispAll(jobj, NULL, HSD_GObj_80390EB8(arg1), 0);
+#ifdef TARGET_PC
+    pc_menu_probe_gobj(gobj, 0, 0);
+#endif
 }
 
 void HSD_GObj_FogCallback(HSD_GObj* gobj, intptr_t unused)

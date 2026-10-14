@@ -1,4 +1,5 @@
 #ifdef TARGET_PC
+#include "pc/menu_probe.h"
 #include "pc/xr_scene.h"
 #endif
 #include "displayfunc.h"
@@ -502,6 +503,7 @@ void HSD_JObjDisp(HSD_JObj* jobj, MtxPtr vmtx, HSD_TrspMask trsp_mask,
 #ifdef TARGET_PC
             /* XR build: stage joints a rule hides stay out of the 3D view
              * (pc/xr_scene.c). */
+            pc_menu_probe_jobj(jobj);
             const int xr_changed = pc_xr_jobj_begin(jobj);
             HSD_JObjDispDObj(jobj, vmtx, trsp_mask, rendermode);
             pc_xr_jobj_end(xr_changed);

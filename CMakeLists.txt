@@ -203,6 +203,7 @@ set(PC_SOURCES
         src/pc/touch.c
         src/pc/vi.c
         src/pc/widescreen.c
+        src/pc/menu_probe.c
         src/pc/xr_scene.c
         src/pc/xr_place.c
         src/pc/xr_pointer.c

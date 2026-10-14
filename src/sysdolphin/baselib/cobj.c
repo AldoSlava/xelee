@@ -1,5 +1,6 @@
 #include "cobj.h"
 #ifdef TARGET_PC
+#include "pc/menu_probe.h"
 #include "pc/widescreen.h"
 #endif
 
@@ -550,6 +551,9 @@ bool HSD_CObjSetCurrent(HSD_CObj* cobj)
         return false;
     } else {
         HSD_CObjSetupViewingMtx(cobj);
+#ifdef TARGET_PC
+        pc_menu_probe_camera(cobj);
+#endif
         return true;
     }
 }
