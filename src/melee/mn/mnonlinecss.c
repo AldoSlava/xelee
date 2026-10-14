@@ -52,7 +52,7 @@ static unsigned css_frame;
 #define MARK_HALF_WIDTH 0.95f
 static bool css_pending[CSS_STEPS_MAX];
 static bool css_hint_z; /* the hint is "Press <Z> to ...": the icon stands for the Z */
-#define HINT_Y_FROM_STEPS (BLOCK_Y + 30.0f + STEP_DY * CSS_STEPS_MAX + 12.0f)
+#define HINT_Y_FROM_STEPS (BLOCK_Y + STEP_OFF + STEP_DY * CSS_STEPS_MAX + 12.0f)
 #define HINT_ICON_X 43.0f /* from the hint's left edge to the icon's centre, in screen units */
 #define HINT_ICON_W 30.0f
 #define HINT_REST_X 64.0f
@@ -66,7 +66,10 @@ static CssLine css_lines[l_count];
  * 9.2 screen units a world unit across, 8.5 down). */
 #define BLOCK_X 384.0f
 #define BLOCK_Y 251.0f
-#define STEP_DY 22.5f
+/* Measured on Slippi's CSS (Dolphin): the first step sits 25.6 units under the
+ * title, and the steps are 19 apart. */
+#define STEP_OFF 25.5f
+#define STEP_DY 19.0f
 #define ORG_X 190.0f
 #define ORG_Y 236.0f
 static float world_x(float u) { return (u - 320.0f) / 9.2f; }
@@ -161,7 +164,7 @@ void mnOnlineCss_Create(int ctx)
     addLine(&css_lines[l_user_label], 217.0f, BLOCK_Y, 0.3f, c_dim);
     addLine(&css_lines[l_user_name], 217.0f, BLOCK_Y + 18.0f, 0.38f, c_white);
     for (i = 0; i < CSS_STEPS_MAX; i++) {
-        float y = BLOCK_Y + 30.0f + STEP_DY * i;
+        float y = BLOCK_Y + STEP_OFF + STEP_DY * i;
         addLine(&css_lines[l_mark + i], BLOCK_X, y, 0.34f, c_blue);
         addLine(&css_lines[l_text + i], BLOCK_X + 16.0f, y, 0.34f, c_white);
     }
@@ -193,7 +196,7 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
             text = steps[i].text;
         }
         css_pending[i] = i < n && (steps[i].mark == '+' || steps[i].mark == 'x');
-        css_mark_y[i] = BLOCK_Y + 30.0f + STEP_DY * i + 24.5f;
+        css_mark_y[i] = BLOCK_Y + STEP_OFF + STEP_DY * i + 24.5f;
         setLine(&css_lines[l_mark + i], mark, color);
         setLine(&css_lines[l_text + i], text, i < n && steps[i].mark == '!' ? c_red : c_white);
     }
