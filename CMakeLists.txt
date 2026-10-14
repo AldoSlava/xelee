@@ -263,6 +263,8 @@ set(PC_SOURCES
         src/pc/xr_scene.c
         src/pc/xr_place.c
         src/pc/xr_pointer.c
+        src/pc/button_icons.c
+        src/pc/button_icons_data.c
         src/pc/windows_arm64_softfp.c
         src/pc/android_compat.cpp
         src/pc/file_cache.cpp

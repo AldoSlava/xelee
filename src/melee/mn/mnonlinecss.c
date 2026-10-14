@@ -19,6 +19,7 @@
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/gobjgxlink.h>
 #include <sysdolphin/baselib/hsd_3915.h>
+#include "pc/button_icons.h"
 #include <sysdolphin/baselib/sislib.h>
 
 #ifdef TARGET_PC
@@ -38,7 +39,7 @@ static GXColor palette[c_count] = {
     { 0x50, 0xA0, 0xFF, 0xFF }, { 0xFF, 0x60, 0x60, 0xFF },
 };
 
-enum { l_title, l_user_label, l_user_name, l_hint, l_mark, l_text = l_mark + CSS_STEPS_MAX,
+enum { l_title, l_user_label, l_user_name, l_hint, l_hint2, l_mark, l_text = l_mark + CSS_STEPS_MAX,
        l_count = l_text + CSS_STEPS_MAX };
 
 static HSD_Text* css_text;
@@ -50,6 +51,11 @@ static unsigned css_frame;
 #define MARK_HALF_LEN 4.2f
 #define MARK_HALF_WIDTH 0.95f
 static bool css_pending[CSS_STEPS_MAX];
+static bool css_hint_z; /* the hint is "Press <Z> to ...": the icon stands for the Z */
+#define HINT_Y_FROM_STEPS (BLOCK_Y + 30.0f + STEP_DY * CSS_STEPS_MAX + 12.0f)
+#define HINT_ICON_X 43.0f /* from the hint's left edge to the icon's centre, in screen units */
+#define HINT_ICON_W 30.0f
+#define HINT_REST_X 64.0f
 static float css_mark_y[CSS_STEPS_MAX];
 static CssLine css_lines[l_count];
 
@@ -91,6 +97,12 @@ static void drawMarks(UNUSED HSD_GObj* gobj, int pass)
     ease = tri * tri * (3.0f - 2.0f * tri);
     angle = ease * 0.78539816f; /* 45 degrees */
     hsd_80391A04(1.0f, 1.0f, 1);
+    if (css_hint_z) {
+        pc_button_icon_draw(PC_BUTTON_ICON_Z, world_x(BLOCK_X + HINT_ICON_X),
+                            -world_y(HINT_Y_FROM_STEPS + 24.5f), 0.0f, HINT_ICON_W / 9.2f,
+                            HINT_ICON_W / 9.2f);
+        hsd_80391A04(1.0f, 1.0f, 1); /* the icon changed the vertex formats back */
+    }
     for (i = 0; i < CSS_STEPS_MAX; i++) {
         if (css_pending[i]) {
             float cx = world_x(BLOCK_X + 4.0f);
@@ -153,8 +165,8 @@ void mnOnlineCss_Create(int ctx)
         addLine(&css_lines[l_mark + i], BLOCK_X, y, 0.34f, c_blue);
         addLine(&css_lines[l_text + i], BLOCK_X + 16.0f, y, 0.34f, c_white);
     }
-    addLine(&css_lines[l_hint], BLOCK_X, BLOCK_Y + 30.0f + STEP_DY * CSS_STEPS_MAX + 12.0f, 0.3f,
-            c_dim);
+    addLine(&css_lines[l_hint], BLOCK_X, HINT_Y_FROM_STEPS, 0.3f, c_dim);
+    addLine(&css_lines[l_hint2], BLOCK_X + HINT_REST_X, HINT_Y_FROM_STEPS, 0.3f, c_dim);
 }
 
 void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep* steps, int n,
@@ -185,7 +197,10 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
         setLine(&css_lines[l_mark + i], mark, color);
         setLine(&css_lines[l_text + i], text, i < n && steps[i].mark == '!' ? c_red : c_white);
     }
-    setLine(&css_lines[l_hint], hint, c_dim);
+    /* "Press Z to cancel": the Z is the button's icon, drawn between the words. */
+    css_hint_z = strncmp(hint, "Press Z ", 8) == 0;
+    setLine(&css_lines[l_hint], css_hint_z ? "Press" : hint, c_dim);
+    setLine(&css_lines[l_hint2], css_hint_z ? hint + 8 : "", c_dim);
 }
 
 void mnOnlineCss_Destroy(void)

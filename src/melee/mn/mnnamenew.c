@@ -29,7 +29,9 @@
 #include <sysdolphin/baselib/sislib.h>
 
 #ifdef TARGET_PC
+#include "pc/button_icons.h"
 #include "pc/xr_pointer.h"
+#include <sysdolphin/baselib/hsd_3915.h>
 #include <math.h>
 #include <string.h>
 #endif
@@ -67,35 +69,73 @@ static struct {
 
 static void pc_finish(bool confirmed);
 
-/* Button hints as Slippi shows them, small chips in the panel's lower
- * corners instead of lines of text: a chip is a text box with a background
- * colour, the button's name in it. The left one says what L and R do. */
-static void pc_chip(float x, float y, float w, const char* label, GXColor bg)
+/* Button hints as Slippi shows them: a small chip in the panel's lower corner
+ * with the button's icon and what it does. A chip is a text box with a
+ * background colour; the icons are drawn over it by pc_chip_icons. */
+#define CHIP_Y 9.0f  /* top edge, in the description line's text units */
+#define CHIP_H 1.5f
+#define CHIP_ICON 1.45f
+static struct {
+    int icon[2];
+    float x[2]; /* chip's left edge */
+    int n;
+} s_chips;
+
+static void pc_chip_icons(UNUSED HSD_GObj* gobj, UNUSED int pass)
+{
+    int i, k;
+    hsd_80391A04(1.0f, 1.0f, 1);
+    for (i = 0; i < s_chips.n; i++) {
+        float cx = s_chips.x[i] + 0.4f + CHIP_ICON * 0.5f;
+        float cy = -(CHIP_Y + CHIP_H * 0.5f);
+        if (s_chips.icon[i] == PC_BUTTON_ICON_L) {
+            /* L and R sit together, as the stock SCROLL hint */
+            pc_button_icon_draw(PC_BUTTON_ICON_L, cx, cy, 17.0f, CHIP_ICON, CHIP_ICON);
+            pc_button_icon_draw(PC_BUTTON_ICON_R, cx + CHIP_ICON * 0.95f, cy, 17.0f, CHIP_ICON,
+                                CHIP_ICON);
+        } else {
+            pc_button_icon_draw(s_chips.icon[i], cx, cy, 17.0f, CHIP_ICON, CHIP_ICON);
+        }
+        (void) k;
+    }
+}
+
+static void pc_chip(float x, float w, const char* label, GXColor bg, float label_x)
 {
     HSD_Text* text = HSD_SisLib_803A6754(0, (s32) mn_804D6BB4);
     text->pos_x = x;
-    text->pos_y = y;
+    text->pos_y = CHIP_Y;
     text->pos_z = 17.0f;
     text->box_size_x = w / 0.02f;
-    text->box_size_y = 1.5f / 0.02f;
+    text->box_size_y = CHIP_H / 0.02f;
     text->font_size.x = 0.02f;
     text->font_size.y = 0.02f;
     text->default_kerning = 1;
-    text->default_alignment = 1;
+    text->default_alignment = 0;
     text->bg_color = bg;
     text->text_color.r = text->text_color.g = text->text_color.b = text->text_color.a = 0xFF;
-    HSD_SisLib_803A6B98(text, w / 0.02f * 0.5f, 0.3f / 0.02f, "%s", label);
+    HSD_SisLib_803A6B98(text, label_x / 0.02f, 0.32f / 0.02f, "%s", label);
 }
 
 static void pc_make_chips(void)
 {
-    GXColor gray = { 0x68, 0x68, 0x78, 0xF0 };
-    GXColor purple = { 0x70, 0x38, 0xB0, 0xF0 };
+    GXColor gray = { 0x58, 0x58, 0x68, 0xF0 };
+    GXColor purple = { 0x58, 0x30, 0x98, 0xF0 };
+    HSD_GObj* g;
+    s_chips.n = 0;
     if (s_pc.shiftable) {
-        pc_chip(-14.8f, 9.0f, 4.4f, "L R  SHIFT", gray);
+        s_chips.x[s_chips.n] = -15.0f;
+        s_chips.icon[s_chips.n++] = PC_BUTTON_ICON_L;
+        pc_chip(-15.0f, 5.0f, "SHIFT", gray, 3.5f);
     }
     if (s_pc.fill != NULL) {
-        pc_chip(10.4f, 9.0f, 4.6f, "Y  AUTO FILL", purple);
+        s_chips.x[s_chips.n] = 10.4f;
+        s_chips.icon[s_chips.n++] = PC_BUTTON_ICON_Y;
+        pc_chip(10.4f, 5.4f, "AUTO FILL", purple, 2.3f);
+    }
+    if (s_chips.n > 0) {
+        g = GObj_Create(6U, 7U, 0x80U);
+        GObj_SetupGXLink(g, (GObj_RenderFunc) pc_chip_icons, 7U, 0x80U);
     }
 }
 
