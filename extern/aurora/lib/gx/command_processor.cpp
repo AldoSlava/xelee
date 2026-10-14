@@ -135,13 +135,13 @@ struct DrawCache {
   gfx::PipelineRef xrSoftRef{};
   gfx::PipelineRef xrSoftForPipeline{};
   uint64_t xrSoftForLayout = 0;
-  // Its motion-vector twin (Application SpaceWarp), for plain opaque draws.
-  gfx::PipelineRef xrMotionRef{};
-  gfx::PipelineRef xrMotionForPipeline{};
-  uint64_t xrMotionForLayout = 0;
-  // ... and for draws straddling a clip.
-  gfx::PipelineRef xrMotionSoftRef{}, xrMotionSoftForPipeline{};
-  uint64_t xrMotionSoftForLayout = 0;
+  // Its motion-vector twins (Application SpaceWarp): [clipped + 2 * cutout],
+  // for plain opaque draws, ones straddling a clip, and alpha-tested ones.
+  struct XrTwin {
+    gfx::PipelineRef ref{};
+    gfx::PipelineRef forPipeline{};
+    uint64_t forLayout = 0;
+  } xrMotionTwin[6];
   // XR batching: the batched twins of the eye and motion pipelines.
   gfx::PipelineRef xrBatchRef{}, xrBatchForPipeline{};
   uint64_t xrBatchForLayout = 0;
@@ -1074,18 +1074,78 @@ static gfx::PipelineRef xr_world_pipeline(const u8* raw, u16 vtxCount, XrClipCla
   return xr_twin(*mv, cache.xrPipelineRef, cache.xrForPipeline, cache.xrForLayout);
 }
 
-// The motion-vector pipeline for a world draw drawn whole and plainly in the
-// eyes (0: none). Only opaque draws that write depth and colour, without
-// alpha test or depth textures: the SpaceWarp depth and motion are of the
-// nearest solid surface; whatever is blended or cut out over it is not.
-static bool xr_motion_eligible() noexcept {
+// How a world draw goes into the SpaceWarp depth and motion (None: not at
+// all). Plain: opaque, writing depth and colour, no alpha test or depth
+// textures: the SpaceWarp depth and motion are of the nearest solid surface;
+// whatever is blended over it is not. Cutout: the same but alpha-tested
+// (trees, fences, leaves), whose twin keeps the game's fragment stage for
+// the test, so only the surviving texels carry depth and motion. Translucent:
+// source-alpha blended without depth writes (leaves, fences of mist): the
+// cutout twin with a cut at half alpha, so the mostly solid texels carry the
+// surface's depth and motion and the faint edges leave what is behind them.
+enum class XrMotionKind { None, Plain, Cutout, Translucent };
+static XrMotionKind xr_motion_kind() noexcept {
   if (gfx::xr_motion_layout() == nullptr || !gfx::xr_recording_world())
-    return false;
+    return XrMotionKind::None;
+  const auto& c = sDrawCache.config;
+  if (!(c.depthCompare && c.colorUpdate && c.shaderConfig.lineMode == 0 && c.shaderConfig.zTexOp == 0))
+    return XrMotionKind::None;
+  if (!c.depthUpdate) {
+    static const bool translucent = [] {
+      const char* v = std::getenv("AURORA_XR_APPSW_TRANSLUCENT");
+      return v == nullptr || *v != '0';
+    }();
+    return translucent && c.blendMode == GX_BM_BLEND && c.blendFacSrc == GX_BL_SRCALPHA &&
+                   c.blendFacDst == GX_BL_INVSRCALPHA
+               ? XrMotionKind::Translucent
+               : XrMotionKind::None;
+  }
+  if (c.shaderConfig.alphaCompare) {
+    static const bool cutouts = [] {
+      const char* v = std::getenv("AURORA_XR_APPSW_CUTOUT");
+      return v == nullptr || *v != '0';
+    }();
+    return cutouts ? XrMotionKind::Cutout : XrMotionKind::None;
+  }
+  const bool opaque = c.blendMode == GX_BM_NONE ||
+                      (c.blendMode == GX_BM_BLEND && c.blendFacSrc == GX_BL_ONE && c.blendFacDst == GX_BL_ZERO);
+  return opaque ? XrMotionKind::Plain : XrMotionKind::None;
+}
+
+// AURORA_XR_MOTION_WHY=1: every 2000 world draws, which draws SpaceWarp's
+// depth and motion leave out and why, by the game's GX link (set
+// AURORA_XR_LINK_STATS=1 for the link markers). Works without SpaceWarp.
+static void xr_motion_why() noexcept {
+  static const bool on = std::getenv("AURORA_XR_MOTION_WHY") != nullptr;
+  if (!on || !gfx::xr_recording_world())
+    return;
+  static u32 n, ok, cutout;
+  static std::unordered_map<std::string, u32> combos;
   const auto& c = sDrawCache.config;
   const bool opaque = c.blendMode == GX_BM_NONE ||
                       (c.blendMode == GX_BM_BLEND && c.blendFacSrc == GX_BL_ONE && c.blendFacDst == GX_BL_ZERO);
-  return opaque && c.depthCompare && c.depthUpdate && c.colorUpdate && !c.shaderConfig.alphaCompare &&
-         c.shaderConfig.lineMode == 0 && c.shaderConfig.zTexOp == 0;
+  const bool alphaTest = static_cast<bool>(c.shaderConfig.alphaCompare);
+  const bool solid = c.depthCompare && c.depthUpdate && c.colorUpdate && c.shaderConfig.lineMode == 0 &&
+                     c.shaderConfig.zTexOp == 0;
+  ++n;
+  if (const auto kind = xr_motion_kind(); kind == XrMotionKind::Plain)
+    ++ok;
+  else if (kind == XrMotionKind::Cutout || kind == XrMotionKind::Translucent)
+    ++cutout;
+  else
+    ++combos[fmt::format("link={} blend={} src={} dst={} ztest={} zwrite={} color={} alphacmp={} line={} ztex={} "
+                         "tex={}",
+                         static_cast<int>(sLinkTag) - 1, static_cast<int>(c.blendMode),
+                         static_cast<int>(c.blendFacSrc), static_cast<int>(c.blendFacDst), c.depthCompare,
+                         c.depthUpdate, c.colorUpdate, alphaTest, c.shaderConfig.lineMode, c.shaderConfig.zTexOp,
+                         sDrawCache.bindGroups.textureBindGroup != 0)];
+  if (n % 2000 == 0) {
+    Log.info("XR motion why: {} draws, {} plain, {} cutout, rest left out:", n, ok, cutout);
+    for (const auto& [k, v] : combos)
+      Log.info("XR motion why:   {} x {}", v, k);
+    n = ok = cutout = 0;
+    combos.clear();
+  }
 }
 
 // The motion twin's config: only what decides where a vertex lands and how
@@ -1117,46 +1177,42 @@ static PipelineConfig xr_motion_config(const PipelineConfig& from) noexcept {
 // `clipped`: the twin for a draw straddling a clip, with the eye's clip test
 // (a hard cut or a dithered fade), else its parts past the clip would be
 // missing from SpaceWarp's depth and motion.
-static gfx::PipelineRef xr_motion_pipeline(bool clipped = false) noexcept {
+static gfx::PipelineRef xr_motion_pipeline(XrMotionKind kind, bool clipped = false) noexcept {
   const auto* base = gfx::xr_motion_layout(); // null once adaptive SpaceWarp turns it off
-  if (base == nullptr || !xr_motion_eligible())
+  if (base == nullptr || kind == XrMotionKind::None)
     return 0;
-  const gfx::RenderTargetLayout* layout = base;
-  if (clipped) {
-    static gfx::RenderTargetLayout soft;
-    static uint64_t softFor = 0;
-    if (softFor != base->key) {
-      softFor = base->key;
-      soft = *base;
-      soft.xrSoftClip = 1;
-      gfx::detail::finalize_render_target_layout(soft);
+  const bool plain = kind == XrMotionKind::Plain;
+  const size_t slot = (clipped ? 1 : 0) + (kind == XrMotionKind::Cutout ? 2 : kind == XrMotionKind::Translucent ? 4 : 0);
+  // The base layout's variants, remade when it changes.
+  static gfx::RenderTargetLayout variants[6];
+  static uint64_t variantsFor = 0;
+  if (variantsFor != base->key) {
+    variantsFor = base->key;
+    for (size_t k = 0; k < 6; ++k) {
+      variants[k] = *base;
+      variants[k].xrSoftClip = k & 1 ? 1 : 0;
+      variants[k].xrMotion = 1 + (k >> 1);
+      gfx::detail::finalize_render_target_layout(variants[k]);
     }
-    layout = &soft;
   }
+  const gfx::RenderTargetLayout* layout = &variants[slot];
   auto& cache = sDrawCache;
-  if (clipped) {
-    if (cache.xrMotionSoftForPipeline != cache.pipelineRef || cache.xrMotionSoftForLayout != layout->key) {
-      static const bool shared = [] {
-        const char* v = std::getenv("AURORA_XR_APPSW_SHARED");
-        return v == nullptr || *v != '0';
-      }();
-      cache.xrMotionSoftRef = gfx::find_pipeline(shared ? xr_motion_config(cache.config) : cache.config, *layout);
-      cache.xrMotionSoftForPipeline = cache.pipelineRef;
-      cache.xrMotionSoftForLayout = layout->key;
-    }
-    return cache.xrMotionSoftRef;
-  }
-  if (cache.xrMotionForPipeline != cache.pipelineRef || cache.xrMotionForLayout != layout->key) {
+  auto& twin = cache.xrMotionTwin[slot];
+  if (twin.forPipeline != cache.pipelineRef || twin.forLayout != layout->key) {
     static const bool shared = [] {
       const char* v = std::getenv("AURORA_XR_APPSW_SHARED");
       return v == nullptr || *v != '0';
     }();
-    cache.xrMotionRef =
-        gfx::find_pipeline(shared ? xr_motion_config(cache.config) : cache.config, *layout);
-    cache.xrMotionForPipeline = cache.pipelineRef;
-    cache.xrMotionForLayout = layout->key;
+    // A cutout or translucent twin needs the game's fragment stage for its
+    // alpha test; the translucent one writes the depth its draw leaves out.
+    PipelineConfig config = cache.config;
+    if (kind == XrMotionKind::Translucent)
+      config.depthUpdate = true;
+    twin.ref = gfx::find_pipeline(shared && plain ? xr_motion_config(config) : config, *layout);
+    twin.forPipeline = cache.pipelineRef;
+    twin.forLayout = layout->key;
   }
-  return cache.xrMotionRef;
+  return twin.ref;
 }
 
 // XR batching: a layout's batched twin (gx::xr_batch_*).
@@ -1446,7 +1502,9 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
   // Before the decoded positions: a draw merging into this one needs them
   // to end the storage pool.
-  const u32 xrPrevMtx = xr_motion_eligible() ? xr_prev_matrices(raw, vertRange.size, fmt) : 0;
+  xr_motion_why();
+  const XrMotionKind xrMotionKind = xr_motion_kind();
+  const u32 xrPrevMtx = xrMotionKind != XrMotionKind::None ? xr_prev_matrices(raw, vertRange.size, fmt) : 0;
 #endif
   const gfx::Range posRange =
       sc.decodedPos || sc.decodedAll
@@ -1473,7 +1531,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     xrPipeline = xr_world_pipeline(raw, vtxCount, &cls, outside.data(), &masked, unsolid.data());
     cls_inside = cls == XrClipClass::Inside;
     if (xrPipeline != 0 && cls != XrClipClass::Outside &&
-        (xrMotionPipeline = xr_motion_pipeline(cls == XrClipClass::Straddle)) != 0)
+        (xrMotionPipeline = xr_motion_pipeline(xrMotionKind, cls == XrClipClass::Straddle)) != 0)
       immediates.xrPrevMtx = xrPrevMtx;
     // A straddling draw's triangles wholly past one plane are left out of
     // the eyes (their own index list; the flat frame keeps every one). On
@@ -1625,7 +1683,8 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
       .xrMotionPipeline = xrMotionPipeline,
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
       .xrBatchPipeline = xrPipeline != 0 && xrSolidIndexCount == 0 && cls_inside ? xr_batch_pipeline(false) : 0,
-      .xrMotionBatchPipeline = xrMotionPipeline != 0 && cls_inside ? xr_batch_pipeline(true) : 0,
+      .xrMotionBatchPipeline =
+          xrMotionPipeline != 0 && cls_inside && xrMotionKind == XrMotionKind::Plain ? xr_batch_pipeline(true) : 0,
 #else
       // xr_batch_pipeline() is XR-only (it needs the multiview/motion layouts),
       // so off XR the batch pipelines stay 0. The DrawData fields exist either

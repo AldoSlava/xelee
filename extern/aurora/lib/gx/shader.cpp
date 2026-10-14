@@ -874,7 +874,7 @@ absl::flat_hash_set<gfx::ShaderRef> s_seenShaders;
 } // namespace
 
 std::string build_shader_source(const ShaderConfig& config, uint32_t normalAttachment, uint32_t viewCount,
-                                bool softClip, bool motion, bool batch) noexcept {
+                                bool softClip, uint32_t motion, bool batch) noexcept {
   ZoneScoped;
   const auto hash = xxh3_hash(normalAttachment, xxh3_hash(config));
   const auto info = build_shader_info(config);
@@ -2256,11 +2256,32 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
           Log.warn("XR motion shader variant: anchors missing");
         } else {
           // Edits from the end back, so earlier anchors stay put.
-          shaderSource.erase(fsAt);
+          // A cutout (motion 2) keeps the game's fragment stage, renamed, for
+          // its alpha test (and the clip test): called first, its discards
+          // leave only the surviving texels with depth and motion.
+          const bool cutout = motion >= 2;
+          if (cutout) {
+            const std::string entry = "@fragment\nfn fs_main(in: VertexOutput) -> @location(0) vec4f";
+            if (shaderSource.compare(fsAt, entry.size(), entry) == 0)
+              shaderSource.replace(fsAt, entry.size(), "fn fs_gx(in: VertexOutput) -> vec4f");
+            else
+              Log.warn("XR motion cutout shader variant: fragment entry missing");
+          } else {
+            shaderSource.erase(fsAt);
+          }
           shaderSource += "@fragment\n"
                           "fn fs_main(in: VertexOutput) -> @location(0) vec4f {\n";
+          // Translucent (motion 3): only texels at least half solid.
+          static const float transAlpha = [] {
+            const char* v = std::getenv("AURORA_XR_APPSW_TRANS_ALPHA");
+            return v != nullptr ? static_cast<float>(std::atof(v)) : 0.5f;
+          }();
+          if (motion == 3)
+            shaderSource += fmt::format("    if (fs_gx(in).a < {:.3f}) {{ discard; }}\n", transAlpha);
+          else if (cutout)
+            shaderSource += "    _ = fs_gx(in);\n";
           // A draw straddling a clip: the eyes' clip test (softClip above).
-          if (softClip)
+          if (softClip && !cutout)
             shaderSource += "    let xr_d = min(in.xr_fade_a, in.xr_fade_b);\n"
                             "    if (xr_bayer(in.pos.xy) >= clamp(min(min(xr_d.x, xr_d.y), min(xr_d.z, xr_d.w)), 0.0, 1.0) * "
                             "(1.0 - bitcast<f32>(xr.enabled.y))) { discard; }\n";
@@ -2274,9 +2295,12 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
           // Only the positions leave the vertex stage: the GX outputs stay in
           // a local struct nobody reads, so their lighting and texgen are
           // dead code the driver drops (Brinstar's pass: 4.8 ms with them).
-          shaderSource.replace(retAt, std::string_view{"return out;"}.size(),
-                               softClip ? "return VertexOutput(out.pos, out.pos, xr_prev, out.xr_fade_a, out.xr_fade_b);"
-                                        : "return VertexOutput(out.pos, out.pos, xr_prev);");
+          if (cutout)
+            shaderSource.insert(retAt, "out.xr_cur = out.pos;\n    out.xr_prv = xr_prev;\n    ");
+          else
+            shaderSource.replace(retAt, std::string_view{"return out;"}.size(),
+                                 softClip ? "return VertexOutput(out.pos, out.pos, xr_prev, out.xr_fade_a, out.xr_fade_b);"
+                                          : "return VertexOutput(out.pos, out.pos, xr_prev);");
           // Last frame's position: by the draw's own matrices then
           // (imm.xr_prev_mtx, in last frame's game camera space, so last
           // frame's eye matrices), or else as a point fixed in the game
@@ -2303,8 +2327,17 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
                             pos));
           }
           const std::string outDecl = "var out: VertexOutput;";
-          if (const auto d = shaderSource.find(outDecl, vsAt); d != std::string::npos)
+          if (const auto d = shaderSource.find(outDecl, vsAt); d != std::string::npos && !cutout)
             shaderSource.replace(d, outDecl.size(), "var out: XrGxOut;");
+          if (cutout) {
+            // The game's outputs stay; the two positions join them.
+            int next = 0;
+            for (size_t a = shaderSource.find("@location(", v0); a != std::string::npos && a < v1;
+                 a = shaderSource.find("@location(", a + 1))
+              next = std::max(next, std::atoi(shaderSource.c_str() + a + 10) + 1);
+            shaderSource.insert(v1, fmt::format("    @location({}) xr_cur: vec4f,\n    @location({}) xr_prv: vec4f,\n",
+                                                next, next + 1));
+          } else {
           // The GX outputs' struct, without its stage attributes.
           std::string members = shaderSource.substr(v0 + vsHead.size(), v1 - v0 - vsHead.size());
           for (size_t a = members.find('@'); a != std::string::npos; a = members.find('@', a)) {
@@ -2325,6 +2358,7 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
                                                           "    @location(3) xr_fade_b: vec4f,\n"
                                                         : "") +
                                    "};");
+          }
         }
       }
     }
@@ -2433,7 +2467,7 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
     }
   }
   const auto hash = layout.viewCount > 1
-                        ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8) + (layout.xrMotion << 9) + (layout.xrBatch << 10),
+                        ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8) + (layout.xrMotion << 9) + (layout.xrBatch << 11),
                                     xxh3_hash(normalAttachment, xxh3_hash(config)))
                         : xxh3_hash(normalAttachment, xxh3_hash(config));
 #ifdef __EMSCRIPTEN__
@@ -2445,7 +2479,7 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
   if (auto it = modules.find(hash); it != modules.end()) return it->second;
 #endif
   const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip != 0,
-                                                 layout.xrMotion != 0, layout.xrBatch != 0);
+                                                 layout.xrMotion, layout.xrBatch != 0);
   wgpu::ShaderSourceWGSL wgslDescriptor{};
   wgslDescriptor.code = shaderSource.c_str();
   const auto label = fmt::format("GX Shader {:x}", hash);
