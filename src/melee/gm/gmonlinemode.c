@@ -233,6 +233,14 @@ static bool slippiFlow(void)
            pc_net_match_slippi_ready();
 }
 
+/* Slippi's Unranked searches on the CSS and has no lobby screen: if the lobby
+ * scene is reached at all (the match is agreed, or a stray exit), it only passes
+ * through. The lobby view is for LAN and the login flows. */
+static bool unrankedPassThrough(void)
+{
+    return online_kind == ONLINE_KIND_UNRANKED && slippiFlow();
+}
+
 bool gmOnline_SlippiFlow(void)
 {
     /* The kind outlasts the mode: VS. Mode's own CSS must not be Slippi's. */
@@ -398,6 +406,11 @@ void onExitCss(GameModeState* state)
             pc_net_match_stop();
             pc_net_unlock_release();
             gm_ChangeGameModeAfterCurrentScene(GM_MENU);
+        } else if (pc_net_peer_status() != PC_NET_PEER_OK) {
+            /* A failure (a timeout while searching, a late desync) ended this
+             * scene: back to a fresh CSS with the reason on it, never the
+             * lobby. */
+            routeAfterFailure();
         } else if (slpcss_leave) {
             online_vs = css->vs;
             gm_SetNextGameModeStateId(state_sss); /* forced stage: it exits at once */
@@ -755,6 +768,10 @@ void onExitIntro(UNUSED GameModeState* state)
 {
 #ifdef TARGET_PC
     gm_vs_splash_online = false;
+    if (slippiFlow() && pc_net_peer_status() != PC_NET_PEER_OK) {
+        routeAfterFailure();
+        return;
+    }
 #endif
     gm_SetNextGameModeStateId(state_vs);
 }
@@ -1454,8 +1471,8 @@ void gm_Scene_OnlineLobby_OnEnter(UNUSED void* unused)
         loginBegin(); /* the keyboard builds its own screen */
         return;
     }
-    if (online_kind == ONLINE_KIND_PLACE) {
-        return; /* a pass-through to the placement scene */
+    if (online_kind == ONLINE_KIND_PLACE || unrankedPassThrough()) {
+        return; /* a pass-through: to the placement scene, or on to the CSS */
     }
 #endif
     mnOnlineLobby_Create();
@@ -1487,7 +1504,7 @@ void gm_Scene_OnlineLobby_OnExit(UNUSED void* unused)
     if (online_kind == ONLINE_KIND_LOGIN) {
         loginEnd();
     }
-    if (online_kind == ONLINE_KIND_PLACE) {
+    if (online_kind == ONLINE_KIND_PLACE || unrankedPassThrough()) {
         return;
     }
 #endif
@@ -1625,8 +1642,8 @@ void gm_Scene_OnlineLobby_OnFrame(void)
     if (mnNameNew_PcActive()) {
         return; /* the keyboard runs its own procs and takes the pad */
     }
-    if (online_kind == ONLINE_KIND_PLACE) {
-        gm_801A4B60(); /* nothing to show: on to the placement scene */
+    if (online_kind == ONLINE_KIND_PLACE || unrankedPassThrough()) {
+        gm_801A4B60(); /* nothing to show: on to the placement scene, or the CSS */
         return;
     }
     if (online_kind == ONLINE_KIND_LOGIN) {
