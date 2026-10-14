@@ -197,10 +197,11 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
         setLine(&css_lines[l_mark + i], mark, color);
         setLine(&css_lines[l_text + i], text, i < n && steps[i].mark == '!' ? c_red : c_white);
     }
-    /* "Press Z to cancel": the Z is the button's icon, drawn between the words. */
-    css_hint_z = strncmp(hint, "Press Z ", 8) == 0;
-    setLine(&css_lines[l_hint], css_hint_z ? "Press" : hint, c_dim);
-    setLine(&css_lines[l_hint2], css_hint_z ? hint + 8 : "", c_dim);
+    /* The hint stays plain text ("Press Z to cancel"); the Z icon path below
+     * is kept for when it is wanted. */
+    css_hint_z = false;
+    setLine(&css_lines[l_hint], hint, c_dim);
+    setLine(&css_lines[l_hint2], "", c_dim);
 }
 
 void mnOnlineCss_Destroy(void)
