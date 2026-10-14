@@ -1,3 +1,4 @@
+#include "pc/pc.h"
 #include "lbaudio_ax.h"
 
 #include <Runtime/platform.h>

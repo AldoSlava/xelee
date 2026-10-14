@@ -1664,6 +1664,7 @@ void gm_Scene_Vs_OnFrame(void)
         if (pc_xr_place_dummy_result() != 0) {
             /* A or B: the scene ends, no outcome to record. */
             controller.state.match_result = OUTCOME_TERMINATED;
+            controller.start.x1_5 = true; /* the end does not stop the music: the menu's goes on */
             fn_8016C7F0();
             gm_801A4B60();
             return;
