@@ -28,9 +28,68 @@
 #include <sysdolphin/baselib/random.h>
 #include <sysdolphin/baselib/sislib.h>
 
+#ifdef TARGET_PC
+#include "pc/xr_pointer.h"
+#include <math.h>
+#include <string.h>
+#endif
+
 typedef char* GlyphRow[4];
 
 typedef volatile char GlyphChar;
+
+#ifdef TARGET_PC
+extern void mnCharSel_SlippiAfterKeyboard(void); /* mncharsel.c */
+/* ---- Slippi mode -------------------------------------------------------
+ * Slippi's Direct keyboard is this screen with ASCII text in it: no kana, no
+ * RANDOM, the typed text kept in a plain buffer. The Latin page here is that
+ * keyboard (A to J across the top, digits and symbols below); Shift swaps its
+ * letters to lowercase. Entered through mnNameNew_PcOpen; every Melee name
+ * path below is left as it was and stays out of the way while `active`. */
+#define PC_NAME_MAX 96
+#define PC_NAME_SHOWN 8 /* characters the entry box shows, from the end */
+static struct {
+    bool active;
+    char text[PC_NAME_MAX + 1];
+    int max_len;
+    bool shift;
+    bool mask;
+    char desc[160];
+    MnNameNewDoneFn done;
+    MnNameNewFillFn fill;
+    bool css;
+    void* user;
+    char key_ch[50];     /* what the key types */
+    char key_str[50][4]; /* what it shows: ASCII, or full-width where the font has no ASCII glyph */
+    char* key_ptr[50];
+} s_pc;
+
+static void pc_finish(bool confirmed);
+
+/* Keys run down columns, right to left: key j is column 9 - j / 5, row j % 5. */
+static const char* const pc_rows[5] = {
+    "ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ_/*#", "0123456789", "-+=!?@%&$.",
+};
+
+static void pc_fill_keys(void)
+{
+    int j;
+    for (j = 0; j < 50; j++) {
+        char c = pc_rows[j % 5][9 - j / 5];
+        if (s_pc.shift && c >= 'A' && c <= 'Z') {
+            c = (char) (c + 32);
+        }
+        s_pc.key_ch[j] = c;
+        if (c == '$') {
+            memcpy(s_pc.key_str[j], "\x81\x90", 3); /* the full-width dollar, in Shift-JIS */
+        } else {
+            s_pc.key_str[j][0] = c;
+            s_pc.key_str[j][1] = '\0';
+        }
+        s_pc.key_ptr[j] = s_pc.key_str[j];
+    }
+}
+#endif
 
 /* 4D6C0C */ u8 mnNameNew_PortInUse;
 
@@ -254,6 +313,12 @@ void mnNameNew_8023B224(u8 arg0)
 
     data = mnNameNew_804D6C08->user_data;
     name_index = data->name_index;
+#ifdef TARGET_PC
+    if (s_pc.active) {
+        pc_finish(arg0 != 0);
+        return;
+    }
+#endif
     if (arg0 != 0) {
         lbCardGame_UpdatePowerTime();
     }
@@ -287,6 +352,22 @@ void mnNameNew_8023B314(NameNewEntry* arg0, s32 arg1)
     u8 idx;
     s32 selection;
 
+#ifdef TARGET_PC
+    if (s_pc.active) {
+        if (arg0->desc_text == NULL) {
+            text = HSD_SisLib_803A6754(0, (s32) mn_804D6BB4);
+            arg0->desc_text = text;
+            text->pos_x = -9.0f;
+            text->pos_y = 9.3f;
+            text->pos_z = 17.0f;
+            text->default_kerning = 1;
+            text->font_size.x = 0.022f;
+            text->font_size.y = 0.022f;
+            HSD_SisLib_803A6B98(text, 0.0f, 0.0f, "%s", s_pc.desc);
+        }
+        return;
+    }
+#endif
     selection = arg1;
     if (selection < 0x32) {
         switch (arg0->mode) {
@@ -380,6 +461,13 @@ HSD_Text* mnNameNew_KeySetup(NameNewEntry* arg0, u8 arg1)
         break;
     }
 
+#ifdef TARGET_PC
+    if (s_pc.active) {
+        arg0->mode = 2;
+        pc_fill_keys();
+        str_table = s_pc.key_ptr;
+    }
+#endif
     if (arg0->key_text != NULL) {
         HSD_SisLib_803A5CC4(arg0->key_text);
     }
@@ -458,6 +546,12 @@ HSD_Text* mnNameNew_KeySetup(NameNewEntry* arg0, u8 arg1)
     for (; j < 0x32; j++) {
         font_x = text->font_size.x;
         col_x = (f32) (9 - (j / 5)) * x_range;
+#ifdef TARGET_PC
+        if (s_pc.active) {
+            HSD_SisLib_803A6B98(text, col_x / font_x,
+                                ((f32) (j % 5) * y_range) / text->font_size.y, "%s", str_table[j]);
+        } else
+#endif
         HSD_SisLib_803A6B98(text, col_x / font_x,
                             ((f32) (j % 5) * y_range) / text->font_size.y,
                             str_table[j]);
@@ -924,6 +1018,242 @@ static inline void SubmitName(NameNewEntry* data, char* name)
     lbAudioAx_80024030(3);
 }
 
+#ifdef TARGET_PC
+/* Slippi's keyboard ends: tear the screen down, as the CSS path of
+ * mnNameNew_8023B224 does before it rebuilds the CSS, and hand the text back.
+ * The caller may open another entry from inside `done`. */
+static void pc_finish(bool confirmed)
+{
+    MnNameNewDoneFn done = s_pc.done;
+    void* user = s_pc.user;
+    char text[PC_NAME_MAX + 1];
+    memcpy(text, s_pc.text, sizeof text);
+    bool css = s_pc.css;
+    s_pc.active = false;
+    HSD_SisLib_803A5E70();
+    mn_8022EBDC();
+    if (css) {
+        mnCharSel_802640A0();
+        mnCharSel_SlippiAfterKeyboard();
+    }
+    if (done != NULL) {
+        done(confirmed, text, user);
+    }
+}
+
+static HSD_JObj* pc_key_jobj(NameNewEntry* data, int k)
+{
+    HSD_JObj* j = data->jobjs[16] != NULL ? data->jobjs[16]->child : NULL;
+    while (j != NULL && k-- > 0) {
+        j = j->next;
+    }
+    return j;
+}
+
+/* The page buttons that mean nothing here: hiragana, katakana and RANDOM. */
+static bool pc_sel_hidden(int sel)
+{
+    return sel == 0x33 || sel == 0x34 || sel == 0x37;
+}
+
+/* Hide what Slippi's keyboard does not have, and the caret box (an
+ * underscore does that job); the scene proc runs this every frame because the
+ * animation shows them again. */
+static void pc_hide(NameNewEntry* data)
+{
+    HSD_JObjSetFlagsAll(data->jobjs[10], JOBJ_HIDDEN);
+    HSD_JObjSetFlagsAll(data->jobjs[11], JOBJ_HIDDEN);
+    HSD_JObjSetFlagsAll(data->jobjs[8], JOBJ_HIDDEN);
+    HSD_JObjSetFlagsAll(data->jobjs[13], JOBJ_HIDDEN);
+}
+
+/* The pointer (a headset laser, or the mouse when testing) follows the keys
+ * and buttons: what it is over becomes the highlighted one, and its click is
+ * A, which is how the pad's A already reaches this screen. */
+static void pc_pointer(NameNewEntry* data)
+{
+    HSD_CObj* cobj = mn_PcMenuCamera();
+    float px, py, kx[50], ky[50], dx, dy;
+    bool leads;
+    int k, sel, best = -1;
+
+    if (cobj == NULL || !pc_xr_pointer_at(&px, &py, &leads)) {
+        return;
+    }
+    pc_xr_pointer_target(false);
+    for (k = 0; k < 50; k++) {
+        HSD_JObj* j = pc_key_jobj(data, k);
+        Vec3 w;
+        if (j == NULL) {
+            return;
+        }
+        lb_8000B1CC(j, NULL, &w);
+        if (!pc_xr_pointer_project(cobj, &w.x, &kx[k], &ky[k])) {
+            return;
+        }
+    }
+    dx = fabsf(kx[5] - kx[0]);
+    dy = fabsf(ky[1] - ky[0]);
+    for (k = 0; k < 50; k++) {
+        if (s_pc.key_ch[k] != '\0' && fabsf(px - kx[k]) < dx * 0.5f &&
+            fabsf(py - ky[k]) < dy * 0.5f) {
+            best = k;
+        }
+    }
+    for (sel = 0x32; sel < 0x3A && best < 0; sel++) {
+        HSD_JObj* j = data->jobjs[mnNameNew_KeyMap.key_jobj_ids[sel - 0x32]];
+        Vec3 w;
+        float bx, by, rx, ry;
+        if (pc_sel_hidden(sel) || sel == 0x39 || j == NULL) {
+            continue;
+        }
+        lb_8000B1CC(j, NULL, &w);
+        if (!pc_xr_pointer_project(cobj, &w.x, &bx, &by)) {
+            continue;
+        }
+        /* The confirm bar is wide; the icons about a key. */
+        rx = sel == 0x38 ? dx * 4.5f : dx * 0.6f;
+        ry = sel == 0x38 ? dy * 0.7f : dy * 0.6f;
+        if (fabsf(px - bx) < rx && fabsf(py - by) < ry) {
+            best = sel;
+        }
+    }
+    if (best >= 0) {
+        pc_xr_pointer_target(true);
+        if (leads && mn_804A04F0.hovered_selection != best) {
+            mn_804A04F0.hovered_selection = (u16) best;
+            if (best < 0x32) {
+                data->last_key_sel = (u8) best;
+            }
+            lbAudioAx_80024030(2);
+        }
+    }
+}
+
+static void pc_backspace(void)
+{
+    int len = (int) strlen(s_pc.text);
+    if (len > 0) {
+        s_pc.text[len - 1] = '\0';
+        lbAudioAx_80024030(0);
+        mnNameNew_8023CE4C();
+    } else {
+        lbAudioAx_80024030(3);
+    }
+}
+
+static void pc_shift(NameNewEntry* data)
+{
+    s_pc.shift = !s_pc.shift;
+    lbAudioAx_80024030(1);
+    mnNameNew_KeySetup(data, 2);
+}
+
+static void pc_confirm(void)
+{
+    if (s_pc.text[0] == '\0') {
+        lbAudioAx_80024030(3);
+        return;
+    }
+    lbAudioAx_80024030(1);
+    pc_finish(true);
+}
+
+static void pc_input(NameNewEntry* data)
+{
+    u32 buttons = (mn_804A04F0.buttons = mn_80229624((u32) mnNameNew_PortInUse));
+    u16* hovered = &mn_804A04F0.hovered_selection;
+    int len = (int) strlen(s_pc.text);
+
+    pc_pointer(data);
+    if (buttons & 0x200) {
+        u16 sel = *hovered;
+        if (sel < 0x32) {
+            if (len < s_pc.max_len) {
+                s_pc.text[len] = s_pc.key_ch[sel];
+                s_pc.text[len + 1] = '\0';
+                lbAudioAx_80024030(1);
+                mnNameNew_8023CE4C();
+            } else {
+                lbAudioAx_80024030(3);
+            }
+        } else if (sel == 0x32) {
+            lbAudioAx_80024030(0);
+            pc_finish(false);
+        } else if (sel == 0x35) {
+            pc_shift(data);
+        } else if (sel == 0x36) {
+            pc_backspace();
+        } else if (sel == 0x38 || sel == 0x39) {
+            pc_confirm();
+        }
+    } else if (buttons & 0x100) {
+        if (*hovered == 0x38 || *hovered == 0x39) {
+            pc_confirm();
+        } else {
+            *hovered = 0x39;
+        }
+    } else if (buttons & 0x20) {
+        if (len > 0) {
+            pc_backspace();
+        } else {
+            lbAudioAx_80024030(0);
+            pc_finish(false);
+        }
+    } else if (buttons & 0xC0) {
+        pc_shift(data);
+    } else if ((buttons & 0x800) && s_pc.fill != NULL) {
+        const char* fill = s_pc.fill(s_pc.user);
+        if (fill != NULL && fill[0] != '\0') {
+            snprintf(s_pc.text, sizeof s_pc.text, "%.*s", s_pc.max_len, fill);
+            lbAudioAx_80024030(1);
+            mnNameNew_8023CE4C();
+        } else {
+            lbAudioAx_80024030(3);
+        }
+    } else {
+        u8 new_sel = mnNameNew_8023BAA8(data, (s32) buttons, (u8) *hovered);
+        int tries;
+        for (tries = 0; tries < 4 && pc_sel_hidden(new_sel); tries++) {
+            new_sel = mnNameNew_8023BAA8(data, (s32) buttons, new_sel);
+        }
+        if (pc_sel_hidden(new_sel)) {
+            new_sel = (u8) *hovered;
+        }
+        if ((s32) new_sel != (s32) *hovered) {
+            lbAudioAx_80024030(2);
+            *hovered = new_sel;
+            if (new_sel < 0x32) {
+                data->last_key_sel = new_sel;
+            }
+        }
+    }
+}
+
+bool mnNameNew_PcActive(void)
+{
+    return s_pc.active;
+}
+
+void mnNameNew_PcOpen(HSD_Archive* ext_all, const char* initial, int max_len, bool mask,
+                      const char* description, MnNameNewDoneFn done, MnNameNewFillFn fill,
+                      bool css, void* user)
+{
+    memset(&s_pc, 0, sizeof s_pc);
+    snprintf(s_pc.text, sizeof s_pc.text, "%s", initial != NULL ? initial : "");
+    s_pc.max_len = max_len > PC_NAME_MAX ? PC_NAME_MAX : max_len;
+    s_pc.mask = mask;
+    snprintf(s_pc.desc, sizeof s_pc.desc, "%s", description != NULL ? description : "");
+    s_pc.done = done;
+    s_pc.fill = fill;
+    s_pc.css = css;
+    s_pc.user = user;
+    s_pc.active = true;
+    mnNameNew_EnterFromMnCharSel(ext_all, 0);
+    mnNameNew_8023CE4C();
+}
+#endif
+
 void mnNameNew_MainInput(HSD_GObj* arg0)
 {
     char space_lead;
@@ -943,6 +1273,12 @@ void mnNameNew_MainInput(HSD_GObj* arg0)
         data = entry;
     }
 
+#ifdef TARGET_PC
+    if (s_pc.active) {
+        pc_input(data);
+        return;
+    }
+#endif
     if (data->variant_gobj != NULL) {
         mnNameNew_GlyphVariantInput(arg0);
         return;
@@ -1210,6 +1546,42 @@ void mnNameNew_8023CE4C(void)
     data = mnNameNew_GetEntryData();
     jobj_a = data->jobjs[14];
     jobj_b = data->jobjs[15];
+#ifdef TARGET_PC
+    if (s_pc.active) {
+        /* The entry box shows the end of what is typed, narrow, with a
+         * trailing underscore for the caret; a mask shows stars. */
+        char shown[PC_NAME_SHOWN * 2 + 2];
+        int len = (int) strlen(s_pc.text);
+        int from = len > PC_NAME_SHOWN ? len - PC_NAME_SHOWN : 0;
+        int n = 0;
+        int k;
+        for (k = from; k < len && k - from < PC_NAME_SHOWN; k++) {
+            char c = s_pc.mask ? '*' : s_pc.text[k];
+            if (c == '$') {
+                shown[n++] = '\x81'; /* the font has no ASCII dollar */
+                shown[n++] = '\x90';
+            } else {
+                shown[n++] = c;
+            }
+        }
+        shown[n++] = '_';
+        shown[n] = '\0';
+        if (data->name_disp_text != 0L) {
+            HSD_SisLib_803A5CC4(data->name_disp_text);
+        }
+        text = HSD_SisLib_803A6754(0, mn_804D6BB5);
+        lb_8000B1CC(jobj_a, &mnNameNew_803EE330, &text_pos);
+        text->pos_x = text_pos.x;
+        text->pos_y = -text_pos.y;
+        text->pos_z = text_pos.z;
+        text->font_size.x = 0.026f;
+        text->font_size.y = 0.05f;
+        text->text_color = mnNameNew_804D4F6C;
+        HSD_SisLib_803A6B98(text, 0.0f, 0.0f, "%s", shown);
+        data->name_disp_text = text;
+        return;
+    }
+#endif
     first_x = HSD_JObjGetTranslationX(jobj_a);
     char_spacing = HSD_JObjGetTranslationX(jobj_b) - first_x;
     if (data->name_disp_text != 0L) {
@@ -1590,6 +1962,11 @@ void fn_8023DBE8(HSD_GObj* arg0)
     flow = &mn_804A04F0;
     gobj = arg0;
     data = gobj->user_data;
+#ifdef TARGET_PC
+    if (s_pc.active) {
+        pc_hide(data);
+    }
+#endif
 
     if (flow->x10 != 1) {
         HSD_JObjSetFlagsAll(data->jobjs[16], JOBJ_HIDDEN);

@@ -16,6 +16,10 @@ void mnOnline_SlippiThink(HSD_GObj*);
 
 /* Literal label / bottom-bar text for PC-only entries; NULL = stock. */
 const char* mnOnline_Label(MenuKind, int selection);
+/* Rows on the Slippi menu: 1 (Login) signed out, 3 signed in. */
+int mnOnline_SlippiCount(void);
+/* Called as the menu is built, so the think can tell when the rows went stale. */
+void mnOnline_SlippiBuilt(void);
 const char* mnOnline_Description(MenuKind, int selection);
 
 /* One-shot description override set by the think proc (A on a stub). */

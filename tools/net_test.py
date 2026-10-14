@@ -325,12 +325,12 @@ def settle(insts, frames):
 # the VS submenu, Up wraps to SEL_VS_ONLINE, A enters the ONLINE menu with
 # SEL_ONLINE_LAN already selected, A takes it into the lobby. Every submenu
 # entry resets the cursor to index 0 (mn_804A04F0.hovered_selection = 0,
-# mnmain.c:2385) and the VS table has 6 entries on TARGET_PC (mn_803EB6B0,
-# mnmain.c:420-424) with SEL_VS_ONLINE last (forward.h:166-171), so the walk
+# mnmain.c:2385) and the main table has 6 entries on TARGET_PC (mn_803EB6B0)
+# with SEL_MAIN_ONLINE third (forward.h), so the walk
 # is stateless: a retry starts from the same place. X = A button in the
 # keyboard map, Z = B.
-# VS Mode -> ONLINE -> (Slippi is first; Down to) LAN PLAY
-LAN_SUBMENU = [("Down", 7), ("X", 7), ("Up", 7), ("X", 7), ("Down", 7), ("X", 7)]
+# Main Menu -> Online Play (third, under VS. Mode) -> (Slippi is first; Down to) LAN
+LAN_SUBMENU = [("Down", 7), ("Down", 7), ("X", 7), ("Down", 7), ("X", 7)]
 MENU_SETTLE = 90  # frames of animation a menu hop can eat a press during
 CSS_BACK = 40     # frames of held B that leave a character-select screen (>30)
 

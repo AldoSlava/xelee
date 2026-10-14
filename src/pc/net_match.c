@@ -415,17 +415,22 @@ static void contacts_note(const char* code) {
 
 /* The Online menu asks about the account every frame it draws, and loading it
  * reads a file, so look again at most once a second. */
+static PcSlippiAccount s_account_cached;
+static uint64_t s_account_at;
+
+void pc_net_match_slippi_refresh(void) {
+    s_account_at = 0; /* the account just changed: look again now */
+}
+
 static bool slp_account_cached(PcSlippiAccount* out) {
-    static PcSlippiAccount cached;
-    static uint64_t at;
     uint64_t now = SDL_GetTicks();
-    if (at == 0 || now - at > 1000) {
-        memset(&cached, 0, sizeof cached);
-        pc_slippi_account_load(&cached, true);
-        at = now ? now : 1;
+    if (s_account_at == 0 || now - s_account_at > 1000) {
+        memset(&s_account_cached, 0, sizeof s_account_cached);
+        pc_slippi_account_load(&s_account_cached, true);
+        s_account_at = now ? now : 1;
     }
-    *out = cached;
-    return cached.logged_in;
+    *out = s_account_cached;
+    return s_account_cached.logged_in;
 }
 
 bool pc_net_match_slippi_ready(void) {

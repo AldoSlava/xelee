@@ -44,6 +44,8 @@ bool pc_net_match_is_slippi(void);
 /* A Slippi account is signed in, so Unranked and Direct go through Slippi
  * matchmaking and Direct takes Slippi connect codes ("ABCD#123"). */
 bool pc_net_match_slippi_ready(void);
+/* The account changed (sign-in or sign-out): drop the cached copy now. */
+void pc_net_match_slippi_refresh(void);
 /* The signed-in account's connect code, "" when there is none. */
 const char* pc_net_match_slippi_code(void);
 /* ... and its display name. */

@@ -49,13 +49,38 @@ enum {
     line_rows, /* 4 per player: YOU marker, name, host badge, ping */
     line_menu = line_rows + ONLINE_LOBBY_MAX_PLAYERS * 4, /* cursor + text */
     line_keys = line_menu + ONLINE_LOBBY_MENU_ROWS * 2,
-    line_count = line_keys + ONLINE_LOBBY_KEY_ROWS * ONLINE_LOBBY_KEY_COLS,
+    line_keybtn = line_keys + ONLINE_LOBBY_KEY_ROWS * ONLINE_LOBBY_KEY_COLS,
+    line_count = line_keybtn + ONLINE_LOBBY_KEY_BUTTONS,
 };
 
 #define KEY_X0 136.0f
 #define KEY_DX 48.0f
-#define KEY_Y0 170.0f
-#define KEY_DY 38.0f
+#define KEY_Y0 160.0f
+#define KEY_DY 31.0f
+/* The button row sits under the grid. */
+#define BTN_Y (KEY_Y0 + ONLINE_LOBBY_KEY_ROWS * KEY_DY + 6.0f)
+#define BTN_X0 136.0f
+#define BTN_DX 150.0f
+#define BTN_W 138.0f
+#define BTN_H 28.0f
+
+int mnOnlineLobby_KeyHit(float x, float y)
+{
+    int row, col, b;
+    for (b = 0; b < ONLINE_LOBBY_KEY_BUTTONS; b++) {
+        float bx = BTN_X0 + b * BTN_DX;
+        if (x >= bx - 6.0f && x < bx - 6.0f + BTN_W && y >= BTN_Y - 4.0f && y < BTN_Y - 4.0f + BTN_H) {
+            return 100 + b;
+        }
+    }
+    col = (int) ((x - (KEY_X0 - 10.0f)) / KEY_DX);
+    row = (int) ((y - (KEY_Y0 - 4.0f)) / KEY_DY);
+    if (x < KEY_X0 - 10.0f || y < KEY_Y0 - 4.0f || col < 0 || col >= ONLINE_LOBBY_KEY_COLS ||
+        row < 0 || row >= ONLINE_LOBBY_KEY_ROWS) {
+        return -1;
+    }
+    return row * ONLINE_LOBBY_KEY_COLS + col;
+}
 
 static HSD_Text* lobby_text;
 static Line lines[line_count];
@@ -181,6 +206,9 @@ void mnOnlineLobby_Create(void)
         addLine(&lines[line_keys + i], KEY_X0 + (i % ONLINE_LOBBY_KEY_COLS) * KEY_DX,
                 KEY_Y0 + (i / ONLINE_LOBBY_KEY_COLS) * KEY_DY, 0.8f, &col_dim);
     }
+    for (i = 0; i < ONLINE_LOBBY_KEY_BUTTONS; i++) {
+        addLine(&lines[line_keybtn + i], BTN_X0 + i * BTN_DX, BTN_Y, 0.5f, &col_dim);
+    }
     for (i = 0; i < ONLINE_LOBBY_MAX_PLAYERS; i++) {
         float y = ROW_Y0 + i * ROW_DY;
         Line* row = &lines[line_rows + i * 4];
@@ -226,6 +254,12 @@ void mnOnlineLobby_Update(const OnlineLobbyView* view)
             key[0] = view->keys[i];
         }
         setLine(&lines[line_keys + i], key);
+    }
+    for (i = 0; i < ONLINE_LOBBY_KEY_BUTTONS; i++) {
+        const char* label = view->screen == LOBBY_SCREEN_KEYS && view->key_buttons[i] != NULL
+                                ? view->key_buttons[i] : "";
+        setLine(&lines[line_keybtn + i], label);
+        setColor(&lines[line_keybtn + i], view->key_button_hot == i ? &col_you : &col_dim);
     }
     {
         int lit = view->screen == LOBBY_SCREEN_KEYS ? view->key_cursor : -1;
@@ -306,6 +340,7 @@ void mnOnlineLobby_Destroy(void)
 
 #else
 
+int mnOnlineLobby_KeyHit(UNUSED float x, UNUSED float y) { return -1; }
 void mnOnlineLobby_Create(void) {}
 void mnOnlineLobby_Update(UNUSED const OnlineLobbyView* view) {}
 void mnOnlineLobby_Destroy(void) {}

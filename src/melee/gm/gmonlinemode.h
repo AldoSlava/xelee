@@ -16,6 +16,7 @@ typedef enum OnlineKind {
     ONLINE_KIND_UNRANKED = 2,
     ONLINE_KIND_RANKED = 3,
     ONLINE_KIND_PROFILE = 4,
+    ONLINE_KIND_LOGIN = 5, /* Slippi sign-in: the keyboard screen, not a match */
 } OnlineKind;
 
 void gmOnline_SetKind(OnlineKind kind);
@@ -43,6 +44,10 @@ bool gmOnline_SlippiCssFrame(void);
 bool gmOnline_SlippiCssStart(int character, int color);
 /* True while the CSS must ignore the controller (a search is running). */
 bool gmOnline_SlippiCssLocked(void);
+
+/* Where a point (640 x 480 logical pixels, as the pointer reports it) lands on
+ * the lobby's key grid: the key's index, 100 + n for the nth button, or -1. */
+int mnOnlineLobby_KeyHit(float x, float y);
 
 void gm_Scene_OnlineLobby_OnFrame(void);
 void gm_Scene_OnlineLobby_OnEnter(void*);
@@ -74,7 +79,8 @@ typedef enum OnlineLobbyPhase {
 
 /* Direct connect's own screens, drawn in place of the player list. */
 #define ONLINE_LOBBY_MENU_ROWS 8
-#define ONLINE_LOBBY_KEY_ROWS 5
+#define ONLINE_LOBBY_KEY_ROWS 6
+#define ONLINE_LOBBY_KEY_BUTTONS 3
 #define ONLINE_LOBBY_KEY_COLS 8
 
 typedef enum OnlineLobbyScreen {
@@ -93,6 +99,10 @@ typedef struct OnlineLobbyView {
     int cursor;
     const char* keys; /* KEYS: ROWS*COLS characters, row-major */
     int key_cursor;
+    /* KEYS: buttons under the grid for what has no key (Shift, Show, Next), so
+     * a pointer can press them; a NULL label is not drawn. */
+    const char* key_buttons[ONLINE_LOBBY_KEY_BUTTONS];
+    int key_button_hot; /* the one the pointer is over, or -1 */
     const char* hint; /* the button line, or NULL for the default */
     OnlineLobbyPhase phase;
     OnlineLobbyPlayer players[ONLINE_LOBBY_MAX_PLAYERS];

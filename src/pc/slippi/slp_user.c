@@ -303,6 +303,23 @@ bool pc_slippi_connect_code_normalize(const char* in, char* out, size_t cap) {
     return pc_slippi_connect_code_valid(out);
 }
 
+/* Signing out has to stick: without a marker the next load would find the
+ * Launcher's own user.json again and sign straight back in. */
+static void signed_out_marker_path(char* out, size_t cap) {
+    snprintf(out, cap, "%s/signed-out", pc_slippi_user_dir());
+}
+
+static bool signed_out_marker_exists(void) {
+    char path[1200];
+    signed_out_marker_path(path, sizeof path);
+    FILE* f = fopen(path, "rb");
+    if (f == NULL) {
+        return false;
+    }
+    fclose(f);
+    return true;
+}
+
 bool pc_slippi_account_load(PcSlippiAccount* out, bool rediscover) {
     account_clear(out);
     char path[1200];
@@ -312,7 +329,7 @@ bool pc_slippi_account_load(PcSlippiAccount* out, bool rediscover) {
     if (read_file(path, buf, sizeof buf, &len) && pc_slippi_account_from_json(buf, len, out)) {
         return true;
     }
-    if (rediscover) {
+    if (rediscover && !signed_out_marker_exists()) {
         return pc_slippi_account_discover(out);
     }
     return false;
@@ -334,6 +351,11 @@ bool pc_slippi_account_save(const PcSlippiAccount* a) {
     }
     bool ok = fwrite(buf, 1, n, f) == n;
     fclose(f);
+    if (ok) {
+        char marker[1200];
+        signed_out_marker_path(marker, sizeof marker);
+        remove(marker); /* signing in again lifts a sign-out */
+    }
     return ok;
 }
 
@@ -341,6 +363,13 @@ void pc_slippi_account_forget(void) {
     char path[1200];
     snprintf(path, sizeof path, "%s/slippi-account.json", pc_slippi_user_dir());
     remove(path);
+    SDL_CreateDirectory(pc_slippi_user_dir());
+    char marker[1200];
+    signed_out_marker_path(marker, sizeof marker);
+    FILE* f = fopen(marker, "wb");
+    if (f != NULL) {
+        fclose(f);
+    }
 }
 
 /* ---- Launcher discovery (desktop convenience) ------------------------- */

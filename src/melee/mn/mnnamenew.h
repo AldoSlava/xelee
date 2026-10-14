@@ -34,6 +34,23 @@
 /* 23E630 */ void mnNameNew_EnterFromMnName(int count);
 /* 23E6D0 */ void mnNameNew_EnterFromMnCharSel(HSD_Archive*, s32);
 /* 23EA08 */ void mnNameNew_8023EA08(UNK_T);
+#ifdef TARGET_PC
+/* Slippi's keyboard: the Name Entry screen with ASCII text in it, opened from
+ * a scene that has MnExtAll loaded (as the CSS does). `done` is called when the
+ * entry ends: `confirmed` false for Back; returning false from a confirm keeps
+ * the screen up (the text was refused). The text is `max_len` characters at
+ * most and masked with '*' when `mask`. */
+typedef bool (*MnNameNewDoneFn)(bool confirmed, const char* text, void* user);
+/* Y fills the entry with what this returns (a code from the clipboard or the
+ * last opponent), or does nothing when it returns NULL. */
+typedef const char* (*MnNameNewFillFn)(void* user);
+/* `css`: the screen is opened from the CSS, so on leaving it the CSS is built
+ * again (as it is when a nametag entry ends) before `done` runs. */
+void mnNameNew_PcOpen(HSD_Archive* ext_all, const char* initial, int max_len, bool mask,
+                      const char* description, MnNameNewDoneFn done, MnNameNewFillFn fill,
+                      bool css, void* user);
+bool mnNameNew_PcActive(void);
+#endif
 /* 3EE720 */ extern char* mnNameNew_803EE720[];
 /* 3EE724 */ extern char* mnNameNew_803EE724[];
 

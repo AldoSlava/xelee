@@ -5768,6 +5768,11 @@ void mnCharSel_Scene_OnFrame(void)
     PAD_STACK(8);
 
 #ifdef TARGET_PC
+    if (mnNameNew_PcActive()) {
+        /* The keyboard is up: the CSS under it is freed and idle. */
+        mnCharSel_804D6CEC += 1;
+        return;
+    }
     mnCharSel_HideOnlineRemote();
     if (gmOnline_SlippiFlow()) {
         bool leave = gmOnline_SlippiCssFrame();
@@ -5915,8 +5920,11 @@ void mnCharSel_Scene_OnFrame(void)
                 mnCharSel_804D6CB0->vs.start.players[0].ckind,
                 mnCharSel_804D6CB0->vs.start.players[0].color))
         {
-            /* Slippi's flow keeps the CSS up and searches from it. */
-            mnCharSel_804D6CF6 = 0;
+            /* Slippi's flow keeps the CSS up: it searches from it, or (Direct)
+             * has opened the keyboard, which holds the CSS idle (CF6 = 5). */
+            if (mnCharSel_804D6CF6 == 1) {
+                mnCharSel_804D6CF6 = 0;
+            }
             mnCharSel_804D6CF2 = 0;
             sfxForward();
             break;
@@ -5955,6 +5963,28 @@ void mnCharSel_Scene_OnFrame(void)
 bool mnCharSel_SlippiStartReady(void)
 {
     return mnCharSel_804D6CF7 != 0;
+}
+
+/* Slippi's Direct: the connect code is typed on the Name Entry screen, opened
+ * from the CSS the way it is for a nametag, and the CSS is built again when it
+ * ends (mnnamenew.c). */
+void mnCharSel_SlippiKeyboard(const char* initial, int max_len, const char* description,
+                              MnNameNewDoneFn done, MnNameNewFillFn fill, void* user)
+{
+    mnOnlineCss_Destroy();
+    mn_8022F138(1, 8);
+    HSD_SisLib_803A5E70();
+    mnNameNew_PcOpen(mnCharSel_804D6CD4, initial, max_len, false, description, done, fill, true,
+                     user);
+    mnCharSel_804D6CF6 = 5;
+}
+
+/* The CSS is up again after the keyboard: put the Slippi text back. */
+void mnCharSel_SlippiAfterKeyboard(void)
+{
+    if (gmOnline_SlippiFlow()) {
+        mnOnlineCss_Create(css_text_ctx);
+    }
 }
 #endif
 

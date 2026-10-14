@@ -311,6 +311,9 @@ static float mn_803EB3CC[] = {
 
 static AnimLoopSettings mn_803EB3FC[] = { { 0, 49, 20 },
                                           { 50, 99, 70 },
+#ifdef TARGET_PC
+                                          { 700, 749, 720 }, /* Online Play: the Melee preview */
+#endif
                                           { 100, 149, 120 },
                                           { 150, 199, 170 },
                                           { 200, 249, 220 } };
@@ -327,9 +330,6 @@ static AnimLoopSettings mn_803EB480 = { 3500, 3549, 3520 };
 static AnimLoopSettings mn_803EB48C[] = {
     { 700, 749, 720 }, { 750, 799, 770 }, { 800, 849, 820 },
     { 850, 899, 870 }, { 900, 949, 920 },
-#ifdef TARGET_PC
-    { 700, 749, 720 }, /* SEL_VS_ONLINE: reuse the Melee preview */
-#endif
 };
 
 #ifdef TARGET_PC
@@ -337,8 +337,8 @@ static AnimLoopSettings mn_803EB48C[] = {
 static AnimLoopSettings mn_OnlinePreview[2] = {
     { 700, 749, 720 }, { 700, 749, 720 },
 };
-static AnimLoopSettings mn_OnlineSlippiPreview[2] = {
-    { 700, 749, 720 }, { 700, 749, 720 },
+static AnimLoopSettings mn_OnlineSlippiPreview[3] = {
+    { 700, 749, 720 }, { 700, 749, 720 }, { 700, 749, 720 },
 };
 #endif
 
@@ -384,7 +384,12 @@ static AnimLoopSettings mn_803EB5E8[] = {
     { 2900, 2949, 2920 },
 };
 
+#ifdef TARGET_PC
+/* the Online Play row (index 2) has literal text, so its id is never read */
+static u16 mn_803EB660[] = { 0x81, 0x82, 0x82, 0x83, 0x84, 0x85, 0x00 };
+#else
 static u16 mn_803EB660[] = { 0x81, 0x82, 0x83, 0x84, 0x85, 0x00 };
+#endif
 static u16 mn_803EB66C[] = { 0x86, 0x87, 0x88, 0x89, 0x8A, 0x00 };
 static u16 mn_803EB678[] = { 0x8E, 0x8F, 0x90, 0x91, 0x92, 0x00 };
 static u16 mn_803EB684[] = { 0x9A, 0x9B, 0x9C, 0x9D, 0x9D, 0x9E };
@@ -412,7 +417,11 @@ MenuKindData mn_803EB6B0[MENU_KIND_TABLE_LEN] = {
         mn_803EB3FC,
         0,
         mn_803EB660,
+#ifdef TARGET_PC
+        0x06, /* + SEL_MAIN_ONLINE */
+#else
         0x05,
+#endif
         mn_8022DB10,
     },
     {
@@ -426,11 +435,7 @@ MenuKindData mn_803EB6B0[MENU_KIND_TABLE_LEN] = {
         mn_803EB48C,
         40,
         mn_803EB678,
-#ifdef TARGET_PC
-        0x06, /* + SEL_VS_ONLINE */
-#else
         0x05,
-#endif
         mn_8022D594,
     },
     {
@@ -1621,8 +1626,16 @@ void fn_8022AFEC(HSD_GObj* gp)
 }
 
 /// @brief frame offset of a selection's cursor animation
-static inline int GetSelectionFrameOffset(int selection)
+static inline int GetSelectionFrameOffset(MenuKind kind, int selection)
 {
+#ifdef TARGET_PC
+    /* Online Play sits third on the main menu and has no label texture; the
+     * rows below it keep the textures of the vanilla rows they came from. */
+    if (kind == MENU_KIND_MAIN && selection > SEL_MAIN_ONLINE) {
+        return 2 * (selection - 1);
+    }
+#endif
+    (void) kind;
     return 2 * selection;
 }
 
@@ -1666,6 +1679,13 @@ HSD_GObj* mn_8022B3A0(u8 state)
     PAD_STACK(16);
 
     cur_menu = mn_804A04F0.cur_menu;
+#ifdef TARGET_PC
+    if (cur_menu == MENU_KIND_ONLINE_SLIPPI) {
+        /* Login alone signed out; Unranked, Direct and Logout signed in. */
+        mn_803EB6B0[MENU_KIND_ONLINE_SLIPPI].selection_count = (u8) mnOnline_SlippiCount();
+        mnOnline_SlippiBuilt();
+    }
+#endif
     /// @todo Idiomatic spellings put the pointer in a named local, not a temp.
     anim_loop = (AnimLoopSettings*) ((u8*) mn_803EB6B0[cur_menu].anim_loop +
                                      sizeof(AnimLoopSettings)) -
@@ -1738,7 +1758,7 @@ HSD_GObj* mn_8022B3A0(u8 state)
             HSD_JObjAnimAll(jobj.value);
             HSD_JObjReqAnim(jobj.value,
                             mn_803EB6B0[mn_804A04F0.cur_menu].start_frame +
-                                GetSelectionFrameOffset(i));
+                                GetSelectionFrameOffset(mn_804A04F0.cur_menu, i));
             mn_8022F3D8(jobj.value, 0xC, TOBJ_MASK);
             mn_8022F3D8(jobj.value, 0xD, TOBJ_MASK);
             mn_8022F3D8(jobj.value, 0xE, TOBJ_MASK);
@@ -1978,7 +1998,12 @@ GXColor* mn_8022BFBC(int arg0)
 int mn_8022C010(int menu_kind, int selection)
 {
     if (menu_kind == MENU_KIND_MAIN) {
+#ifdef TARGET_PC
+        /* Online Play shares VS. Mode's colour; the rows below keep theirs. */
+        return selection <= SEL_MAIN_VS ? selection : selection == SEL_MAIN_ONLINE ? 1 : selection - 1;
+#else
         return selection;
+#endif
     }
     switch (menu_kind) {
     case MENU_KIND_1P:
@@ -2764,12 +2789,6 @@ void mn_8022D594(HSD_GObj* gp)
             data->pending_mode = GM_TOURNAMENT;
             gm_801A4B60();
             break;
-#ifdef TARGET_PC
-        case SEL_VS_ONLINE:
-            sfxForward();
-            mn_80229894(MENU_KIND_ONLINE, SEL_ONLINE_SLIPPI, 1);
-            break;
-#endif
         case SEL_VS_SPECIAL:
             sfxForward();
             mn_804D6BC8.cooldown = 5;
@@ -2964,6 +2983,12 @@ void mn_8022DB10(HSD_GObj* gp)
             menu_kind = MENU_KIND_VS;
             hovered_selection = 0;
             break;
+#ifdef TARGET_PC
+        case SEL_MAIN_ONLINE:
+            menu_kind = MENU_KIND_ONLINE;
+            hovered_selection = 0;
+            break;
+#endif
         case SEL_MAIN_TOY:
             menu_kind = MENU_KIND_TOY;
             hovered_selection = 0;

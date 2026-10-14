@@ -17,7 +17,11 @@
 #include "types.h"
 #include <dolphin/pad.h>
 #include <melee/if/if_2FD9.h>
+#include <melee/lb/lbarchive.h>
+#include <melee/lb/lblanguage.h>
 #include <melee/lb/lbaudio_ax.h>
+#include <melee/mn/mnmain.h>
+#include <melee/mn/mnnamenew.h>
 #include <melee/lb/lbdvd.h>
 #include <melee/lb/types.h>
 #include <melee/mn/inlines.h>
@@ -25,12 +29,14 @@
 #include <sysdolphin/baselib/controller.h>
 #include <sysdolphin/baselib/random.h>
 #ifdef TARGET_PC
+#include <SDL3/SDL.h>
 #include "pc/net.h"
 #include "pc/net_lan.h"
 #include "pc/net_identity.h"
 #include "pc/net_match.h"
 #include "pc/slippi/slp_user.h"
 #include "pc/net_rank_session.h"
+#include "pc/xr_pointer.h"
 extern bool pc_net_slippi_active(void);
 extern const char* pc_get_net_target(void);
 extern void pc_set_net_target(const char* code);
@@ -422,6 +428,46 @@ bool gmOnline_SlippiCssLocked(void)
     return slippiFlow() && slpcss_state == SLPCSS_SEARCH;
 }
 
+static void directCall(const char* code);
+extern void mnCharSel_SlippiKeyboard(const char* initial, int max_len, const char* description,
+                                     MnNameNewDoneFn done, MnNameNewFillFn fill, void* user);
+static char slpcss_code[16]; /* the last code typed, so a refused one can be fixed */
+
+/* The Name Entry screen ended: a good code starts the call, and the CSS shows
+ * the search. */
+static bool slpDirectDone(bool confirmed, const char* text, UNUSED void* user)
+{
+    char code[PC_SLIPPI_CONNECT_CODE_MAX];
+    if (!confirmed) {
+        return true;
+    }
+    snprintf(slpcss_code, sizeof slpcss_code, "%s", text);
+    if (!pc_slippi_connect_code_normalize(text, code, sizeof code)) {
+        snprintf(slpcss_notice, sizeof slpcss_notice, "A code looks like NAME#123");
+        return true;
+    }
+    pc_net_peer_status_clear();
+    directCall(code);
+    slpcss_state = SLPCSS_SEARCH;
+    pc_log_line("css: direct call to %s", code);
+    return true;
+}
+
+/* Y fills the entry: a code on the clipboard, else the last one played. */
+static const char* slpDirectFill(UNUSED void* user)
+{
+    static char code[18];
+    PcNetContact last;
+    if (pc_net_match_clipboard_code(code)) {
+        return code;
+    }
+    if (pc_net_match_contacts(&last, 1) > 0) {
+        snprintf(code, sizeof code, "%s", last.code);
+        return code;
+    }
+    return NULL;
+}
+
 bool gmOnline_SlippiCssStart(int character, int color)
 {
     if (!slippiFlow()) {
@@ -432,7 +478,10 @@ bool gmOnline_SlippiCssStart(int character, int color)
     pc_net_match_set_slippi_pick((uint8_t) character, (uint8_t) color);
     slippi_picked = true;
     if (online_kind == ONLINE_KIND_DIRECT) {
-        return false; /* the code is typed on the lobby's keyboard */
+        /* The code is typed on Melee's Name Entry screen, straight from here. */
+        mnCharSel_SlippiKeyboard(slpcss_code, 11, "Enter your opponent's code. Y: fill  L/R: shift",
+                                 slpDirectDone, slpDirectFill, NULL);
+        return true;
     }
     pc_net_peer_status_clear();
     pc_net_match_start(PC_MATCH_UNRANKED, NULL);
@@ -807,6 +856,7 @@ static void profileRefresh(void) {
 }
 static bool internetLobby(void) {
     return online_kind != ONLINE_KIND_LAN && online_kind != ONLINE_KIND_PROFILE &&
+           online_kind != ONLINE_KIND_LOGIN &&
            !(online_kind == ONLINE_KIND_DIRECT && getenv("MELEE_LAN_DIRECT"));
 }
 
@@ -1024,6 +1074,27 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
     const int nkeys = directKeyCount();
     const int maxlen = slp ? DIRECT_SLIPPI_MAX : DIRECT_SUFFIX;
     int len = (int) strlen(direct_suffix);
+    {
+        /* The pointer follows the keys, its click types one; "Call" is START. */
+        float px, py;
+        bool leads = false;
+        int hit = -1;
+        view->key_button_hot = -1;
+        if (pc_xr_pointer_at(&px, &py, &leads)) {
+            hit = mnOnlineLobby_KeyHit(px, py);
+            if ((hit >= nkeys && hit < 100) || (hit >= 100 && hit != 102)) {
+                hit = -1;
+            }
+            pc_xr_pointer_target(hit >= 0);
+            if (leads && hit >= 0 && hit < 100) {
+                direct_key = hit;
+            }
+            view->key_button_hot = leads && hit == 102 ? 2 : -1;
+            if (leads && hit == 102 && (input & HSD_PAD_A)) {
+                input = (input & ~(u64) HSD_PAD_A) | HSD_PAD_START;
+            }
+        }
+    }
     if (repeat & PAD_ANY_LEFT) {
         direct_key = direct_key / ONLINE_LOBBY_KEY_COLS * ONLINE_LOBBY_KEY_COLS +
                      (direct_key + ONLINE_LOBBY_KEY_COLS - 1) % ONLINE_LOBBY_KEY_COLS;
@@ -1097,6 +1168,7 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
     view->keys = keys;
     view->key_cursor = direct_key;
     view->menu_count = 1;
+    view->key_buttons[2] = "Call";
     if (slp) {
         snprintf(buf, sizeof buf, "Friend's code   %s_", direct_suffix);
         snprintf(view->menu[0], sizeof view->menu[0], "%s", buf);
@@ -1118,8 +1190,213 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
 }
 #endif
 
+#ifdef TARGET_PC
+/* ---- Slippi sign-in ---------------------------------------------------
+ * Online Play > Slippi > Login: the email, then the password, typed on Melee's
+ * own Name Entry screen (mnNameNew_PcOpen), as Slippi's Direct keyboard is.
+ * The sign-in itself is blocking HTTPS (pc_slippi_account_login), so it runs
+ * on a thread; the lobby view shows "Signing in..." and the result. A
+ * password is kept only until the request is sent. */
+enum { LOGIN_ENTRY, LOGIN_BUSY, LOGIN_DONE, LOGIN_FAIL };
+#define LOGIN_FIELD_MAX 90
+
+typedef struct LoginJob {
+    char email[LOGIN_FIELD_MAX + 1];
+    char password[LOGIN_FIELD_MAX + 1];
+    PcSlippiAccount account;
+    char error[160];
+    SDL_AtomicInt done;
+    bool ok;
+} LoginJob;
+
+static int login_step;
+static char login_email[LOGIN_FIELD_MAX + 1];
+static char login_message[ONLINE_LOBBY_MSG_LEN];
+static LoginJob* login_job;
+static SDL_Thread* login_thread;
+static HSD_Archive* login_ext;
+static bool login_view; /* the lobby view (status text) is up */
+
+static bool loginEmailDone(bool confirmed, const char* text, void* user);
+static bool loginPasswordDone(bool confirmed, const char* text, void* user);
+
+static int loginThread(void* user)
+{
+    LoginJob* job = user;
+    job->ok = pc_slippi_account_login(job->email, job->password, &job->account, job->error,
+                                      sizeof job->error);
+    memset(job->password, 0, sizeof job->password);
+    SDL_SetAtomicInt(&job->done, 1);
+    return 0;
+}
+
+static void loginOpenEmail(void)
+{
+    login_step = LOGIN_ENTRY;
+    mnNameNew_PcOpen(login_ext, login_email, LOGIN_FIELD_MAX, false,
+                     "Enter the email of your Slippi account.", loginEmailDone, NULL, false, NULL);
+}
+
+static void loginOpenPassword(void)
+{
+    login_step = LOGIN_ENTRY;
+    mnNameNew_PcOpen(login_ext, "", LOGIN_FIELD_MAX, true,
+                     "Enter your password. L/R: shift.", loginPasswordDone, NULL, false, NULL);
+}
+
+static void loginLeave(void)
+{
+    gm_ChangeGameModeAfterCurrentScene(GM_MENU);
+    gm_801A4B60();
+}
+
+/* The status view (the lobby's panel and text) for busy, done and failed. */
+static void loginShowView(void)
+{
+    if (!login_view) {
+        mnOnlineLobby_Create();
+        login_view = true;
+    }
+}
+
+static void loginHideView(void)
+{
+    if (login_view) {
+        mnOnlineLobby_Destroy();
+        HSD_SisLib_803A5E70();
+        mn_8022EBDC();
+        login_view = false;
+    }
+}
+
+static bool loginEmailDone(bool confirmed, const char* text, UNUSED void* user)
+{
+    if (!confirmed) {
+        loginLeave();
+        return true;
+    }
+    snprintf(login_email, sizeof login_email, "%s", text);
+    if (strchr(login_email, '@') == NULL) {
+        /* Not an email: back to the same entry. */
+        loginOpenEmail();
+        return true;
+    }
+    loginOpenPassword();
+    return true;
+}
+
+static bool loginPasswordDone(bool confirmed, const char* text, UNUSED void* user)
+{
+    if (!confirmed) {
+        loginOpenEmail();
+        return true;
+    }
+    login_job = calloc(1, sizeof *login_job);
+    if (login_job != NULL) {
+        snprintf(login_job->email, sizeof login_job->email, "%s", login_email);
+        snprintf(login_job->password, sizeof login_job->password, "%s", text);
+        login_thread = SDL_CreateThread(loginThread, "slippi login", login_job);
+    }
+    if (login_thread == NULL) {
+        free(login_job);
+        login_job = NULL;
+        login_step = LOGIN_FAIL;
+        snprintf(login_message, sizeof login_message, "Could not start the sign-in");
+    } else {
+        login_step = LOGIN_BUSY;
+    }
+    loginShowView();
+    return true;
+}
+
+static void loginBegin(void)
+{
+    login_step = LOGIN_ENTRY;
+    login_email[0] = '\0';
+    login_message[0] = '\0';
+    login_view = false;
+    if (!pc_slippi_account_login_available()) {
+        login_step = LOGIN_FAIL;
+        snprintf(login_message, sizeof login_message, "Online login is not set up in this build");
+        loginShowView();
+        return;
+    }
+    /* What the Name Entry screen needs: the menu text and its archive. */
+    if (lbLang_IsSavedLanguageUS()) {
+        HSD_SisLib_803A62A0(0, "SdMenu.usd", "SIS_MenuData");
+        login_ext = lbArchive_LoadArchive("MnExtAll.usd");
+    } else {
+        HSD_SisLib_803A62A0(0, "SdMenu.dat", "SIS_MenuData");
+        login_ext = lbArchive_LoadArchive("MnExtAll.dat");
+    }
+    loginOpenEmail();
+}
+
+static void loginEnd(void)
+{
+    if (login_ext != NULL) {
+        lbArchive_80016EFC(login_ext);
+        login_ext = NULL;
+    }
+}
+
+/* One frame of the status view; the keyboard runs its own procs. */
+static void loginFrame(OnlineLobbyView* view, u64 input)
+{
+    view->title = "SLIPPI LOGIN";
+    view->phase = LOBBY_PHASE_FOUND;
+    view->screen = LOBBY_SCREEN_PLAYERS;
+    if (login_step == LOGIN_BUSY) {
+        view->phase = LOBBY_PHASE_CONNECTING;
+        snprintf(view->message, sizeof view->message, "Signing in...");
+        view->hint = "Please wait";
+        if (login_job != NULL && SDL_GetAtomicInt(&login_job->done) != 0) {
+            SDL_WaitThread(login_thread, NULL);
+            login_thread = NULL;
+            if (login_job->ok) {
+                login_step = LOGIN_DONE;
+                snprintf(login_message, sizeof login_message, "Signed in as %.32s (%.12s)",
+                         login_job->account.display_name, login_job->account.connect_code);
+                pc_net_match_slippi_refresh();
+            } else {
+                login_step = LOGIN_FAIL;
+                snprintf(login_message, sizeof login_message, "%.90s",
+                         login_job->error[0] ? login_job->error : "Sign-in failed");
+            }
+            memset(login_job, 0, sizeof *login_job);
+            free(login_job);
+            login_job = NULL;
+        }
+        return;
+    }
+    view->phase = login_step == LOGIN_DONE ? LOBBY_PHASE_FOUND : LOBBY_PHASE_ERROR;
+    snprintf(view->message, sizeof view->message, "%s", login_message);
+    view->hint = login_step == LOGIN_DONE ? "A: continue" :
+                 pc_slippi_account_login_available() ? "A: try again   B: back" : "B: back";
+    if (input & (HSD_PAD_A | HSD_PAD_START)) {
+        sfxForward();
+        if (login_step == LOGIN_DONE) {
+            loginLeave();
+        } else if (pc_slippi_account_login_available()) {
+            loginHideView();
+            loginOpenPassword();
+        }
+    } else if (input & HSD_PAD_B) {
+        sfxBack();
+        loginLeave();
+    }
+}
+#endif
+
 void gm_Scene_OnlineLobby_OnEnter(UNUSED void* unused)
 {
+#ifdef TARGET_PC
+    if (online_kind == ONLINE_KIND_LOGIN) {
+        direct_screen = DIRECT_OFF;
+        loginBegin(); /* the keyboard builds its own screen */
+        return;
+    }
+#endif
     mnOnlineLobby_Create();
 #ifdef TARGET_PC
     direct_screen = DIRECT_OFF;
@@ -1145,6 +1422,11 @@ void gm_Scene_OnlineLobby_OnEnter(UNUSED void* unused)
 
 void gm_Scene_OnlineLobby_OnExit(UNUSED void* unused)
 {
+#ifdef TARGET_PC
+    if (online_kind == ONLINE_KIND_LOGIN) {
+        loginEnd();
+    }
+#endif
     mnOnlineLobby_Destroy();
 }
 
@@ -1276,6 +1558,17 @@ void gm_Scene_OnlineLobby_OnFrame(void)
     int n;
     u64 input = gm_GetButtonsTriggered(pc_net_active() ? pc_net_local_player() : PAD_MAX_CONTROLLERS);
 
+    if (mnNameNew_PcActive()) {
+        return; /* the keyboard runs its own procs and takes the pad */
+    }
+    if (online_kind == ONLINE_KIND_LOGIN) {
+        if (login_view) {
+            memset(&view, 0, sizeof view);
+            loginFrame(&view, input);
+            mnOnlineLobby_Update(&view);
+        }
+        return;
+    }
     if (slippiFlow() && !slippi_picked) {
         gm_801A4B60(); /* first pass: nothing to search yet, go pick */
         return;
