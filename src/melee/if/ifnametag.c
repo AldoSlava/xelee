@@ -195,12 +195,14 @@ static void slippiHudNameShow(int slot, bool show)
         t->pos_z = -10.0f;
         t->box_size_x = w;
         t->box_size_y = h;
-        t->bg_color.r = t->bg_color.g = t->bg_color.b = 0x10;
-        t->bg_color.a = 0x90;
+        /* Slippi's pill is black at about a third (measured on Dolphin: it
+         * leaves black black and takes the scene to 0.68 of its brightness) */
+        t->bg_color.r = t->bg_color.g = t->bg_color.b = 0x00;
+        t->bg_color.a = 0x52;
         t->pos_x = 54.7f + 151.3f * (float) slot;
         t->pos_y = 451.6f;
-        HSD_SisLib_803A6B98(t, w * 0.5f, -18.8f, "%s", name);
-        HSD_SisLib_803A7548(t, 0, 0.27f, 0.27f);
+        HSD_SisLib_803A6B98(t, w * 0.5f, -20.6f, "%s", name);
+        HSD_SisLib_803A7548(t, 0, 0.355f, 0.355f);
         un_hud_names[slot] = t;
     }
     t->hidden = 0;
