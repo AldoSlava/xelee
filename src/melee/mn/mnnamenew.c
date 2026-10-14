@@ -47,7 +47,7 @@ extern void mnCharSel_SlippiAfterKeyboard(void); /* mncharsel.c */
  * letters to lowercase. Entered through mnNameNew_PcOpen; every Melee name
  * path below is left as it was and stays out of the way while `active`. */
 #define PC_NAME_MAX 96
-#define PC_NAME_SHOWN 8 /* characters the entry box shows, from the end */
+#define PC_NAME_SHOWN 16 /* characters the entry box shows, from the end (a leading ".." says more is typed) */
 static struct {
     bool active;
     char text[PC_NAME_MAX + 1];
@@ -66,6 +66,38 @@ static struct {
 } s_pc;
 
 static void pc_finish(bool confirmed);
+
+/* Button hints as Slippi shows them, small chips in the panel's lower
+ * corners instead of lines of text: a chip is a text box with a background
+ * colour, the button's name in it. The left one says what L and R do. */
+static void pc_chip(float x, float y, float w, const char* label, GXColor bg)
+{
+    HSD_Text* text = HSD_SisLib_803A6754(0, (s32) mn_804D6BB4);
+    text->pos_x = x;
+    text->pos_y = y;
+    text->pos_z = 17.0f;
+    text->box_size_x = w / 0.02f;
+    text->box_size_y = 1.5f / 0.02f;
+    text->font_size.x = 0.02f;
+    text->font_size.y = 0.02f;
+    text->default_kerning = 1;
+    text->default_alignment = 1;
+    text->bg_color = bg;
+    text->text_color.r = text->text_color.g = text->text_color.b = text->text_color.a = 0xFF;
+    HSD_SisLib_803A6B98(text, w / 0.02f * 0.5f, 0.3f / 0.02f, "%s", label);
+}
+
+static void pc_make_chips(void)
+{
+    GXColor gray = { 0x68, 0x68, 0x78, 0xF0 };
+    GXColor purple = { 0x70, 0x38, 0xB0, 0xF0 };
+    if (s_pc.shiftable) {
+        pc_chip(-14.8f, 9.0f, 4.4f, "L R  SHIFT", gray);
+    }
+    if (s_pc.fill != NULL) {
+        pc_chip(10.4f, 9.0f, 4.6f, "Y  AUTO FILL", purple);
+    }
+}
 
 /* Keys run down columns, right to left: key j is column 9 - j / 5, row j % 5. */
 static const char* const pc_rows[5] = {
@@ -365,6 +397,7 @@ void mnNameNew_8023B314(NameNewEntry* arg0, s32 arg1)
             text->font_size.x = 0.022f;
             text->font_size.y = 0.022f;
             HSD_SisLib_803A6B98(text, 0.0f, 0.0f, "%s", s_pc.desc);
+            pc_make_chips();
         }
         return;
     }
@@ -1555,12 +1588,16 @@ void mnNameNew_8023CE4C(void)
     if (s_pc.active) {
         /* The entry box shows the end of what is typed, narrow, with a
          * trailing underscore for the caret; a mask shows stars. */
-        char shown[PC_NAME_SHOWN * 2 + 2];
+        char shown[PC_NAME_SHOWN * 2 + 6];
         int len = (int) strlen(s_pc.text);
-        int from = len > PC_NAME_SHOWN ? len - PC_NAME_SHOWN : 0;
+        int from = len > PC_NAME_SHOWN ? len - (PC_NAME_SHOWN - 2) : 0;
         int n = 0;
         int k;
-        for (k = from; k < len && k - from < PC_NAME_SHOWN; k++) {
+        if (from > 0) {
+            shown[n++] = '.';
+            shown[n++] = '.';
+        }
+        for (k = from; k < len; k++) {
             char c = s_pc.mask ? '*' : s_pc.text[k];
             if (c == '$') {
                 shown[n++] = '\x81'; /* the font has no ASCII dollar */
@@ -1576,11 +1613,11 @@ void mnNameNew_8023CE4C(void)
         }
         text = HSD_SisLib_803A6754(0, mn_804D6BB5);
         lb_8000B1CC(jobj_a, &mnNameNew_803EE330, &text_pos);
-        text->pos_x = text_pos.x;
+        text->pos_x = text_pos.x - 0.9f; /* start at the box's left edge */
         text->pos_y = -text_pos.y;
         text->pos_z = text_pos.z;
-        text->font_size.x = 0.026f;
-        text->font_size.y = 0.05f;
+        text->font_size.x = 0.02f;
+        text->font_size.y = 0.047f;
         text->text_color = mnNameNew_804D4F6C;
         HSD_SisLib_803A6B98(text, 0.0f, 0.0f, "%s", shown);
         data->name_disp_text = text;

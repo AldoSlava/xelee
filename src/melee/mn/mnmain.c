@@ -3,6 +3,9 @@
 #include <melee/gm/forward.h>
 
 #include <math.h>
+#ifdef TARGET_PC
+#include "pc/pc.h"
+#endif
 
 #include "forward.h"
 #include "inlines.h"
@@ -940,14 +943,84 @@ static inline void mn_80229A7C_dontinline(void* arg0, int arg1, int arg2)
 }
 
 #ifdef TARGET_PC
+/* The stock labels are textures on the entry's own model, so they lean with
+ * it (the bars sit at a slight angle in 3D, plainest on Trophies). The drawn
+ * labels take the same lean: before the glyphs go out, the text's position
+ * matrix is turned by the entry joint's world rotation about the label's
+ * centre. */
+static struct {
+    HSD_Text* text;
+    HSD_JObj* jobj;
+} mn_pcLabelFollow[8];
+static HSD_JObj* mn_pcLabelPart[8];
+
+static void mn_PcLabelLean(void* gobj_)
+{
+    HSD_GObj* gobj = gobj_;
+    HSD_Text* text = HSD_GObjGetUserData(gobj);
+    HSD_JObj* jobj = NULL;
+    Mtx view, rot, out;
+    float a[3], len;
+    int c, r, i;
+
+    for (i = 0; i < (int) ARRAY_SIZE(mn_pcLabelFollow); i++) {
+        if (mn_pcLabelFollow[i].text == text) {
+            jobj = mn_pcLabelFollow[i].jobj;
+        }
+    }
+    if (jobj == NULL || mn_804D6BAC == NULL) {
+        return;
+    }
+    a[0] = jobj->mtx[0][3];
+    a[1] = jobj->mtx[1][3];
+    a[2] = jobj->mtx[2][3];
+    for (c = 0; c < 3; c++) {
+        len = sqrtf(jobj->mtx[0][c] * jobj->mtx[0][c] + jobj->mtx[1][c] * jobj->mtx[1][c] +
+                    jobj->mtx[2][c] * jobj->mtx[2][c]);
+        if (len < 1e-4f) {
+            return;
+        }
+        for (r = 0; r < 3; r++) {
+            rot[r][c] = jobj->mtx[r][c] / len;
+        }
+    }
+    {
+        /* The stock label textures lean right a little (about 3 degrees) and sit a hair
+         * off level; the joint's own turn is only the tilt. Shear x by y and
+         * turn about z, in the joint's frame, before the tilt. */
+        const float k = 0.05f, z = -0.01f;
+        const float cz = cosf(z), sz = sinf(z);
+        Mtx lean = { { cz + k * sz, -sz + k * cz, 0.0f, 0.0f },
+                     { sz, cz, 0.0f, 0.0f },
+                     { 0.0f, 0.0f, 1.0f, 0.0f } };
+        Mtx tilt;
+        for (r = 0; r < 3; r++) {
+            for (c = 0; c < 3; c++) {
+                tilt[r][c] = rot[r][0] * lean[0][c] + rot[r][1] * lean[1][c] + rot[r][2] * lean[2][c];
+            }
+        }
+        for (r = 0; r < 3; r++) {
+            for (c = 0; c < 3; c++) {
+                rot[r][c] = tilt[r][c];
+            }
+            rot[r][3] = a[r] - (rot[r][0] * a[0] + rot[r][1] * a[1] + rot[r][2] * a[2]);
+        }
+    }
+    HSD_CObjGetViewingMtx(HSD_CObjGetCurrent(), view);
+    MTXConcat(view, rot, out);
+    GXLoadPosMtxImm(out, 0);
+}
+
 /* ponytail: PC-only entries (mnonline.h) have no label texture. mn_8022B3A0
  * hides their slot's matanim label and this draws SIS text over the slot
  * every frame (the tree animates). Freed with the description on slide-out. */
 static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
 {
-    static const GXColor hovered = { 0x28, 0x28, 0x28, 0xFF };
-    static const GXColor idle = { 0xFF, 0xD2, 0x50, 0xFF };
-    const float label_size = 0.033f;
+    /* Sampled from the stock labels: near-black on the lit bar, and the dark
+     * gold of the others. */
+    static const GXColor hovered = { 0x08, 0x06, 0x00, 0xFF };
+    static const GXColor idle = { 0xCA, 0x97, 0x32, 0xFF };
+    const float label_size = 0.046f;
     int i;
 
     if (alive && data->description != NULL) {
@@ -963,6 +1036,7 @@ static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
 
         if (label == NULL) {
             if (text != NULL) {
+                mn_pcLabelFollow[i].text = NULL;
                 HSD_SisLib_803A5CC4(text);
                 data->pc_label[i] = NULL;
             }
@@ -976,6 +1050,9 @@ static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
             text->font_size.x = label_size;
             text->font_size.y = label_size;
             HSD_SisLib_803A6B98(text, 0.0f, 0.0f, "%s", label);
+            mn_pcLabelFollow[i].text = text;
+            mn_pcLabelFollow[i].jobj = data->tree[mn_803EAE68[i]];
+            text->render_callback = mn_PcLabelLean;
         }
         lb_8000B1CC(data->tree[mn_803EAE68[i]], NULL, &pos);
         text->pos_x = pos.x;
@@ -1789,8 +1866,10 @@ HSD_GObj* mn_8022B3A0(u8 state)
             }
 #ifdef TARGET_PC
             if (mnOnline_Label(mn_804A04F0.cur_menu, i) != NULL) {
-                /* no label texture; mn_UpdatePcLabels draws SIS text */
+                /* no label texture; mn_UpdatePcLabels draws SIS text, leaning
+                 * as this (hidden) label joint would */
                 HSD_JObjSetFlagsAll(cursor_parts[1], JOBJ_HIDDEN);
+                mn_pcLabelPart[unlocked_index < 8 ? unlocked_index : 7] = cursor_parts[1];
             }
 #endif
             HSD_JObjAddChild(option_jobjs[unlocked_index], cursor_jobj);
