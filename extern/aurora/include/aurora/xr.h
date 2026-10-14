@@ -54,6 +54,13 @@ enum { AURORA_XR_MONO = 0, AURORA_XR_WORLD = 1, AURORA_XR_HUD = 2, AURORA_XR_HID
  * in game units. Lapses 250 ms after the last call. Any thread. */
 void aurora_xr_menu_window(float dist, float plane_height);
 
+/* Menu window only: the following AURORA_XR_WORLD draws pop out of the window.
+ * They are scaled by `scale` (below 1; 1 or more: none) about the head, in the
+ * room, so they keep their place in the picture as seen from the head and sit
+ * that much nearer to it. Takes the place of aurora_xr_world_transform (and
+ * clears it). Same thread and FIFO ordering as aurora_xr_camera. */
+void aurora_xr_menu_pop(float scale);
+
 /* Lock-step pacing: when the headset runs at a multiple of 60 Hz, blocks
  * until it is time for the next game frame (every display frame at 60 Hz,
  * every other at 120 Hz) and returns true; the caller then skips its own

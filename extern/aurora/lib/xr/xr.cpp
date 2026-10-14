@@ -4535,7 +4535,7 @@ struct Renderer3D {
   // The menu window's hard edge: clears everything outside the screen's
   // rectangle as each eye sees it (maskData: per eye four NDC corners, then
   // the viewport's size).
-  wgpu::RenderPipeline maskPipeline;
+  wgpu::RenderPipeline maskOutside, maskInside;
   wgpu::Buffer maskBuf;
   wgpu::BindGroup maskGroup;
   std::array<float, 36> maskData{};
@@ -4851,9 +4851,11 @@ constexpr char kCoverageShader[] = R"(
 @fragment fn fs_set() -> @location(0) vec4f { return vec4f(0.0, 0.0, 0.0, 1.0); }
 )";
 
-// Wipes (all channels, so the room shows) what is outside the window's
-// rectangle in the eye's image. corners: the rectangle's NDC corners in
-// order, eye 0 then eye 1; size: the viewport in pixels.
+// The menu window's edge, per eye: outside the screen rectangle the image is
+// wiped (all channels, so the room shows); inside, alpha is set to 1 (menu
+// draws write no depth, so the coverage the fights use would leave the window
+// see-through). corners: the rectangle's NDC corners in order, eye 0 then
+// eye 1; size: the viewport in pixels.
 constexpr char kMaskShader[] = R"(
 enable chromium_experimental_multiview;
 struct Mask { corners: array<vec4f, 8>, size: vec4f };
@@ -4863,7 +4865,7 @@ struct VOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) eye
   let uv = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
   return VOut(vec4f(uv * 2.0 - 1.0, 0.0, 1.0), v);
 }
-@fragment fn fs(in: VOut) -> @location(0) vec4f {
+fn inside(in: VOut) -> bool {
   let p = vec2f(in.pos.x / mask.size.x * 2.0 - 1.0, 1.0 - in.pos.y / mask.size.y * 2.0);
   var pos = 0u;
   var neg = 0u;
@@ -4874,8 +4876,15 @@ struct VOut { @builtin(position) pos: vec4f, @location(0) @interpolate(flat) eye
     pos = pos + select(0u, 1u, c >= 0.0);
     neg = neg + select(0u, 1u, c <= 0.0);
   }
-  if (pos == 4u || neg == 4u) { discard; }
+  return pos == 4u || neg == 4u;
+}
+@fragment fn fs_outside(in: VOut) -> @location(0) vec4f {
+  if (inside(in)) { discard; }
   return vec4f(0.0, 0.0, 0.0, 0.0);
+}
+@fragment fn fs_inside(in: VOut) -> @location(0) vec4f {
+  if (!inside(in)) { discard; }
+  return vec4f(0.0, 0.0, 0.0, 1.0);
 }
 )";
 
@@ -4965,35 +4974,38 @@ bool ensure_direct(const gfx::RenderTargetLayout& layout) {
     const auto bgl = device.CreateBindGroupLayout(&bgld);
     const wgpu::PipelineLayoutDescriptor mpld{.bindGroupLayoutCount = 1, .bindGroupLayouts = &bgl};
     const auto mlayout = device.CreatePipelineLayout(&mpld);
-    std::array<wgpu::ColorTargetState, gfx::MaxColorAttachments> mt{};
-    for (uint32_t i = 0; i < layout.colorAttachmentCount; ++i)
-      mt[i] = {.format = layout.colorAttachments[i].format,
-               .writeMask = i == gfx::SceneColorAttachmentIndex ? wgpu::ColorWriteMask::All
-                                                                : wgpu::ColorWriteMask::None};
-    const wgpu::FragmentState mfrag{.module = mmodule,
-                                    .entryPoint = "fs",
-                                    .targetCount = layout.colorAttachmentCount,
-                                    .targets = mt.data()};
-    const wgpu::DepthStencilState mdepth{.format = layout.depthStencilFormat,
-                                         .depthWriteEnabled = wgpu::OptionalBool::False,
-                                         .depthCompare = wgpu::CompareFunction::Always};
-    wgpu::RenderPipelineMultiview mview{};
-    mview.viewMask = (1u << stereo.layers) - 1u;
-    const wgpu::RenderPipelineDescriptor mrpd{
-        .nextInChain = &mview,
-        .label = "XR window mask",
-        .layout = mlayout,
-        .vertex = {.module = mmodule, .entryPoint = "vs"},
-        .depthStencil = &mdepth,
-        .multisample = {.count = g_xrSamples},
-        .fragment = &mfrag,
+    const auto makeMask = [&](const char* entryPoint, wgpu::ColorWriteMask scene) {
+      std::array<wgpu::ColorTargetState, gfx::MaxColorAttachments> mt{};
+      for (uint32_t i = 0; i < layout.colorAttachmentCount; ++i)
+        mt[i] = {.format = layout.colorAttachments[i].format,
+                 .writeMask = i == gfx::SceneColorAttachmentIndex ? scene : wgpu::ColorWriteMask::None};
+      const wgpu::FragmentState mfrag{.module = mmodule,
+                                      .entryPoint = entryPoint,
+                                      .targetCount = layout.colorAttachmentCount,
+                                      .targets = mt.data()};
+      const wgpu::DepthStencilState mdepth{.format = layout.depthStencilFormat,
+                                           .depthWriteEnabled = wgpu::OptionalBool::False,
+                                           .depthCompare = wgpu::CompareFunction::Always};
+      wgpu::RenderPipelineMultiview mview{};
+      mview.viewMask = (1u << stereo.layers) - 1u;
+      const wgpu::RenderPipelineDescriptor mrpd{
+          .nextInChain = &mview,
+          .label = "XR window mask",
+          .layout = mlayout,
+          .vertex = {.module = mmodule, .entryPoint = "vs"},
+          .depthStencil = &mdepth,
+          .multisample = {.count = g_xrSamples},
+          .fragment = &mfrag,
+      };
+      return device.CreateRenderPipeline(&mrpd);
     };
-    R.maskPipeline = device.CreateRenderPipeline(&mrpd);
+    R.maskOutside = makeMask("fs_outside", wgpu::ColorWriteMask::All);
+    R.maskInside = makeMask("fs_inside", wgpu::ColorWriteMask::Alpha);
     const wgpu::BufferDescriptor bd{.label = "XR window mask",
                                     .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
-                                    .size = 160};
+                                    .size = 144};
     R.maskBuf = device.CreateBuffer(&bd);
-    const wgpu::BindGroupEntry be{.binding = 0, .buffer = R.maskBuf, .size = 160};
+    const wgpu::BindGroupEntry be{.binding = 0, .buffer = R.maskBuf, .size = 144};
     const wgpu::BindGroupDescriptor bgd{.layout = bgl, .entryCount = 1, .entries = &be};
     R.maskGroup = device.CreateBindGroup(&bgd);
   }
@@ -5009,14 +5021,14 @@ void draw_coverage(const wgpu::RenderPassEncoder& pass, void*) {
   pass.Draw(3);
 }
 
-// A menu window: the same, then the hard edge.
-void draw_coverage_window(const wgpu::RenderPassEncoder& pass, void* user) {
-  draw_coverage(pass, user);
-  if (R.maskPipeline) {
-    pass.SetPipeline(R.maskPipeline);
-    pass.SetBindGroup(0, R.maskGroup);
-    pass.Draw(3);
-  }
+// A menu window's edge, between the replay's two halves.
+void draw_window_edge(const wgpu::RenderPassEncoder& pass, void*) {
+  pass.SetBindGroup(0, R.maskGroup);
+  pass.SetPipeline(R.maskOutside);
+  pass.Draw(3);
+  pass.SetPipeline(R.maskInside);
+  pass.Draw(3);
+  // The replay's own bind group 0 comes back with its next draw's pipeline.
 }
 
 void compose(const wgpu::CommandEncoder& cmd, const wgpu::Texture& dst, std::initializer_list<int> sources,
@@ -5698,6 +5710,20 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       if (t > 0) {
         const auto& m = worldTransforms[t - 1];
         place = {m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], 0.f, 0.f, 0.f, 1.f};
+        if (m[1] > 1e20f) {
+          // aurora_xr_menu_pop: scale m[0] about the head, in the room: the
+          // object keeps its place in the picture (seen from the head) and
+          // comes closer, so the eyes' disparity and head motion pop it out.
+          const float rho = m[0];
+          const XrVector3f head = (views[0].pose.position + views[1].pose.position) * 0.5f;
+          const Mat4 inv = inverse_affine({arena[0], arena[1], arena[2], arena[3], arena[4], arena[5], arena[6],
+                                           arena[7], arena[8], arena[9], arena[10], arena[11]});
+          const float hx = inv[0] * head.x + inv[1] * head.y + inv[2] * head.z + inv[3];
+          const float hy = inv[4] * head.x + inv[5] * head.y + inv[6] * head.z + inv[7];
+          const float hz = inv[8] * head.x + inv[9] * head.y + inv[10] * head.z + inv[11];
+          place = {rho, 0.f, 0.f, (1.f - rho) * hx, 0.f, rho, 0.f, (1.f - rho) * hy,
+                   0.f, 0.f, rho, (1.f - rho) * hz, 0.f, 0.f, 0.f, 1.f};
+        }
         world = mul(place, cameraToWorld);
         for (int k = 0; k < gfx::XrMaxClipPlanes; ++k)
           for (int j = 0; j < 4; ++j) {
@@ -5847,11 +5873,12 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       uint32_t draws = 0;
       t.drawCount = &draws;
       t.finish = &draw_coverage;
-      if (window && R.maskOn && R.maskPipeline && g_multiview) {
+      if (window && R.maskOn && R.maskOutside && g_multiview) {
         R.maskData[32] = vwMask;
         R.maskData[33] = vhMask;
         webgpu::g_queue.WriteBuffer(R.maskBuf, 0, R.maskData.data(), 144);
-        t.finish = &draw_coverage_window;
+        t.edge = &draw_window_edge;
+        t.finish = nullptr; // the window's alpha is the edge's: no depth coverage
       }
       t.timestampWrites = zone_writes(kZone3D);
       t.passes = passes;

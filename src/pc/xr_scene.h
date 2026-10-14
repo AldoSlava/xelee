@@ -30,6 +30,8 @@ void pc_xr_hud_camera(void);
  * screen when MELEE_XR_MENU_WINDOW=0 or no XR session is presenting. */
 struct HSD_GObj;
 void pc_xr_menu_window_render(struct HSD_GObj* gobj, intptr_t pass);
+/* Same for a menu object that pops out of the window (under such a camera). */
+void pc_xr_menu_pop_render(struct HSD_GObj* gobj, intptr_t pass);
 /* While on, the fight and HUD cameras draw only the flat frame, so XR shows
  * the virtual screen: for screens the game draws over a fight that has
  * ended (Stage Clear's bonus tally, gm/gmregclear.c). Each scene starts
@@ -93,6 +95,7 @@ static inline void pc_xr_world_camera(const float view[3][4]) { (void)view; }
 static inline void pc_xr_camera_focus(const float interest[3]) { (void)interest; }
 static inline void pc_xr_hud_camera(void) {}
 #define pc_xr_menu_window_render HSD_GObj_803910D8
+#define pc_xr_menu_pop_render HSD_GObj_JObjCallback
 static inline void pc_xr_flat_view(bool on) { (void)on; }
 static inline void pc_xr_mono_camera(void) {}
 struct HSD_JObj;

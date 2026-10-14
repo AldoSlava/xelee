@@ -43,6 +43,11 @@ struct XrReplayTarget {
   // Runs inside the pass after the replays (e.g. coverage-to-alpha draws).
   void (*finish)(const wgpu::RenderPassEncoder& pass, void* user) = nullptr;
   void* finishUser = nullptr;
+  // Menu windows (one view, multiview): the draws recorded with the base
+  // placement go first, then `edge` (the window's mask), then the ones with an
+  // extra placement (aurora_xr_menu_pop), which the mask leaves alone.
+  void (*edge)(const wgpu::RenderPassEncoder& pass, void* user) = nullptr;
+  void* edgeUser = nullptr;
   const wgpu::PassTimestampWrites* timestampWrites = nullptr; // XR GPU timing
   uint32_t* drawCount = nullptr; // incremented per draw encoded (all views)
   // Multiview (Dawn fork): the pass draws every view in the mask at once, into

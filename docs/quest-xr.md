@@ -1174,6 +1174,37 @@ headset plays each clip forward and then back, so a clip needs to show
 only one direction of a gesture. Rerun the script after changing any of
 these.
 
+### Menu windows
+
+Melee's menus are 3D scenes drawn through a perspective camera. In XR the
+character select shows as a window onto that scene instead of a flat
+picture: head motion and the eyes' disparity show its depth.
+`MELEE_XR_MENU_WINDOW=0` keeps the flat screen.
+
+- **Camera.** `pc_xr_menu_window_render` (`src/pc/xr_scene.c`) replaces the
+  camera's render callback (`HSD_GObj_803910D8`, in `mncharsel.c`). It tags
+  the camera's draws as world and tells aurora the plane the camera looks at
+  (`aurora_xr_menu_window`: the camera's distance to its interest, and the
+  plane's height).
+- **Placement.** While a menu window is active, `render_eyes` replaces the
+  arena's transform with the virtual screen's: `A · V_game⁻¹` becomes the
+  map from the camera's space to the room. The plane lands on the screen's
+  content, depth keeps its proportion (`AURORA_XR_MENU_DEPTH` scales it), and
+  the screen's pose, size and grab bar work as before. No HUD, placing or
+  fight pointer layers show.
+- **Edge.** The window has a hard edge. Between the replay's draws, a mask
+  pass wipes everything outside the screen's rectangle, as each eye sees it,
+  and sets alpha to 1 inside (menu draws write no depth, so the fights'
+  depth coverage would leave the window see-through).
+- **Pop-out.** Objects drawn through `pc_xr_menu_pop_render` (the character
+  select's hands and tokens) come toward the head by `MELEE_XR_MENU_POP`
+  (default 0.12 of the distance). `aurora_xr_menu_pop` scales them about the
+  head in the room, so they keep their place in the picture as seen from the
+  head and the pointer needs no correction. They draw after the mask, so they
+  leave the window past its frame.
+- **Measuring.** `MELEE_MENU_PROBE=1` logs each menu camera's projection and
+  each GObj's depth in its view (`src/pc/menu_probe.c`).
+
 ### Pointing at the screen
 
 The virtual screen (menus, character and stage select, results) works like

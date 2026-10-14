@@ -804,6 +804,8 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
       for (const auto& p : frame.renderPasses)
         all.push_back(&p);
     }
+    // phase 0: draws with the base placement only; 1: the others only; -1: all.
+    const auto replay = [&](int phase) {
     for (const RenderPass* srcPass : target.passes != nullptr ? *target.passes : all) {
       auto& src = const_cast<RenderPass&>(*srcPass); // draw encoders take their payload mutable
       if (!src.sealed || src.discardable ||
@@ -836,7 +838,8 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
           }
           break;
         case CommandType::Draw:
-          if (c.xrCategory == category && c.data.draw.encoder != nullptr) {
+          if (c.xrCategory == category && c.data.draw.encoder != nullptr &&
+              (phase < 0 || (phase == 0) == (c.xrTransform == 0))) {
             if (c.xrTransform != boundTransform) {
               gx::xr_batch_flush(pass); // batched draws see the transform they were recorded with
               boundTransform = c.xrTransform;
@@ -852,6 +855,30 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
           break; // custom draws (clears, copies), markers
         }
       }
+    }
+    };
+    if (target.edge != nullptr && target.viewCount <= 1) {
+      replay(0);
+      gx::xr_batch_flush(pass);
+      pass.SetViewport(0.f, 0.f, w, h, 0.f, 1.f);
+      pass.SetScissorRect(0, 0, target.size.width, target.size.height);
+      target.edge(pass, target.edgeUser);
+      // The hook set its own pipeline and group 0.
+      g_currentPipeline = UINTPTR_MAX;
+      pass.SetBindGroup(0, resources().staticBindGroup);
+      pass.SetBindGroup(2, gx::g_emptyTextureBindGroup);
+      if (target.fullViewport) {
+        const bool whole = view.width <= 0.f || view.height <= 0.f;
+        const float vx = whole ? 0.f : view.x, vy = whole ? 0.f : view.y;
+        const float vw = whole ? w : view.width, vh = whole ? h : view.height;
+        pass.SetViewport(vx, vy, vw, vh, 0.f, 1.f);
+        pass.SetScissorRect(static_cast<uint32_t>(vx), static_cast<uint32_t>(vy), static_cast<uint32_t>(vw),
+                            static_cast<uint32_t>(vh));
+      }
+      pass.SetBindGroup(3, group(boundTransform));
+      replay(1);
+    } else {
+      replay(-1);
     }
   }
   gx::xr_batch_flush(pass);

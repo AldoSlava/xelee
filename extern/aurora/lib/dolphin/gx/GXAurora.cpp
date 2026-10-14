@@ -50,6 +50,16 @@ void aurora_xr_camera(int category, const float view[3][4]) {
 
 void aurora_xr_world_transform(const float m[3][4]) { aurora_xr_camera(3, m); }
 
+// A marker transform (m[0][1] absurdly large) that render_eyes turns into a scale about the head.
+void aurora_xr_menu_pop(float scale) {
+  if (!(scale < 1.f)) {
+    aurora_xr_world_transform(nullptr);
+    return;
+  }
+  const float m[3][4] = {{scale, 1e30f, 0.f, 0.f}, {0.f, 1.f, 0.f, 0.f}, {0.f, 0.f, 1.f, 0.f}};
+  aurora_xr_world_transform(m);
+}
+
 void aurora_xr_world_clip(const float plane[4]) { aurora_xr_world_clip_soft(plane, 0.f); }
 
 void aurora_xr_world_clip_soft(const float plane[4], float fade) { aurora_xr_world_clips(plane, fade, nullptr, 0.f); }
