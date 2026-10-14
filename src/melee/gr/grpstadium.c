@@ -1025,6 +1025,9 @@ typedef struct TextWrapper {
     HSD_ImageDesc desc;
     HSD_Text* win_static_p;
     HSD_Text* win_dynamic_p;
+#ifdef TARGET_PC
+    u8* sis5; /* string 5's storage, in MEM1: see grStadium_801D3460 */
+#endif
 } TextWrapper;
 
 /// @todo can these inlines be merged?
@@ -1323,6 +1326,9 @@ HSD_GObj* grStadium_801D2BEC(void)
     text->win_static_p =
         HSD_SisLib_803A5ACC(1, 0, 0.0F, 0.0F, 0.0F, 250.0F, 160.0F);
     text->win_dynamic_p = HSD_SisLib_803A6754(1, 0);
+#ifdef TARGET_PC
+    text->sis5 = HSD_MemAlloc(0x100);
+#endif
     text->win_dynamic_p->pos_z = 0.0F;
     hsd_text = text->win_dynamic_p;
     hsd_text->box_size_x = 250.0F;
@@ -1632,7 +1638,9 @@ bool grStadium_801D32D0(Ground_GObj* gobj)
 static const GXColor grPs_804DAF3C = { 0xFF, 0xFF, 0xFF, 0xFF };
 
 /// Writable storage for SIS string 5, which the stage rebuilds.
+#ifndef TARGET_PC
 static u8 grPs_8049F040[0x100];
+#endif
 
 void grStadium_801D3460(Ground_GObj* gobj)
 {
@@ -1662,7 +1670,17 @@ void grStadium_801D3460(Ground_GObj* gobj)
     HSD_SisLib_803A7664(gp2->win_dynamic_p);
     temp_r29 = GET_GROUND(Ground_GetMapGObj(2));
 
+#ifdef TARGET_PC
+    /* The screen's labels ("Current Stage", the stage type, "Combatants",
+     * "Time") are built into SIS string 5 from strings 6-12, then shown. The
+     * GameCube's storage is a static; ours is the executable's .bss, below
+     * 4GB but outside MEM1, and sislib's bind refuses any string that is not
+     * in MEM1 (its guard against region-shifted indices), so the labels never
+     * drew. The same storage, allocated with the screen, is in MEM1. */
+    DP_SET(HSD_SisLib_804D1124[1][2].textures, gp2->sis5);
+#else
     DP_SET(HSD_SisLib_804D1124[1][2].textures, grPs_8049F040);
+#endif
 
     HSD_SisLib_803A6530(1, 5, 6);
     temp_r0 = temp_r29->u.stadium.xDE;
