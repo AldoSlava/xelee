@@ -4,11 +4,15 @@
 #include "pc/net.h"
 #include "pc/pc.h"
 #include <stdlib.h>
+#include <string.h>
 extern bool pc_net_slippi_active(void);
-extern bool gmOnline_SlippiFlow(void);
+#include <melee/gm/gmonlinemode.h>
 
 /* The online CSS: Slippi's order puts it before any connection (the local
  * player is port 1), and a session left over from the old order has one too. */
+/* Slippi's "Press START to ..." prompt is up: a valid pick is made. */
+bool mnCharSel_SlippiStartReady(void);
+
 static bool cssOnline(int* local)
 {
     if (gmOnline_SlippiFlow()) {
@@ -5529,6 +5533,11 @@ void mnCharSel_Scene_OnEnter(void* arg0)
     }
     mnCharSel_804D6CF4 = 0;
     mnCharSel_802640A0();
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        mnOnlineCss_Create();
+    }
+#endif
 }
 
 #ifdef TARGET_PC
@@ -5616,11 +5625,21 @@ static void mnCharSel_HideOnlineRemote(void)
         return;
     }
     remote = local ? 0 : 1;
-    if (mnCharSel_804A0BC0[remote] != NULL) {
-        cssHideGObj(mnCharSel_804A0BC0[remote]->gobj);
-    }
-    if (mnCharSel_804A0BD0[remote] != NULL) {
-        cssHideGObj(mnCharSel_804A0BD0[remote]->gobj);
+    /* Every hand and token but ours: the unused ports' hands show up at the
+     * bottom edge otherwise. */
+    {
+        int port;
+        for (port = 0; port < 4; port++) {
+            if (port == local) {
+                continue;
+            }
+            if (mnCharSel_804A0BC0[port] != NULL) {
+                cssHideGObj(mnCharSel_804A0BC0[port]->gobj);
+            }
+            if (mnCharSel_804A0BD0[port] != NULL) {
+                cssHideGObj(mnCharSel_804A0BD0[port]->gobj);
+            }
+        }
     }
     cssHideDoor(remote);
     cssHideDoor(2);
@@ -5639,11 +5658,31 @@ void mnCharSel_Scene_OnFrame(void)
 
 #ifdef TARGET_PC
     mnCharSel_HideOnlineRemote();
+    if (gmOnline_SlippiFlow()) {
+        bool leave = gmOnline_SlippiCssFrame();
+        if (gmOnline_SlippiCssLocked()) {
+            /* A search is running: the pick is locked in. */
+            memset(HSD_PadCopyStatus, 0, sizeof HSD_PadCopyStatus);
+        }
+        if (leave) {
+            mnCharSel_804D6CF6 = 1;
+            gm_801A4B60();
+            return;
+        }
+    }
     {
         static bool dumped;
         if (!dumped && mnCharSel_804D6CEC == 90 && getenv("MELEE_CSS_DUMP")) {
             int id;
             dumped = true;
+            pc_log_line("css doors: p_kind %d %d %d %d, slot_type %d %d %d %d, x5 %d %d",
+                        mnCharSel_803F0DFC.doors[0].p_kind, mnCharSel_803F0DFC.doors[1].p_kind,
+                        mnCharSel_803F0DFC.doors[2].p_kind, mnCharSel_803F0DFC.doors[3].p_kind,
+                        mnCharSel_804D6CB0->vs.start.players[0].slot_type,
+                        mnCharSel_804D6CB0->vs.start.players[1].slot_type,
+                        mnCharSel_804D6CB0->vs.start.players[2].slot_type,
+                        mnCharSel_804D6CB0->vs.start.players[3].slot_type,
+                        mnCharSel_804A0BC0[0]->x5, mnCharSel_804A0BD0[0]->x5);
             for (id = 0; id < 160; id++) {
                 HSD_JObj* j = NULL;
                 lb_80011E24(mnCharSel_804D6CC0, &j, id, -1);
@@ -5739,6 +5778,19 @@ void mnCharSel_Scene_OnFrame(void)
                 mnCharSel_804D6CF6 = 0;
             }
         }
+#ifdef TARGET_PC
+        if (mnCharSel_804D6CF6 == 1 && gmOnline_SlippiFlow() &&
+            gmOnline_SlippiCssStart(
+                mnCharSel_804D6CB0->vs.start.players[0].ckind,
+                mnCharSel_804D6CB0->vs.start.players[0].color))
+        {
+            /* Slippi's flow keeps the CSS up and searches from it. */
+            mnCharSel_804D6CF6 = 0;
+            mnCharSel_804D6CF2 = 0;
+            sfxForward();
+            break;
+        }
+#endif
         if (mnCharSel_804D6CF6 != 0) {
             gm_801A4B60();
             if (mnCharSel_804D6CF5 == 4) {
@@ -5768,6 +5820,13 @@ void mnCharSel_Scene_OnFrame(void)
     }
 }
 
+#ifdef TARGET_PC
+bool mnCharSel_SlippiStartReady(void)
+{
+    return mnCharSel_804D6CF7 != 0;
+}
+#endif
+
 void mnCharSel_Scene_OnExit(void* unused)
 {
     int num_slots;
@@ -5775,6 +5834,9 @@ void mnCharSel_Scene_OnExit(void* unused)
     int i;
     u8 type;
 
+#ifdef TARGET_PC
+    mnOnlineCss_Destroy();
+#endif
     HSD_SisLib_803A5FBC();
     if (mnCharSel_804D6CD0 != NULL) {
         lbArchive_80016EFC(mnCharSel_804D6CD0);

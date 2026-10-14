@@ -881,6 +881,7 @@ src/melee/mn/mnmainrule.c
 src/melee/mn/mnname.c
 src/melee/mn/mnnamenew.c
 src/melee/mn/mnonline.c
+src/melee/mn/mnonlinecss.c
 src/melee/mn/mnonlinelobby.c
 src/melee/mn/mnruleplus.c
 src/melee/mn/mnsnap.c

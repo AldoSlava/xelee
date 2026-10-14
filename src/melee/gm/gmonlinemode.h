@@ -24,6 +24,21 @@ OnlineKind gmOnline_GetKind(void);
  * the CSS comes first and the search follows (see gmonlinemode.c). */
 bool gmOnline_SlippiFlow(void);
 
+/* The online CSS's status text (src/melee/mn/mnonlinecss.c), drawn by the
+ * Slippi flow's state in gmonlinemode.c. */
+void mnOnlineCss_Create(void);
+void mnOnlineCss_Update(const char* title, const char* line1, const char* line2,
+                        const char* hint, bool error);
+void mnOnlineCss_Destroy(void);
+/* Called every CSS frame while the Slippi flow owns the screen; true when the
+ * match is agreed and the CSS should leave now. */
+bool gmOnline_SlippiCssFrame(void);
+/* START was pressed with a valid pick: true if the flow handled it (the CSS
+ * stays up and locks) rather than leaving the scene. */
+bool gmOnline_SlippiCssStart(int character, int color);
+/* True while the CSS must ignore the controller (a search is running). */
+bool gmOnline_SlippiCssLocked(void);
+
 void gm_Scene_OnlineLobby_OnFrame(void);
 void gm_Scene_OnlineLobby_OnEnter(void*);
 void gm_Scene_OnlineLobby_OnExit(void*);
