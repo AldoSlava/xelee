@@ -179,6 +179,15 @@ void onEnterDebugVs(GameModeState* state)
 
     start->players[0].ckind = CKind_Link;
     start->players[1].ckind = CKind_Mario;
+#ifdef TARGET_PC
+    if (getenv("MELEE_PLACE_DUMMY") != NULL) {
+        /* The stage-placement dummy (docs: slippi-stage-placement-flow): Fox
+         * and Falcon on Battlefield, tinted by gmvs.c's placeDummyTint. */
+        start->players[0].ckind = CKind_Fox;
+        start->players[1].ckind = CKind_Captain;
+        start->rules.stkind = St_Kind_Battle;
+    }
+#endif
     start->players[2].ckind = CKind_Link;
     start->players[3].ckind = CKind_Link;
 

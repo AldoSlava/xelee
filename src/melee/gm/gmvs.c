@@ -41,6 +41,11 @@
 #include <melee/mn/types.h>
 #include <melee/mp/mpcoll.h>
 #include <melee/pl/player.h>
+#ifdef TARGET_PC
+#include <sysdolphin/baselib/dobj.h>
+#include <sysdolphin/baselib/mobj.h>
+#include <sysdolphin/baselib/tobj.h>
+#endif
 #include <melee/pl/plbonus.h>
 #include <melee/pl/plbonuslib.h>
 #include <melee/sfx/crowdsfx.h>
@@ -1555,9 +1560,70 @@ void fn_8016D634(void)
     }
 }
 
+#ifdef TARGET_PC
+/* MELEE_PLACE_DUMMY=1: the stage-placement dummy. The stage's materials are
+ * turned translucent green and the fighters flat red, every frame (the
+ * fighters' own code sets some of them back). Presentation only: nothing
+ * here is read by the sim. */
+static void placeDummyTintJObj(HSD_JObj* j, u8 r, u8 g, u8 b, u8 a)
+{
+    for (; j != NULL; j = j->next) {
+        if (!(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL))) {
+            HSD_DObj* d;
+            for (d = j->u.dobj; d != NULL; d = d->next) {
+                HSD_MObj* m = d->mobj;
+                if (m == NULL || m->mat == NULL) {
+                    continue;
+                }
+                m->mat->diffuse.r = m->mat->ambient.r = r;
+                m->mat->diffuse.g = m->mat->ambient.g = g;
+                m->mat->diffuse.b = m->mat->ambient.b = b;
+                m->mat->alpha = a / 255.0f;
+                {
+                    HSD_TObj* t;
+                    for (t = m->tobj; t != NULL; t = t->next) {
+                        /* ignore the texture: the material's colour alone */
+                        t->flags = (t->flags & ~(TEX_COLORMAP_MASK | TEX_ALPHAMAP_MASK)) |
+                                   TEX_COLORMAP_NONE | TEX_ALPHAMAP_NONE;
+                    }
+                }
+                m->rendermode &= ~(RENDER_TEXTURES | RENDER_TOON | RENDER_ALPHA_BITS);
+                m->rendermode |= RENDER_DIFFUSE | RENDER_ALPHA_MAT;
+                if (a < 255) {
+                    m->rendermode |= RENDER_XLU | RENDER_NO_ZUPDATE;
+                }
+            }
+        }
+        placeDummyTintJObj(j->child, r, g, b, a);
+    }
+}
+
+static void placeDummyTint(void)
+{
+    HSD_GObj* g;
+    int slot;
+    for (g = HSD_GObjPLinkHead[5]; g != NULL; g = g->next) {
+        if (g->classifier == HSD_GOBJ_CLASS_STAGE && g->obj_kind == HSD_GObj_JObjKind) {
+            placeDummyTintJObj(GET_JOBJ(g), 0x30, 0xE0, 0x50, 0x70);
+        }
+    }
+    for (slot = 0; slot < 2; slot++) {
+        g = Player_GetEntity(slot);
+        if (g != NULL && g->obj_kind == HSD_GObj_JObjKind) {
+            placeDummyTintJObj(GET_JOBJ(g), 0xE0, 0x20, 0x20, 0xFF);
+        }
+    }
+}
+#endif
+
 void gm_Scene_Vs_OnFrame(void)
 {
     PAD_STACK(8);
+#ifdef TARGET_PC
+    if (getenv("MELEE_PLACE_DUMMY") != NULL) {
+        placeDummyTint();
+    }
+#endif
     if (controller.start.on_frame_start != NULL) {
         controller.start.on_frame_start();
     }
