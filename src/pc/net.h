@@ -68,6 +68,31 @@ bool pc_net_connect_socket(
  * `ip` of NULL or empty listens only. */
 bool pc_net_connect_slippi(
     const char* ip, uint16_t port, int player, uint32_t seed, uint16_t local_udp_port);
+/* ---- Slippi matchmaking sessions -----------------------------------------
+ * The flow is Slippi's: the character is picked first, the search runs, and
+ * once the ENet link is up the two sides swap *selections* (character, color,
+ * stage, rngOffset). Only then does the match begin. So the link is opened on
+ * its own (nothing of the rollback engine runs, and a Dolphin peer never sees
+ * our scene hand-offs), the selections cross it, and pc_net_slippi_adopt()
+ * starts the engine on it when the VS scene starts. */
+struct PcSlippiSelections;
+bool pc_net_slippi_link_open(
+    const char* ip, uint16_t port, int local_player, uint16_t local_udp_port);
+void pc_net_slippi_link_pump(void);
+/* 0 connecting, 1 connected, 2 failed or closed. */
+int pc_net_slippi_link_state(void);
+bool pc_net_slippi_link_send_selections(const struct PcSlippiSelections* s);
+bool pc_net_slippi_link_remote_selections(struct PcSlippiSelections* out);
+void pc_net_slippi_link_close(void);
+/* Apply Slippi's fixed rules (4 stocks, 8 minutes, ...) to this process. */
+void pc_net_slippi_rules_force(void);
+/* Pin / release the all-unlocked save image outside a session (the Slippi
+ * CSS); the player's own progress is kept aside and put back on release. */
+void pc_net_unlock_pin(void);
+void pc_net_unlock_release(void);
+/* Start the rollback engine on the open link for a match; `rng_offset` is the
+ * decider's value. Call before the VS scene's first tick. */
+bool pc_net_slippi_adopt(int local_player, uint32_t rng_offset);
 /* Which peer sends the Slippi direct-session setup (seed + start frame). A
  * MELEE_NET session leaves it unset and the caller's controller port decides
  * (P1 sends); a matchmaking session sets it from the ticket's decider flag,

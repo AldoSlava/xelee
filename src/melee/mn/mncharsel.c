@@ -5,6 +5,22 @@
 #include "pc/pc.h"
 #include <stdlib.h>
 extern bool pc_net_slippi_active(void);
+extern bool gmOnline_SlippiFlow(void);
+
+/* The online CSS: Slippi's order puts it before any connection (the local
+ * player is port 1), and a session left over from the old order has one too. */
+static bool cssOnline(int* local)
+{
+    if (gmOnline_SlippiFlow()) {
+        *local = 0;
+        return true;
+    }
+    if (pc_net_active() && pc_net_slippi_active()) {
+        *local = pc_net_local_player();
+        return true;
+    }
+    return false;
+}
 #endif
 
 #include <melee/ft/forward.h>
@@ -3087,8 +3103,11 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
 #ifdef TARGET_PC
                                 /* A Slippi match is 1v1 between two humans:
                                  * no CPU fighters, no closing a slot. */
-                                if (pc_net_active() && pc_net_slippi_active()) {
-                                    continue;
+                                {
+                                    int unused;
+                                    if (cssOnline(&unused)) {
+                                        continue;
+                                    }
                                 }
 #endif
                                 if ((mnCharSel_803F0DFC.doors[door]
@@ -3770,6 +3789,14 @@ void fn_80262F44(HSD_GObj* gobj)
                     goto hide;
                 }
                 valid_count++;
+            }
+        }
+
+        {
+            /* The online CSS has one human door until a match is found. */
+            int unused;
+            if (valid_count == 1 && cssOnline(&unused)) {
+                valid_count = 2;
             }
         }
 
@@ -5582,12 +5609,13 @@ static void cssHideDoor(int door)
 static void mnCharSel_HideOnlineRemote(void)
 {
     int remote;
-    if (!pc_net_active() || !pc_net_slippi_active() ||
-        mnCharSel_804D6CF5 == 1 || getenv("MELEE_CSS_SHOW_ALL"))
+    int local;
+    if (!cssOnline(&local) || mnCharSel_804D6CF5 == 1 ||
+        getenv("MELEE_CSS_SHOW_ALL"))
     {
         return;
     }
-    remote = pc_net_local_player() ? 0 : 1;
+    remote = local ? 0 : 1;
     if (mnCharSel_804A0BC0[remote] != NULL) {
         cssHideGObj(mnCharSel_804A0BC0[remote]->gobj);
     }

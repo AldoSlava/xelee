@@ -54,6 +54,13 @@ __attribute__((weak)) bool pc_slippi_net_send_rel(PcSlippiNet* n, uint8_t t, con
 }
 __attribute__((weak)) void pc_slippi_net_set_callbacks(PcSlippiNet* n, const PcSlippiNetCallbacks* cb) { (void) n, (void) cb; }
 __attribute__((weak)) void pc_slippi_net_stats(const PcSlippiNet* n, PcSlippiNetStats* o) { (void) n; memset(o, 0, sizeof *o); }
+__attribute__((weak)) bool pc_slippi_net_poll(PcSlippiNet* n, uint64_t t) { (void) n, (void) t; return false; }
+__attribute__((weak)) int pc_slippi_net_status(const PcSlippiNet* n) { (void) n; return 0; }
+__attribute__((weak)) bool pc_slippi_net_send_selections(PcSlippiNet* n, const PcSlippiSelections* s) { (void) n, (void) s; return false; }
+__attribute__((weak)) bool pc_slippi_net_remote_selections(const PcSlippiNet* n, int r, PcSlippiSelections* o) {
+    (void) n, (void) r, (void) o; return false;
+}
+__attribute__((weak)) void pc_slippi_selections_reset(PcSlippiSelections* s) { memset(s, 0, sizeof *s); }
 
 #include <stdarg.h>
 

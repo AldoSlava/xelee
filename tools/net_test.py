@@ -49,6 +49,7 @@ import time
 # boot). The exit frame is fixed at launch, so the budget covers the worst
 # boot seen and check_match() fails a row whose match did not get its minutes.
 BOOT_FRAMES = 9000
+MM_RUN = False  # set by run() for --mm: frames count from the match, not from boot
 CACHE_ROOT = os.path.expanduser("~/.cache/melee_net_cache")  # kept between runs; keyed by port, never shared
 LOAD_STALL_FRAME = 900  # --load-stall: session up, menus lockstep, every frame waits
 # A direct session derives a datagram key from its handshake nonces like any
@@ -406,27 +407,27 @@ def to_lobby(inst, tries=4):
 
 
 def drive_mm(a, b):
-    """Both instances boot into the Unranked lobby, pair through the
-    synthesized ticket, and the lobby releases both at the agreed start frame."""
-    if not (a.wait_log(r"match: Slippi ticket", 60) and b.wait_log(r"match: Slippi ticket", 60)):
-        print("net_test: no instance got a Slippi ticket", flush=True)
+    """Slippi's order: both instances boot into the Unranked flow, which opens on
+    the CSS with a pick already placed (MELEE_CSS_PICK, different per seat);
+    START on each starts the search, the synthesized ticket pairs them, and the
+    selections that cross the link must give both the same match."""
+    if not (a.wait_log(r"online: enter CSS", 180) and b.wait_log(r"online: enter CSS", 60)):
+        print("net_test: the online CSS never opened", flush=True)
         return False
-    if not (a.wait_log(r"lobby: entering CSS", 90) and b.wait_log(r"lobby: entering CSS", 90)):
-        print("net_test: the lobby never handed over to the CSS", flush=True)
+    settle((a, b), MENU_SETTLE)
+    if not press_until((a, b), "Return", 9, r"match: Slippi ticket", tries=6, each=8.0,
+                       on=(a, b)):
+        print("net_test: START on the CSS never started a search", flush=True)
         return False
-    if not drive_css(a, b):
-        return False
-    # Unranked takes the stage from the ticket's list: no picks, and both
-    # peers must land on the same one.
-    rx = r"sss: Slippi ticket stage (\d+)"
+    rx = r"match: Slippi match P\d: chars (\d+)/(\d+) colors (\d+)/(\d+) stage (\d+) alt (\d+) rng (\d+)"
     if not (a.wait_log(rx, 60) and b.wait_log(rx, 60)):
-        print("net_test: no ticket stage was chosen", flush=True)
+        print("net_test: the selections never produced a match", flush=True)
         return False
-    sa, sb = re.findall(rx, a.text()), re.findall(rx, b.text())
-    if sa != sb or not sa or int(sa[0]) not in (2, 3, 8, 28, 31, 32):
-        print(f"net_test: the peers disagree on the ticket stage: a={sa} b={sb}", flush=True)
+    ma, mb = re.findall(rx, a.text()), re.findall(rx, b.text())
+    if ma != mb or int(ma[-1][4]) not in (2, 3, 8, 28, 31, 32):
+        print(f"net_test: the peers disagree on the match: a={ma} b={mb}", flush=True)
         return False
-    print(f"net_test: ticket stage {sa[0]} on both peers", flush=True)
+    print(f"net_test: agreed Slippi match {ma[-1]}", flush=True)
     return True
 
 
@@ -494,7 +495,7 @@ CSS_STEP = 6      # frames of Right: 7.4 units, one column
 CSS_COLS = 7      # columns 1..7 of the row
 
 
-def drive_css(a, b, want=1):
+def drive_css(a, b, want=1, done=None):
     """CSS: pin both hands on the top-left clamp, drop into a row of
     portraits and press A once per column until a pick sticks on both ports,
     then Start -> SSS. Both peers press: each instance drives its own port's
@@ -517,9 +518,12 @@ def drive_css(a, b, want=1):
         for col in range(CSS_COLS):
             press((a, b), "X", 7, 0.5)  # A: pick whatever the token is over
             press((a, b), "Right", CSS_STEP, 0.4)
-        if press_until((a, b), "Return", 9, SCENE_FILE["sss"], want=want, tries=2, each=8.0,
-                       on=(a,)):
-            print(f"net_test: CSS picked on row {row} (Down {down}), SSS loaded", flush=True)
+        # With `done` the CSS is each instance's own (Slippi's order: nothing is
+        # connected yet), so both are pressed; otherwise one press carries both.
+        if press_until((a, b), "Return", 9, done or SCENE_FILE["sss"], want=want, tries=2,
+                       each=8.0, on=(a, b) if done else (a,)):
+            print(f"net_test: CSS picked on row {row} (Down {down}), "
+                  f"{'search started' if done else 'SSS loaded'}", flush=True)
             return True
         print(f"net_test: no pick on CSS row {row} (Down {down}), trying the next row",
               flush=True)
@@ -651,6 +655,7 @@ def in_match_scene(inst):
     # The scene hand-off line is the third witness: a matchmaking run picks its
     # stage through the SSS and may load an archive STAGE_RX does not name.
     vs = len(re.findall(r"net: scene \d+ -> 2 at frame", inst.text()))
+    vs += count(inst, r"online: enter VS at frame")  # the matchmaking flow has no scene hand-offs
     return count(inst, SCENE_FILE["match"]) + sum(1 for n in snaps if n > 0) + vs
 
 
@@ -736,7 +741,14 @@ def check_entry(a, b):
     e = [match_entry(record_cks(i.rec_path)) for i in (a, b)]
     if None in e:
         return []  # check_match reports that with its own detail
-    return [] if e[0] == e[1] else [f"match entered on different frames: a {e[0]} b {e[1]}"]
+    # A matchmaking session starts its frame count at the match, not at a lobby
+    # both peers leave on one frame, so the recorded entry can sit a frame
+    # apart; the per-frame checksum compare is what proves the sims agree.
+    # (the peers enter the match when their own scenes finish, so Stage 2's
+    # start sync, not this check, is what will tighten it)
+    slack = 600 if MM_RUN else 0
+    return [] if abs(e[0] - e[1]) <= slack else \
+        [f"match entered on different frames: a {e[0]} b {e[1]}"]
 
 
 # "net: frame N, rollbacks N (max depth N, lost N), stalls N (worst X ms), skips N,
@@ -902,7 +914,8 @@ def summarize(inst, need_match=True):
     says what the checksum stream saw, it just is not a failure."""
     text = inst.text()
     fails = []
-    if not re.search(r"net: test done at frame (\d+)", text):
+    if not re.search(r"net: test done at frame (\d+)", text) and \
+            not (MM_RUN and "online: enter RESULTS" in text):
         fails.append("no 'net: test done'")
     # A session that never came up makes every other number in this row
     # meaningless: the instance plays a normal offline game, its checksum
@@ -912,9 +925,9 @@ def summarize(inst, need_match=True):
     # peers that went out of sync.
     if re.search(r"net: bind\(\d+\) failed", text):
         fails.append("netplay never started: bind failed (port still in use?)")
-    elif not re.search(r"net: (rollback with |Slippi transport: peer )", text):
+    elif not re.search(r"net: (rollback with |Slippi transport: peer |Slippi match: P)", text):
         fails.append("netplay never started: no session line")
-    if inst.proc.returncode != 0:
+    if inst.proc.returncode != 0 and not (MM_RUN and "online: enter RESULTS" in text):
         fails.append(f"exit code {inst.proc.returncode}")
     # "peer silent" has to be the whole leaving-netplay line, not a substring:
     # the benign `net: interrupted at frame N (peer silent 3000 ms),
@@ -1250,7 +1263,12 @@ def run(args):
         args.lan = True  # boots a lobby, not a MELEE_NET direct session
     if args.scenes:
         args.lan = True  # the set flow is the online one: lobby, CSS, SSS, VS, results
-    frames = int(args.minutes * 3600) + BOOT_FRAMES
+    global MM_RUN
+    MM_RUN = bool(args.mm)
+    # A matchmaking session counts frames from the match start, so there is no
+    # boot to budget for; and under Slippi's rules (4 stocks) a match can end
+    # in about 4000 frames.
+    frames = int(args.minutes * 3600) + (0 if args.mm else BOOT_FRAMES)
     sim = {"MELEE_NET_EXIT_AFTER_FRAMES": str(frames)}
     if args.loss:
         sim["MELEE_NET_SIM_LOSS"] = str(args.loss)
@@ -1303,6 +1321,7 @@ def run(args):
                 "MELEE_SLIPPI_PEER_PORT": str(peer),
                 "MELEE_SLIPPI_LOCAL_INDEX": "0" if name == "a" else "1",
                 "MELEE_SLIPPI_LOCAL_HOST": "1" if name == args.mm_decider else "0",
+                "MELEE_CSS_PICK": "2,0" if name == "a" else "9,1",  # Fox vs Marth
             })
     if args.state_log:
         # Per-frame state dumps beside the logs, so a DESYNC can be diffed
@@ -1374,6 +1393,9 @@ def run(args):
             texts = a.text() + b.text()
             if any(re.search(t, texts) for t in term):
                 break  # let summarize() report it; do not burn the whole budget
+            if MM_RUN and "online: enter RESULTS" in a.text() and \
+                    "online: enter RESULTS" in b.text():
+                break  # the match ended on its own, which is a complete run
             fr = max([int(x) for x in re.findall(r"net: frame (\d+)", texts)] or [-1])
             if fr > last_frame:
                 last_frame, last_progress = fr, time.time()

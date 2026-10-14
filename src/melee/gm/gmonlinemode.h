@@ -20,6 +20,9 @@ typedef enum OnlineKind {
 
 void gmOnline_SetKind(OnlineKind kind);
 OnlineKind gmOnline_GetKind(void);
+/* True while a Slippi account is signed in and the mode is Unranked or Direct:
+ * the CSS comes first and the search follows (see gmonlinemode.c). */
+bool gmOnline_SlippiFlow(void);
 
 void gm_Scene_OnlineLobby_OnFrame(void);
 void gm_Scene_OnlineLobby_OnEnter(void*);

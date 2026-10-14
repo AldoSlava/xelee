@@ -7,6 +7,7 @@
 #include "net_rank_session.h"
 #include "pc.h"
 #include "pc/slippi/slp_match.h"
+#include "pc/slippi/slp_msg.h"
 #include "pc/slippi/slp_user.h"
 #include <SDL3/SDL_clipboard.h>
 #include <SDL3/SDL_filesystem.h>
@@ -116,7 +117,13 @@ static bool s_slippi_match;         /* this search is the Slippi backend */
 static PcSlippiMatch* s_slippi_search; /* the running search, else NULL */
 static PcSlippiTicket s_slippi_ticket;
 static char s_slippi_code[PC_SLIPPI_CONNECT_CODE_MAX]; /* our connect code, for the lobby */
-static uint32_t s_slippi_seed;       /* seed for the Slippi game session */
+static uint32_t s_slippi_seed;
+static uint8_t s_pick_char, s_pick_color; /* the CSS pick, set before the search */
+static bool s_pick_set;
+static bool s_sel_sent;
+static uint64_t s_link_started_ms;
+static PcNetSlippiMatch s_slippi_built;
+#define SLIPPI_CONNECT_TIMEOUT_MS 20000       /* seed for the Slippi game session */
 static int64_t public_sequence(const uint8_t* p) {
     return (int64_t)((uint32_t)p[16] << 24 | (uint32_t)p[17] << 16 | (uint32_t)p[18] << 8 | p[19]);
 }
@@ -804,11 +811,6 @@ static void slp_poll(void) {
     int local = s_slippi_ticket.local_player_index;
     int remote = local == 0 ? 1 : 0;
     host = s_slippi_ticket.is_host;
-    /* The decider picks the seed; it travels in the interim setup message
-     * (PC_SLIPPI_MSG_SETUP) so both peers agree. M5's selections flow carries
-     * it instead of a melee-pc-private message. */
-    if (host && !s_slippi_seed)
-        s_slippi_seed = (uint32_t)SDL_GetTicks() | 1u;
     snprintf(target, sizeof target, "%.17s", s_slippi_ticket.players[local].connect_code);
     snprintf(opponent, sizeof opponent, "%.17s", s_slippi_ticket.players[remote].connect_code);
     char ip[PC_SLIPPI_ADDR_MAX];
@@ -819,17 +821,112 @@ static void slp_poll(void) {
     }
     pc_log_line("match: Slippi ticket %s: %s:%u, local port P%d, %s", s_slippi_ticket.match_id,
         ip, port, local + 1, host ? "decider" : "guest");
-    if (!pc_net_connect_slippi(ip, port, local, s_slippi_seed, s_slippi_ticket.local_port)) {
+    /* Only the link opens here; the rollback engine starts with the match. */
+    if (!pc_net_slippi_link_open(ip, port, local, s_slippi_ticket.local_port)) {
         fail("Slippi connect failed");
         return;
     }
-    /* After connect: it resets the session and defaults the setup sender to
-     * P1; the decider is not necessarily P1. The handshake runs later. */
-    pc_net_slippi_set_setup_host(host);
-    /* The game session is up; the setup exchange (handshake_direct ->
-     * slp_direct) fills net.start_frame and the lobby releases at it. */
+    s_sel_sent = false;
+    s_link_started_ms = SDL_GetTicks();
     start_frame = -1;
     state = PC_MATCH_CONNECT;
+}
+
+/* Our selections, sent as soon as the link is up (Slippi's CSS picks first,
+ * so there is nothing left to choose). Unranked takes the stage from the
+ * ticket's list at random (Slippi's clients each roll one and the lower port's
+ * wins); until Direct has its own stage select it does the same from the
+ * standard six. */
+static void slp_send_selections(void) {
+    PcSlippiSelections s;
+    pc_slippi_selections_reset(&s);
+    s.player_idx = (uint8_t)s_slippi_ticket.local_player_index;
+    s.character_id = s_pick_char;
+    s.character_color = s_pick_color;
+    s.character_selected = true;
+    uint16_t ids[16];
+    int n = pc_net_match_slippi_stages(ids, 16);
+    static const uint16_t standard[] = {2, 3, 8, 28, 31, 32};
+    uint32_t r = (uint32_t)SDL_GetTicksNS();
+    r ^= r >> 13;
+    r *= 0x9E3779B1u;
+    s.stage_id = n > 0 ? ids[(r >> 8) % (uint32_t)n] : standard[(r >> 8) % 6];
+    s.stage_selected = true;
+    s.alt_stage_mode = 0;
+    s.rng_offset = (uint32_t)(SDL_GetTicksNS() * 2654435761u >> 7) % 0xFFFFu;
+    if (pc_net_slippi_link_send_selections(&s)) {
+        s_sel_sent = true;
+        s_slippi_seed = s.rng_offset; /* kept for the decider's choice below */
+        s_slippi_built.rng_offset = s.rng_offset;
+        s_slippi_built.stage = s.stage_id; /* ours, until theirs arrives */
+        pc_log_line("match: sent selections: char %u color %u stage %u rng %u", s.character_id,
+            s.character_color, s.stage_id, s.rng_offset);
+    }
+}
+
+/* Both sides' selections are in: build the match the same way on both. The
+ * stage is the first selected one by port, the seed offset is the decider's,
+ * the alt stage mode only counts in Direct. */
+static void slp_build_match(const PcSlippiSelections* theirs) {
+    int local = s_slippi_ticket.local_player_index;
+    int remote = local ? 0 : 1;
+    PcNetSlippiMatch* m = &s_slippi_built;
+    uint16_t my_stage = m->stage;
+    uint32_t my_rng = m->rng_offset;
+    memset(m, 0, sizeof *m);
+    m->local_player = local;
+    m->character[local] = s_pick_char;
+    m->color[local] = s_pick_color;
+    m->character[remote] = theirs->character_id;
+    m->color[remote] = theirs->character_color;
+    bool direct = mode == PC_MATCH_DIRECT;
+    uint16_t stage = 0x1F;
+    uint8_t alt = 0;
+    for (int port = 0; port < 2; port++) {
+        bool ours = port == local;
+        bool chosen = ours ? true : theirs->stage_selected;
+        if (chosen) {
+            stage = ours ? my_stage : theirs->stage_id;
+            alt = ours ? 0 : theirs->alt_stage_mode;
+            break;
+        }
+    }
+    m->stage = stage;
+    m->alt_stage_mode = direct ? alt : 0;
+    m->decider = s_slippi_ticket.is_host;
+    m->rng_offset = m->decider ? my_rng : theirs->rng_offset;
+    if (theirs->character_id >= 26 || s_pick_char >= 26) {
+        fail("The character selected is not allowed in this mode");
+        return;
+    }
+    if (mode == PC_MATCH_UNRANKED) {
+        uint16_t ids[16];
+        int n = pc_net_match_slippi_stages(ids, 16);
+        bool ok = n == 0;
+        for (int i = 0; i < n; i++)
+            ok |= ids[i] == stage;
+        if (!ok) {
+            fail("The opponent chose a stage that is not allowed");
+            return;
+        }
+    }
+    pc_log_line("match: Slippi match P%d: chars %u/%u colors %u/%u stage %u alt %u rng %u (%s)",
+        local + 1, m->character[0], m->character[1], m->color[0], m->color[1], m->stage,
+        m->alt_stage_mode, m->rng_offset, m->decider ? "decider" : "guest");
+    ready();
+}
+
+bool pc_net_match_slippi_match(PcNetSlippiMatch* out) {
+    if (!s_slippi_match || state != PC_MATCH_READY)
+        return false;
+    *out = s_slippi_built;
+    return true;
+}
+
+void pc_net_match_set_slippi_pick(uint8_t character, uint8_t color) {
+    s_pick_char = character;
+    s_pick_color = color;
+    s_pick_set = true;
 }
 
 bool pc_net_match_start(enum PcNetMatchMode m, const char* code) {
@@ -991,18 +1088,22 @@ void pc_net_match_poll(void) {
         }
     } else if (state == PC_MATCH_CONNECT) {
         if (s_slippi_match) {
-            /* The Slippi transport agrees the match through the interim setup
-             * message (net_handshake.c slp_direct, driven from pc_net_poll via
-             * handshake_direct), not the custom RULES/READY lane. Pump it and
-             * watch for the handshake to complete. */
-            pc_net_poll();
-            int hs = pc_net_handshake_state(); /* 0 idle, 2 done, 3 failed */
-            if (hs == 2) {
-                seed = pc_net_seed();
-                start_frame = pc_net_start_frame();
-                ready();
-            } else if (hs == 3) {
-                fail("Slippi match setup failed");
+            /* The link is up or coming up; selections cross it and the match
+             * is built from both. The rollback engine is not running yet. */
+            pc_net_slippi_link_pump();
+            int link = pc_net_slippi_link_state();
+            if (link == 2) {
+                fail("Connection to the opponent was lost");
+            } else if (link == 0) {
+                if (SDL_GetTicks() - s_link_started_ms > SLIPPI_CONNECT_TIMEOUT_MS)
+                    fail("Could not connect to opponent");
+            } else {
+                if (!s_sel_sent)
+                    slp_send_selections();
+                PcSlippiSelections theirs;
+                if (s_sel_sent && pc_net_slippi_link_remote_selections(&theirs) &&
+                    theirs.character_selected)
+                    slp_build_match(&theirs);
             }
             return;
         }
@@ -1061,6 +1162,7 @@ void pc_net_match_stop(void) {
         pc_slippi_match_stop(s_slippi_search);
         s_slippi_search = NULL;
     }
+    pc_net_slippi_link_close();
     s_slippi_match = false;
     pc_dht_stop();
     publication = 0;

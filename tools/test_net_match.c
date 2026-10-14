@@ -17,6 +17,15 @@ bool pc_net_connect_slippi(const char* ip, uint16_t port, int player, uint32_t s
 uint32_t pc_net_seed(void) { return 0; }
 int32_t pc_net_start_frame(void) { return -1; }
 void pc_net_slippi_set_setup_host(bool host) { (void) host; }
+bool pc_net_slippi_link_open(const char* ip, uint16_t port, int p, uint16_t lp) {
+    (void) ip, (void) port, (void) p, (void) lp; return false;
+}
+void pc_net_slippi_link_pump(void) {}
+int pc_net_slippi_link_state(void) { return 2; }
+bool pc_net_slippi_link_send_selections(const struct PcSlippiSelections* s) { (void) s; return false; }
+bool pc_net_slippi_link_remote_selections(struct PcSlippiSelections* o) { (void) o; return false; }
+void pc_net_slippi_link_close(void) {}
+void pc_slippi_selections_reset(PcSlippiSelections* s) { memset(s, 0, sizeof *s); }
 bool pc_slippi_account_load(PcSlippiAccount* a, bool rediscover) {
     (void) rediscover; memset(a, 0, sizeof *a); return false;
 }
@@ -132,6 +141,11 @@ char* SDL_GetPrefPath(const char* org, const char* app) {
 }
 void SDL_free(void* p) {
     free(p);
+}
+uint64_t SDL_GetTicksNS(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000ull + t.tv_nsec;
 }
 uint64_t SDL_GetTicks(void) {
     struct timespec t;

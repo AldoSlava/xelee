@@ -73,6 +73,9 @@ static int32_t s_rb_frame = -1;      /* oldest mispredicted frame not rolled bac
  * are, because the Slippi frame callback below feeds the same s_remote_ring /
  * s_remote_have / s_rb_frame state the custom transport's on_inputs does. */
 static bool s_slippi_on;
+/* A Slippi matchmaking session runs the engine for the match only, with no
+ * scene hand-offs: a Dolphin peer has no such messages (pc_net_slippi_adopt). */
+static bool s_slippi_match_only;
 static PcSlippiAdapter s_slippi;
 static bool s_slippi_ever_heard;
 static uint64_t s_slippi_now_us(void);
@@ -1979,6 +1982,9 @@ static void scene_handoff_reset(void) {
 /* True while the caller must keep ticking the scene it has asked to leave.
  * Offline, and once the peer is gone, it never holds. */
 bool pc_net_scene_hold(void) {
+    if (net.active && s_slippi_match_only) {
+        return false; /* scenes end locally; only the match frames are synced */
+    }
     if (!net.active) {
         /* Replaying a netplay recording: the scene has to end where the
          * recorded pair agreed, not where this run's own code asks to. */
@@ -2071,6 +2077,7 @@ static void audit_reset(void);
 static bool s_seen_remote;
 
 static void session_reset(void) {
+    s_slippi_match_only = false;
     scene_handoff_reset();
     s_seed_have = false;
     s_lockstep = snapshot_state_region_missing() != NULL;
@@ -2599,6 +2606,138 @@ bool pc_net_connect_slippi(
     pc_log_line("net: Slippi transport: peer %s:%u, local port P%d, delay %s%d, seed %u",
         ip != NULL && ip[0] ? ip : "(listen)", port, net.local + 1, net.delay_auto ? "auto " : "",
         net.delay, seed);
+    return true;
+#endif
+}
+
+/* ---- Slippi link and adopt (see net.h) ---------------------------------- */
+static PcSlippiNet* s_link;
+
+bool pc_net_slippi_link_open(
+    const char* ip, uint16_t port, int local_player, uint16_t local_udp_port) {
+#ifdef __EMSCRIPTEN__
+    (void)ip, (void)port, (void)local_player, (void)local_udp_port;
+    return false;
+#else
+    if (net.tx_lock == NULL) {
+        net.tx_lock = SDL_CreateMutex();
+        s_rx_lock = SDL_CreateMutex();
+        sock_startup();
+        pc_slippi_net_global_init();
+    }
+    pc_net_slippi_link_close();
+    PcSlippiSessionConfig cfg;
+    memset(&cfg, 0, sizeof cfg);
+    cfg.local_port = (uint8_t)(local_player ? 1 : 0);
+    cfg.remote_count = 1;
+    cfg.remote_ports[0] = (uint8_t)(local_player ? 0 : 1);
+    s_link = pc_slippi_net_create(&cfg, local_udp_port, NULL);
+    if (s_link == NULL) {
+        pc_log_line("net: cannot create the Slippi ENet host");
+        return false;
+    }
+    pc_slippi_net_listen(s_link);
+    if (!pc_slippi_net_connect(s_link, ip, port)) {
+        pc_log_line("net: cannot dial Slippi peer %s:%u", ip, port);
+        pc_net_slippi_link_close();
+        return false;
+    }
+    pc_log_line("net: Slippi link: dialling %s:%u from port %u as P%d", ip, port, local_udp_port,
+        local_player + 1);
+    return true;
+#endif
+}
+
+void pc_net_slippi_link_pump(void) {
+    if (s_link != NULL) {
+        pc_slippi_net_poll(s_link, s_slippi_now_us());
+    }
+}
+
+int pc_net_slippi_link_state(void) {
+    if (s_link == NULL) {
+        return 2;
+    }
+    int st = pc_slippi_net_status(s_link);
+    if (st == PC_SLIPPI_NET_CONNECTED) {
+        return 1;
+    }
+    if (st == PC_SLIPPI_NET_DISCONNECTED || st == PC_SLIPPI_NET_FAILED) {
+        return 2;
+    }
+    return 0;
+}
+
+bool pc_net_slippi_link_send_selections(const struct PcSlippiSelections* s) {
+    return s_link != NULL && pc_slippi_net_send_selections(s_link, s);
+}
+
+bool pc_net_slippi_link_remote_selections(struct PcSlippiSelections* out) {
+    return s_link != NULL && pc_slippi_net_remote_selections(s_link, 0, out);
+}
+
+void pc_net_slippi_link_close(void) {
+    if (s_link == NULL) {
+        return;
+    }
+    pc_slippi_net_disconnect(s_link, PC_SLIPPI_DISCONNECT_UNSPECIFIED);
+    pc_slippi_net_poll(s_link, s_slippi_now_us());
+    pc_slippi_net_destroy(s_link);
+    s_link = NULL;
+}
+
+bool pc_net_slippi_adopt(int local_player, uint32_t rng_offset) {
+#ifdef __EMSCRIPTEN__
+    (void)local_player, (void)rng_offset;
+    return false;
+#else
+    if (s_link == NULL || pc_net_slippi_link_state() != 1) {
+        pc_log_line("net: no connected Slippi link to start a match on");
+        return false;
+    }
+    PcSlippiNet* link = s_link;
+    s_link = NULL;
+    session_reset();
+    HSD_PadLibData.qtype = 2;
+    net.local = local_player ? 1 : 0;
+    net.remote = 1 - net.local;
+    net.connect_timeout_ms = MATCH_CONNECT_TIMEOUT_MS;
+    const char* delay = getenv("MELEE_NET_DELAY");
+    net.delay_auto = delay ? strcmp(delay, "auto") == 0 : s_configured_delay < 0;
+    net.delay = net.delay_auto ? 2 : delay ? atoi(delay) : s_configured_delay;
+    if (net.delay < 0 || net.delay >= RING / 2) {
+        net.delay = 2;
+    }
+    net.delay_next = net.delay;
+    s_wrote = net.delay - 1;
+    net.seed = rng_offset;
+    net.rng_offset = rng_offset;
+    net.direct = true;
+    s_slippi.net = link;
+    pc_slippi_adapter_init(&s_slippi, link, slp_frame_cb, NULL, NULL);
+    /* No setup message and no tunnelled engine lanes: a Dolphin peer sends
+     * neither, and the match is already agreed. */
+    PcSlippiNetCallbacks cb;
+    memset(&cb, 0, sizeof cb);
+    pc_slippi_net_set_callbacks(link, &cb);
+    pc_slippi_adapter_start_game(&s_slippi, s_slippi_now_us());
+    s_slippi_sent_upto = -1;
+    s_slippi_ever_heard = false;
+    s_slippi_on = true;
+    net.slippi = true;
+    net.sock = SOCK_INVALID;
+    /* Agreed already: nothing to handshake, no scene hand-offs in this
+     * session, the engine counts frames from here. */
+    net.hs = HS_DONE;
+    net.hs_host = false;
+    net.start_frame = 0;
+    /* A peer's checksum for frame 0 is not stamped before it has run it, so
+     * frame 0 reads as zero and would be reported as a desync. */
+    net.ck_from = 1;
+    s_slippi_match_only = true;
+    net.active = true;
+    pc_log_line("net: Slippi match: P%d, rngOffset %u, delay %s%d", net.local + 1, rng_offset,
+        net.delay_auto ? "auto " : "", net.delay);
     return true;
 #endif
 }

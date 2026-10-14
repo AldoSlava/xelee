@@ -49,6 +49,21 @@ const char* pc_net_match_slippi_code(void);
 /* The external stage ids a Slippi Unranked ticket allows (0 when the match is
  * not an Unranked Slippi one: players pick). */
 int pc_net_match_slippi_stages(uint16_t* out, int max);
+
+/* A Slippi match once both sides' selections have crossed the link (state
+ * PC_MATCH_READY): what the VS scene needs, by port (0 = P1, 1 = P2). */
+typedef struct PcNetSlippiMatch {
+    int local_player;      /* our port, 0 or 1 */
+    uint8_t character[2];  /* external character ids */
+    uint8_t color[2];
+    uint16_t stage;        /* external stage id */
+    uint8_t alt_stage_mode;
+    uint32_t rng_offset;   /* the decider's */
+    bool decider;
+} PcNetSlippiMatch;
+bool pc_net_match_slippi_match(PcNetSlippiMatch* out);
+/* The local pick, made on the CSS before the search starts (Slippi's order). */
+void pc_net_match_set_slippi_pick(uint8_t character, uint8_t color);
 const char* pc_net_match_profile_error(void);
 const char* pc_net_match_profile_directory(void);
 enum PcNetMatchMode pc_net_match_mode(void);

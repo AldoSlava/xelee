@@ -306,6 +306,18 @@ static void unlock_restore(void) {
     }
 }
 
+/* The Slippi CSS opens before any session (it is the lobby), and Slippi
+ * assumes everything is unlocked, so the flow pins the unlock surface while
+ * that screen is up and puts the player's own progress back when it leaves
+ * for the menu or a session disconnects (rules_restore also releases it). */
+void pc_net_unlock_pin(void) {
+    unlock_force();
+}
+
+void pc_net_unlock_release(void) {
+    unlock_restore();
+}
+
 /* Hash of the unlock state as read back out of the save data, not of the
  * constant we asked for: what goes on the wire is what the readers will
  * see. Folded into the RULES/READY hash discipline by riding inside their
@@ -736,7 +748,7 @@ static bool rules_ready(void) {
  * Both peers apply the same constants, so no RULES message is needed and the
  * local settings never reach the sim (a peer with 3 stocks would otherwise
  * desync at the first KO). Restored with the rest at disconnect. */
-static void slippi_rules_force(void) {
+void pc_net_slippi_rules_force(void) {
     const struct GamePrefs* p = gmMainLib_GetGamePrefs();
     Rules ru;
     memset(&ru, 0, sizeof ru);
@@ -778,7 +790,7 @@ static void slp_direct(void) {
         }
         s_direct_idle_ns = 0;
         if (!s_rules_on) {
-            slippi_rules_force();
+            pc_net_slippi_rules_force();
         }
         if (pc_net_slippi_setup_host()) {
             net.hs_host = true;
