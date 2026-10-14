@@ -127,6 +127,27 @@ bool pc_slippi_http_post_json(const char* url, const char* body, const char* bea
     return http_request(url, body, bearer, true, out, cap, status);
 }
 
+#elif defined(__ANDROID__) /* no libcurl: java.net over JNI (slp_http_android.cpp) */
+
+#include <stdbool.h>
+bool pc_slippi_http_android(const char* url, const char* body, const char* bearer, bool post, char* out,
+                            size_t cap, int* status);
+
+bool pc_slippi_http_get(const char* url, const char* bearer, char* out, size_t cap, int* status) {
+    if (status != NULL) {
+        *status = 0;
+    }
+    return pc_slippi_http_android(url, NULL, bearer, false, out, cap, status);
+}
+
+bool pc_slippi_http_post_json(const char* url, const char* body, const char* bearer, char* out,
+                              size_t cap, int* status) {
+    if (status != NULL) {
+        *status = 0;
+    }
+    return pc_slippi_http_android(url, body, bearer, true, out, cap, status);
+}
+
 #else /* no curl: the refresh is unavailable, everything else still works */
 
 bool pc_slippi_http_get(const char* url, const char* bearer, char* out, size_t cap, int* status) {

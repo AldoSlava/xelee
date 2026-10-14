@@ -254,6 +254,7 @@ set(PC_SOURCES
         src/pc/slippi/slp_json.c
         src/pc/slippi/slp_user.c
         src/pc/slippi/slp_http.c
+        src/pc/slippi/slp_http_android.cpp
         src/pc/slippi/slp_match.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
