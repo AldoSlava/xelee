@@ -64,7 +64,7 @@ static CssLine css_lines[l_count];
  * screen units, as Slippi's; these map them onto the CSS world, calibrated
  * against marks at known world positions (x = 0 is the screen centre, about
  * 9.2 screen units a world unit across, 8.5 down). */
-#define BLOCK_X 380.0f
+#define BLOCK_X 384.0f
 #define BLOCK_Y 251.0f
 #define STEP_DY 22.5f
 #define ORG_X 190.0f
@@ -158,8 +158,8 @@ void mnOnlineCss_Create(int ctx)
     css_text->x4C = 1;
     memset(css_lines, 0, sizeof(css_lines));
     addLine(&css_lines[l_title], BLOCK_X, BLOCK_Y, 0.42f, c_white);
-    addLine(&css_lines[l_user_label], 202.0f, BLOCK_Y, 0.3f, c_dim);
-    addLine(&css_lines[l_user_name], 202.0f, BLOCK_Y + 18.0f, 0.38f, c_white);
+    addLine(&css_lines[l_user_label], 217.0f, BLOCK_Y, 0.3f, c_dim);
+    addLine(&css_lines[l_user_name], 217.0f, BLOCK_Y + 18.0f, 0.38f, c_white);
     for (i = 0; i < CSS_STEPS_MAX; i++) {
         float y = BLOCK_Y + 30.0f + STEP_DY * i;
         addLine(&css_lines[l_mark + i], BLOCK_X, y, 0.34f, c_blue);

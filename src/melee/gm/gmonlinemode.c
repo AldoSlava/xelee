@@ -393,6 +393,15 @@ void onEnterCss(GameModeState* state)
         }
     }
 #endif
+#ifdef TARGET_PC
+    if (slippiFlow()) {
+        /* Slippi's CSS is a one-player layout (wide card, "1-P" badge, no
+         * rules bar). Event Match's is the nearest; its "MELEE" title is put
+         * in by mncharsel.c (cssSlippiTitle). */
+        gmVsMelee_EnterCss(state, &online_vs, EVENT_MATCH);
+        return;
+    }
+#endif
     gmVsMelee_EnterCss(state, &online_vs, VS_MELEE);
 }
 

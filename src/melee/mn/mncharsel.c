@@ -1702,6 +1702,46 @@ void mnCharSel_8025DB34(u8 arg0)
     }
 }
 
+#ifdef TARGET_PC
+/* Slippi's CSS is the one-player layout (here Event Match's, wide card and "1-P"
+ * badge) titled "MELEE": that title is the VS layout's, so the layout's own is
+ * hidden and the VS model is loaded with only its title joint showing. */
+static void cssSlippiTitle(void)
+{
+    HSD_JObj* j = NULL;
+    HSD_JObj* vs;
+    HSD_GObj* gobj;
+    int id;
+    lb_80011E24(mnCharSel_804D6CC0, &j, 0x24, -1);
+    if (j != NULL) {
+        HSD_JObjSetFlags(j, JOBJ_HIDDEN);
+    }
+    gobj = GObj_Create(4, 5, 0x80);
+    vs = HSD_JObjLoadJoint(DP(HSD_Joint, css_models->menu.joint));
+    HSD_JObjAddAnimAll(vs, DP(HSD_AnimJoint, css_models->menu.animjoint),
+                       DP(HSD_MatAnimJoint, css_models->menu.matanim_joint),
+                       DP(HSD_ShapeAnimJoint, css_models->menu.shapeanim_joint));
+    HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, vs);
+    GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 1, 0x80);
+    HSD_JObjReqAnimAll(vs, 0.0f);
+    HSD_JObjAnimAll(vs);
+    for (id = 0; id < 400; id++) {
+        j = NULL;
+        lb_80011E24(vs, &j, id, -1);
+        if (j != NULL && id != 0x24 && !(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL)) &&
+            j->u.dobj != NULL) {
+            HSD_JObjSetFlags(j, JOBJ_HIDDEN);
+        }
+    }
+    lb_80011E24(vs, &j, 0x24, -1);
+    if (j != NULL) { /* frame 0 of the title: "MELEE" */
+        HSD_ForeachAnim(j, JOBJ_TYPE, TOBJ_MASK, HSD_AObjReqAnim, AOBJ_ARG_AF, 0.0f);
+        HSD_JObjAnimAll(j);
+        HSD_ForeachAnim(j, JOBJ_TYPE, TOBJ_MASK, HSD_AObjStopAnim, AOBJ_ARG_AOV, NULL);
+    }
+}
+#endif
+
 void mnCharSel_8025EE8C(u8 idx)
 {
     float mode_frame;
@@ -4521,6 +4561,11 @@ s32 mnCharSel_802640A0(void)
     HSD_JObjAnimAll(mnCharSel_804D6CC0);
     HSD_ForeachAnim(mnCharSel_804D6CC0, JOBJ_TYPE, ALL_TYPE_MASK,
                     HSD_AObjStopAnim, AOBJ_ARG_AOV, NULL);
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        cssSlippiTitle();
+    }
+#endif
 
     if (gm_IsCKindUnlocked(CKind_Luigi) == 0) {
         row_a = 2;
