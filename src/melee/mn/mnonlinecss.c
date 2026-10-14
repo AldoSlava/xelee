@@ -181,7 +181,7 @@ void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep
             text = steps[i].text;
         }
         css_pending[i] = i < n && (steps[i].mark == '+' || steps[i].mark == 'x');
-        css_mark_y[i] = BLOCK_Y + 30.0f + STEP_DY * i + 25.5f;
+        css_mark_y[i] = BLOCK_Y + 30.0f + STEP_DY * i + 24.5f;
         setLine(&css_lines[l_mark + i], mark, color);
         setLine(&css_lines[l_text + i], text, i < n && steps[i].mark == '!' ? c_red : c_white);
     }
