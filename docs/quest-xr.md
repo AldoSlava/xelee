@@ -1177,12 +1177,16 @@ these.
 ### Menu windows
 
 Melee's menus are 3D scenes drawn through a perspective camera. In XR the
-character select shows as a window onto that scene instead of a flat
-picture: head motion and the eyes' disparity show its depth.
+title screen, the main menu and the character select show as a window onto
+that scene instead of a flat picture: head motion and the eyes' disparity
+show its depth.
 `MELEE_XR_MENU_WINDOW=0` keeps the flat screen.
 
 - **Camera.** `pc_xr_menu_window_render` (`src/pc/xr_scene.c`) replaces the
-  camera's render callback (`HSD_GObj_803910D8`, in `mncharsel.c`). It tags
+  camera's render callback (`HSD_GObj_803910D8`: `mncharsel.c`, the main
+  menu's text camera). Callbacks that erase first (the main menu's and the
+  title's scene cameras) call `pc_xr_menu_window_begin` after
+  `HSD_CObjSetCurrent` instead. It tags
   the camera's draws as world and tells aurora the plane the camera looks at
   (`aurora_xr_menu_window`: the camera's distance to its interest, and the
   plane's height).
@@ -1197,7 +1201,9 @@ picture: head motion and the eyes' disparity show its depth.
   and sets alpha to 1 inside (menu draws write no depth, so the fights'
   depth coverage would leave the window see-through).
 - **Pop-out.** Objects drawn through `pc_xr_menu_pop_render` (the character
-  select's hands and tokens) come toward the head by `MELEE_XR_MENU_POP`
+  select's hands and tokens, the main menu's option buttons and description
+  card, the title's logo; not the main menu's panel, whose grid and frame the
+  flat screen crops) come toward the head by `MELEE_XR_MENU_POP`
   (default 0.12 of the distance). `aurora_xr_menu_pop` scales them about the
   head in the room, so they keep their place in the picture as seen from the
   head and the pointer needs no correction. They draw after the mask, so they

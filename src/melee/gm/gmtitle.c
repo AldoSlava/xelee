@@ -54,7 +54,11 @@ HSD_GObj* gmTitle_801A12C4(void)
     HSD_GObj* gobj = GObj_Create(HSD_GOBJ_CLASS_UI, 15, 0);
     HSD_JObj* jobj = HSD_JObjLoadJoint(DP(HSD_Joint, model_desc_0.joint));
     HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
+    #ifdef TARGET_PC
+    GObj_SetupGXLink(gobj, pc_xr_menu_pop_render, 9, 0);
+#else
     GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 9, 0);
+#endif
     HSD_JObjAddAnimAll(jobj, DP(HSD_AnimJoint, model_desc_0.animjoint),
                        DP(HSD_MatAnimJoint, model_desc_0.matanim_joint),
                        DP(HSD_ShapeAnimJoint, model_desc_0.shapeanim_joint));
@@ -147,7 +151,11 @@ HSD_GObj* gmTitle_801A165C(void)
     u8 kind = HSD_GObj_JObjKind;
 
     HSD_GObjObject_80390A70(gobj, kind, jobj);
+    #ifdef TARGET_PC
+    GObj_SetupGXLink(gobj, pc_xr_menu_pop_render, 9, 0);
+#else
     GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 9, 0);
+#endif
     HSD_JObjAddAnimAll(jobj, DP(HSD_AnimJoint, model_desc_0.animjoint),
                        DP(HSD_MatAnimJoint, model_desc_0.matanim_joint),
                        DP(HSD_ShapeAnimJoint, model_desc_0.shapeanim_joint));
@@ -196,8 +204,14 @@ static void gmTitle_801A1814(HSD_GObj* gobj, intptr_t unused)
 {
     HSD_CObj* cobj = GET_COBJ(gobj);
     if (HSD_CObjSetCurrent(GET_COBJ(gobj))) {
+#ifdef TARGET_PC
+        pc_xr_menu_window_begin(cobj);
+#endif
         HSD_GObj_80390ED0(gobj, 0x7);
         HSD_CObjEndCurrent();
+#ifdef TARGET_PC
+        pc_xr_mono_camera();
+#endif
     }
 }
 
