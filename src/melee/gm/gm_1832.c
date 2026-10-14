@@ -37,8 +37,16 @@
 #include <sysdolphin/baselib/wobj.h>
 
 #ifdef TARGET_PC
+#include "pc/pc.h"
 #include "pc/widescreen.h"
 #include <stdlib.h>
+#endif
+
+#ifdef TARGET_PC
+/* Slippi's online VS splash is this scene with the stage text and the stage
+ * progress row hidden (its VSScreen patches); set by gmonlinemode.c. */
+bool gm_vs_splash_online;
+static HSD_JObj* gm_vs_splash_hud;
 #endif
 
 static struct {
@@ -387,6 +395,41 @@ void fn_80184AB8(HSD_GObj* arg0)
 
     jobj = arg0->hsd_obj;
     HSD_JObjAnimAll(jobj);
+#ifdef TARGET_PC
+    if (gm_vs_splash_online && getenv("MELEE_SPLASH_DUMP")) {
+        static bool dumped;
+        if (!dumped && lbl_804735A8.x38 == 5) {
+            int m, id;
+            HSD_JObj* roots[2] = { jobj, gm_vs_splash_hud };
+            dumped = true;
+            for (m = 0; m < 2; m++) {
+                for (id = 0; id < 60; id++) {
+                    HSD_JObj* j = NULL;
+                    lb_80011E24(roots[m], &j, id, -1);
+                    if (j != NULL) {
+                        Vec3 t;
+                        HSD_JObjGetTranslation(j, &t);
+                        pc_log_line("splashjoint m%d %3d x=%7.2f y=%7.2f z=%7.2f flags=%08x dobj=%d", m, id,
+                                    t.x, t.y, t.z, (unsigned) j->flags,
+                                    !(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL)) &&
+                                        j->u.dobj != NULL);
+                    }
+                }
+            }
+        }
+    }
+    if (gm_vs_splash_online) {
+        /* HideStageText: the letters of "STAGE" and its number. */
+        static const u8 hidden[] = { 9, 10, 11, 12, 13, 0x12, 0x13 };
+        size_t k;
+        for (k = 0; k < sizeof hidden; k++) {
+            lb_80011E24(jobj, &sp110, hidden[k], -1);
+            if (sp110 != NULL) {
+                HSD_JObjSetFlagsAll(sp110, JOBJ_HIDDEN);
+            }
+        }
+    }
+#endif
 
     if (lbl_804735A8.x38 < 0x8CU) {
         lbl_804735A8.x38 = (u16) (lbl_804735A8.x38 + 1);
@@ -526,6 +569,19 @@ void fn_8018504C(void)
         lbl_804735A8.x4[4],
         (f32) (lbl_804735A8.x3A + ((lbl_8047368C.xEE * 0x32) - new_var)));
     HSD_JObjAnimAll(lbl_804735A8.x4[4]);
+#ifdef TARGET_PC
+    if (gm_vs_splash_online && gm_vs_splash_hud != NULL) {
+        /* HideStageDisplay: the whole stage progress row. */
+        int j;
+        for (j = 0; j < 0x1B; j++) {
+            HSD_JObj* part = NULL;
+            lb_80011E24(gm_vs_splash_hud, &part, j, -1);
+            if (part != NULL) {
+                HSD_JObjSetFlags(part, JOBJ_HIDDEN);
+            }
+        }
+    }
+#endif
     if ((lbl_804735A8.x38 == 0x2D) && (lbl_8047368C.model_scale_kind == 3)) {
         switch (lbl_8047368C.game_type) {
         case 1:
@@ -1095,6 +1151,9 @@ static inline void gm_80186634_SetupModel(void)
     HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
     GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 0xC, 0);
     HSD_GObj_SetupProc(gobj, (HSD_GObjEvent) (Event) fn_8018504C, 0x11);
+#ifdef TARGET_PC
+    gm_vs_splash_hud = jobj;
+#endif
     gm_8016895C(jobj, GM_SCENE_MODEL(lbl_804D6600, 0), 0);
     HSD_JObjReqAnimAll(jobj, (f32) ((lbl_8047368C.xEE - 1) * 0x32));
     HSD_JObjAnimAll(jobj);

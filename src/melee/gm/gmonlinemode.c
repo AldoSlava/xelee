@@ -55,6 +55,7 @@ enum {
     state_vs = 3,
     state_sudden_death = 4,
     state_results = 5, /* last: gmVsMelee_ExitResults skips challengers */
+    state_intro = 6,   /* the VS splash: the Classic stage intro, between the stage and the fight */
 };
 
 static bool awaiting_rank_result;
@@ -71,6 +72,24 @@ static void onEnterSuddenDeath(GameModeState*);
 static void onExitSuddenDeath(GameModeState*);
 static void onEnterResults(GameModeState*);
 static void onExitResults(GameModeState*);
+static void onEnterIntro(GameModeState*);
+static void onExitIntro(GameModeState*);
+
+/* The Classic stage intro's enter data (gmclassic.c's gmClassicIntroData): the
+ * allies on one side, the enemies on the other, each with a costume. Slippi's
+ * VS splash is this scene with the two players in it. */
+typedef struct OnlineIntroData {
+    s32 kind;          /* 0: plain models */
+    s32 sub;
+    u8 slot, nametag, stage_no, ally_n, enemy_n;
+    u8 ally[3], enemy[3], ally_color[3], enemy_color[3], ally_flag[3], enemy_flag[3];
+    u8 pad;
+} OnlineIntroData;
+#ifdef TARGET_PC
+extern bool gm_vs_splash_online;
+#endif
+static OnlineIntroData online_intro_data;
+static u8 online_intro_exit[0x20];
 
 GameModeState gm_Mode_Online_States[] = {
     {
@@ -131,6 +150,18 @@ GameModeState gm_Mode_Online_States[] = {
             GS_SUDDEN_DEATH,
             &gmVsMelee_StartData,
             &gmVsMelee_SuddenDeathExitInfo,
+        },
+    },
+    {
+        state_intro,
+        lbDvdPreload_3,
+        0,
+        onEnterIntro,
+        onExitIntro,
+        {
+            GS_INTRO_EASY,
+            &online_intro_data,
+            &online_intro_exit,
         },
     },
     {
@@ -526,11 +557,56 @@ void onExitSss(GameModeState* state)
 #endif
     gmVsMelee_ExitSss(state, &online_vs, state_css);
 #ifdef TARGET_PC
+    {
+        PcNetSlippiMatch sm;
+        if (slippiFlow() && pc_net_match_slippi_match(&sm) &&
+            ((SSSData*) gm_GetGameModeStateExitData(state))->start_game) {
+            gm_SetNextGameModeStateId(state_intro); /* the VS splash, then the fight */
+        }
+    }
     if (rankedMode() && !((SSSData*) gm_GetGameModeStateExitData(state))->start_game) {
         pc_rank_session_abort("ranked stage selection cancelled");
         gm_SetNextGameModeStateId(state_lobby);
     }
 #endif
+}
+
+void onEnterIntro(GameModeState* state)
+{
+    OnlineIntroData* d = gm_GetGameModeStateEnterData(state);
+#ifdef TARGET_PC
+    PcNetSlippiMatch sm;
+    pc_log_line("online: enter VS splash at frame %d", pc_net_frame());
+    memset(d, 0, sizeof *d);
+    if (slippiFlow() && pc_net_match_slippi_match(&sm)) {
+        d->kind = 0;
+        d->slot = 0;
+        d->nametag = 0x78;
+        d->stage_no = 1;
+        d->ally_n = 1;
+        d->enemy_n = 1;
+        /* The local player is on the left, the opponent on the right, and the
+         * announcer calls the opponent's character, as Slippi's. */
+        d->ally[0] = sm.character[sm.local_player];
+        d->ally[1] = d->ally[2] = 0x21;
+        d->ally_color[0] = sm.color[sm.local_player];
+        d->enemy[0] = sm.character[1 - sm.local_player];
+        d->enemy[1] = d->enemy[2] = 0x21;
+        d->enemy_color[0] = sm.color[1 - sm.local_player];
+        gm_vs_splash_online = true;
+        return;
+    }
+#endif
+    /* Any other online mode: the scene ends on its first frame. */
+    d->enemy[0] = 0x1A;
+}
+
+void onExitIntro(UNUSED GameModeState* state)
+{
+#ifdef TARGET_PC
+    gm_vs_splash_online = false;
+#endif
+    gm_SetNextGameModeStateId(state_vs);
 }
 
 void onEnterVs(GameModeState* state)
@@ -587,6 +663,16 @@ void onExitVs(GameModeState* state)
         /* Ties return through CSS to a fresh one-stock, three-minute game;
          * vanilla sudden death would begin at 300 percent. */
         gm_SetNextGameModeStateId(state_results);
+    }
+    if (slippiFlow() && online_kind == ONLINE_KIND_UNRANKED && pc_net_slippi_active() &&
+        !gm_MatchHasMultipleWinners(&mei->match_end)) {
+        /* Slippi's Unranked has no results screen: the set is over, so the
+         * link closes and the next search starts from the CSS. A tie still
+         * goes to sudden death first. */
+        pc_log_line("online: set over at frame %d, skipping the results", pc_net_frame());
+        pc_net_disconnect();
+        pc_net_match_stop();
+        gm_SetNextGameModeStateId(state_css);
     }
 #endif
     for (i = 0; i < GM_MAX_PLAYERS; i++) {

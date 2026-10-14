@@ -915,7 +915,7 @@ def summarize(inst, need_match=True):
     text = inst.text()
     fails = []
     if not re.search(r"net: test done at frame (\d+)", text) and \
-            not (MM_RUN and "online: enter RESULTS" in text):
+            not (MM_RUN and "online: set over" in text):
         fails.append("no 'net: test done'")
     # A session that never came up makes every other number in this row
     # meaningless: the instance plays a normal offline game, its checksum
@@ -927,7 +927,7 @@ def summarize(inst, need_match=True):
         fails.append("netplay never started: bind failed (port still in use?)")
     elif not re.search(r"net: (rollback with |Slippi transport: peer |Slippi match: P)", text):
         fails.append("netplay never started: no session line")
-    if inst.proc.returncode != 0 and not (MM_RUN and "online: enter RESULTS" in text):
+    if inst.proc.returncode != 0 and not (MM_RUN and "online: set over" in text):
         fails.append(f"exit code {inst.proc.returncode}")
     # "peer silent" has to be the whole leaving-netplay line, not a substring:
     # the benign `net: interrupted at frame N (peer silent 3000 ms),
@@ -1413,8 +1413,8 @@ def run(args):
             texts = a.text() + b.text()
             if any(re.search(t, texts) for t in term):
                 break  # let summarize() report it; do not burn the whole budget
-            if MM_RUN and "online: enter RESULTS" in a.text() and \
-                    "online: enter RESULTS" in b.text():
+            if MM_RUN and "online: set over" in a.text() and \
+                    "online: set over" in b.text():
                 break  # the match ended on its own, which is a complete run
             fr = max([int(x) for x in re.findall(r"net: frame (\d+)", texts)] or [-1])
             if fr > last_frame:
