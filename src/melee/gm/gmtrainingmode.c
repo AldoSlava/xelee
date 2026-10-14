@@ -4,6 +4,10 @@
 
 #include "gm_1884.h"
 #include "gmboot.h"
+#ifdef TARGET_PC
+#include <stdlib.h>
+#include <string.h>
+#endif
 #include <melee/ft/forward.h>
 #include <melee/gr/forward.h>
 #include "gm_1A3F.h"
@@ -323,7 +327,11 @@ void gm_Mode_Training_OnLoad(void)
         cache->stkind = vs->start.rules.stkind;
         lbDvd_80018254();
 
-        gm_SetGameModeStateId(2);
+        /* MELEE_BOOT_SCENE=sss stops at the stage select, with this cast. */
+        {
+            const char* want = getenv("MELEE_BOOT_SCENE");
+            gm_SetGameModeStateId(want != NULL && strcmp(want, "sss") == 0 ? 1 : 2);
+        }
     }
 #endif
 }

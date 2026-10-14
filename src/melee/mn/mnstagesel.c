@@ -26,6 +26,11 @@
 #include <sysdolphin/baselib/lobj.h>
 #include <sysdolphin/baselib/memory.h>
 #include <sysdolphin/baselib/random.h>
+#ifndef TARGET_PC
+#define pc_xr_menu_window_render HSD_GObj_803910D8
+#define pc_xr_menu_pop_render HSD_GObj_JObjCallback
+#define pc_xr_menu_pop_half_render HSD_GObj_JObjCallback
+#endif
 
 #define MAX_ITER 100000
 #define NUM_STAGES 29
@@ -127,6 +132,7 @@ struct StageSelUserData {
 #include "pc/net_rank_session.h"
 #include <sysdolphin/baselib/sislib.h>
 #include "pc/pc.h"
+#include "pc/xr_scene.h"
 
 /* A compact ranked list uses synchronized pads and makes both bans visible.
  * It does not depend on the archive's cursor geometry. */
@@ -674,7 +680,7 @@ static inline void make_stage_icon(HSD_JObj** out)
     gobj = GObj_Create(4, 5, 0x80);
     jobj = HSD_JObjLoadJoint(DP(HSD_Joint, sss_models->icon_stacked.joint));
     HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
-    GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 4, 0x83);
+    GObj_SetupGXLink(gobj, pc_xr_menu_pop_half_render, 4, 0x83);
     HSD_GObj_SetupProc(gobj, mn_8022EAE0, 3);
     HSD_JObjAddAnimAll(jobj,
                        DP(HSD_AnimJoint, sss_models->icon_stacked.animjoint),
@@ -789,7 +795,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
             HSD_GObj* gobj = mnStageSel_804D6C9C = GObj_Create(2, 3, 0x80);
             HSD_CObj* cobj = HSD_CObjLoadDesc(MenMain_cam);
             HSD_GObjObject_80390A70(gobj, HSD_GObj_CameraKind, cobj);
-            GObj_SetupGXLinkMax(gobj, HSD_GObj_803910D8, 0);
+            GObj_SetupGXLinkMax(gobj, pc_xr_menu_window_render, 0);
             gobj->gxlink_prios = 0x11;
             HSD_GObj_SetupProc(gobj, mn_8022BA1C, 5);
         }
@@ -897,7 +903,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
             jobj = HSD_JObjLoadJoint(DP(HSD_Joint,
                                         sss_models->icon_special.joint));
             HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
-            GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 4, 0x83);
+            GObj_SetupGXLink(gobj, pc_xr_menu_pop_half_render, 4, 0x83);
             HSD_GObj_SetupProc(gobj, mn_8022EAE0, 3);
             HSD_JObjAddAnimAll(jobj,
                                DP(HSD_AnimJoint,
@@ -930,7 +936,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
             jobj = HSD_JObjLoadJoint(DP(HSD_Joint,
                                         sss_models->icon_random.joint));
             HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
-            GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 4, 0x83);
+            GObj_SetupGXLink(gobj, pc_xr_menu_pop_half_render, 4, 0x83);
             HSD_GObj_SetupProc(gobj, mn_8022EAE0, 3);
             HSD_JObjAddAnimAll(jobj,
                                DP(HSD_AnimJoint,
@@ -954,7 +960,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
             jobj = HSD_JObjLoadJoint(DP(HSD_Joint,
                                         sss_models->icon_large.joint));
             HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
-            GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 4, 0x83);
+            GObj_SetupGXLink(gobj, pc_xr_menu_pop_half_render, 4, 0x83);
             HSD_GObj_SetupProc(gobj, mn_8022EAE0, 3);
             animjoint = DP(HSD_AnimJoint, sss_models->icon_large.animjoint);
             HSD_JObjAddAnimAll(jobj, animjoint,
@@ -987,7 +993,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
             jobj = HSD_JObjLoadJoint(DP(HSD_Joint,
                                         sss_models->cursor.joint));
             HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
-            GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 4, 0x86);
+            GObj_SetupGXLink(gobj, pc_xr_menu_pop_render, 4, 0x86);
             HSD_GObj_SetupProc(gobj, mn_8022EAE0, 2);
             HSD_JObjAddAnimAll(jobj,
                                DP(HSD_AnimJoint,
@@ -1083,7 +1089,7 @@ void mnStageSel_Scene_OnEnter(void* arg0)
                                      sss_models->icon_hover.joint));
             s32* temp_r3_16;
             HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, temp_r3_15);
-            GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 4, 0x85);
+            GObj_SetupGXLink(gobj, pc_xr_menu_pop_render, 4, 0x85);
             HSD_GObj_SetupProc(gobj, mn_8022EAE0, 1);
             HSD_JObjAddAnimAll(temp_r3_15,
                                DP(HSD_AnimJoint,

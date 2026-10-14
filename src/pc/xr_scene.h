@@ -37,6 +37,8 @@ struct HSD_CObj;
 bool pc_xr_menu_window_begin(struct HSD_CObj* cobj);
 /* Same for a menu object that pops out of the window (under such a camera). */
 void pc_xr_menu_pop_render(struct HSD_GObj* gobj, intptr_t pass);
+/* Half as far: a layer between the window and the popped objects. */
+void pc_xr_menu_pop_half_render(struct HSD_GObj* gobj, intptr_t pass);
 /* While on, the fight and HUD cameras draw only the flat frame, so XR shows
  * the virtual screen: for screens the game draws over a fight that has
  * ended (Stage Clear's bonus tally, gm/gmregclear.c). Each scene starts
@@ -102,6 +104,7 @@ static inline void pc_xr_hud_camera(void) {}
 #define pc_xr_menu_window_render HSD_GObj_803910D8
 static inline bool pc_xr_menu_window_begin(struct HSD_CObj* cobj) { (void)cobj; return false; }
 #define pc_xr_menu_pop_render HSD_GObj_JObjCallback
+#define pc_xr_menu_pop_half_render HSD_GObj_JObjCallback
 static inline void pc_xr_flat_view(bool on) { (void)on; }
 static inline void pc_xr_mono_camera(void) {}
 struct HSD_JObj;

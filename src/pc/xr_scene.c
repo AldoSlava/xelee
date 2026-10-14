@@ -976,7 +976,7 @@ void pc_xr_menu_window_render(HSD_GObj* gobj, intptr_t pass) {
  * windows"): a GObj render callback standing in for HSD_GObj_JObjCallback.
  * MELEE_XR_MENU_POP is the fraction of the way to the head the object comes
  * (0 keeps it flat; default 0.12, about 10 cm at arm's length). */
-void pc_xr_menu_pop_render(HSD_GObj* gobj, intptr_t pass) {
+static void menu_pop(HSD_GObj* gobj, intptr_t pass, float part) {
     static float rho = -1.f;
     if (rho < 0.f) {
         const char* e = getenv("MELEE_XR_MENU_POP");
@@ -984,13 +984,17 @@ void pc_xr_menu_pop_render(HSD_GObj* gobj, intptr_t pass) {
     }
     const bool pop = rho > 0.f && menu_window_wanted() && s_category == AURORA_XR_WORLD;
     if (pop) {
-        aurora_xr_menu_pop(1.f - rho);
+        aurora_xr_menu_pop(1.f - rho * part);
     }
     HSD_GObj_JObjCallback(gobj, pass);
     if (pop) {
         aurora_xr_menu_pop(1.f);
     }
 }
+
+void pc_xr_menu_pop_render(HSD_GObj* gobj, intptr_t pass) { menu_pop(gobj, pass, 1.f); }
+
+void pc_xr_menu_pop_half_render(HSD_GObj* gobj, intptr_t pass) { menu_pop(gobj, pass, 0.5f); }
 
 void pc_xr_mono_camera(void) {
     s_category = AURORA_XR_MONO;

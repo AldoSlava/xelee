@@ -37,7 +37,7 @@ static struct loadData load_data;
 static struct leaveData leave_data;
 
 #ifdef TARGET_PC
-/* MELEE_BOOT_SCENE=<title|vs|css|classic|adventure|allstar|homerun|training|unranked|direct|ranked>: skip
+/* MELEE_BOOT_SCENE=<title|vs|css|sss|classic|adventure|allstar|homerun|training|unranked|direct|ranked>: skip
  * the whole menu walk and boot into one scene with a fixed setup. Menu navigation here can only be
  * driven by synthetic input, which misses keypresses often enough that an
  * automated run cannot rely on it (see tools/smoke_test.py).
@@ -70,8 +70,8 @@ u8 pc_boot_scene(void)
             scene = GM_ALLSTAR;
         } else if (strcmp(want, "homerun") == 0) {
             scene = GM_HOME_RUN_CONTEST;
-        } else if (strcmp(want, "training") == 0) {
-            scene = GM_TRAINING;
+        } else if (strcmp(want, "training") == 0 || strcmp(want, "sss") == 0) {
+            scene = GM_TRAINING; /* sss: Training's stage select (gmtrainingmode.c) */
         } else if (strcmp(want, "unranked") == 0) {
             scene = GM_ONLINE;
             gmOnline_SetKind(ONLINE_KIND_UNRANKED);
@@ -83,7 +83,7 @@ u8 pc_boot_scene(void)
             gmOnline_SetKind(ONLINE_KIND_RANKED);
         } else {
             OSReport("MELEE_BOOT_SCENE: unknown scene '%s'; valid values are "
-                     "title, vs, css, classic, adventure, allstar, homerun, training, unranked, direct, ranked\n",
+                     "title, vs, css, sss, classic, adventure, allstar, homerun, training, unranked, direct, ranked\n",
                      want);
         }
     }

@@ -1177,7 +1177,8 @@ these.
 ### Menu windows
 
 Melee's menus are 3D scenes drawn through a perspective camera. In XR the
-title screen, the main menu and the character select show as a window onto
+title screen, the main menu, the character select and the stage select
+show as a window onto
 that scene instead of a flat picture: head motion and the eyes' disparity
 show its depth.
 `MELEE_XR_MENU_WINDOW=0` keeps the flat screen.
@@ -1202,13 +1203,16 @@ show its depth.
   depth coverage would leave the window see-through).
 - **Pop-out.** Objects drawn through `pc_xr_menu_pop_render` (the character
   select's hands and tokens, the main menu's option buttons and description
-  card, the title's logo; not the main menu's panel, whose grid and frame the
-  flat screen crops) come toward the head by `MELEE_XR_MENU_POP`
+  card, the title's logo, the stage select's cursor and hovered icon; not
+  the main menu's panel, whose grid and frame the flat screen crops) come toward the head by `MELEE_XR_MENU_POP`
   (default 0.12 of the distance). `aurora_xr_menu_pop` scales them about the
   head in the room, so they keep their place in the picture as seen from the
   head and the pointer needs no correction. They draw after the mask, so they
-  leave the window past its frame.
-- **Measuring.** `MELEE_MENU_PROBE=1` logs each menu camera's projection and
+  leave the window past its frame. `pc_xr_menu_pop_half_render` comes half
+  as far: the stage select's icon grid, which is as flat as its frame,
+  floats between the backdrop and the cursor that way.
+- **Measuring.** `MELEE_BOOT_SCENE=sss` opens on Training's stage select
+  (no input needed). `MELEE_MENU_PROBE=1` logs each menu camera's projection and
   each GObj's depth in its view (`src/pc/menu_probe.c`).
 
 ### Pointing at the screen
