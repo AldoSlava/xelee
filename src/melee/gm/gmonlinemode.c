@@ -58,6 +58,12 @@ enum {
     state_intro = 6,   /* the VS splash: the Classic stage intro, between the stage and the fight */
 };
 
+#ifdef TARGET_PC
+/* Why the session ended, for the CSS to show: Slippi's flow has no lobby to
+ * return to, so a failure lands on the CSS with the reason on it. */
+static char slpcss_notice[48];
+static void routeAfterFailure(void);
+#endif
 static bool awaiting_rank_result;
 static unsigned lobby_frame_n;
 static void onEnterLobby(GameModeState*);
@@ -276,6 +282,17 @@ static void rankedRules(StartMeleeData* start, UNUSED StartMeleeData* previous)
     start->rules.stkind = pc_rank_session_stage();
 }
 
+/* Pausing is local to a peer and the other never sees it, so it is off in
+ * every Slippi match (Slippi itself allows it in Direct only: that needs the
+ * pause synced, which is not built). */
+static void slippiOrRankedRules(StartMeleeData* start, StartMeleeData* previous)
+{
+    if (slippiFlow() && pc_net_slippi_active()) {
+        start->rules.disable_pausing = true;
+    }
+    rankedRules(start, previous);
+}
+
 static void rankedPlayer(PlayerInitData* start, PlayerInitData* previous)
 {
     if (!rankedMode() || !pc_rank_session_active()) return;
@@ -288,6 +305,25 @@ static void rankedPlayer(PlayerInitData* start, PlayerInitData* previous)
         start->slot_type = Gm_PKind_Human;
     else
         start->slot_type = Gm_PKind_NA;
+}
+#endif
+
+#ifdef TARGET_PC
+static void routeAfterFailure(void)
+{
+    static const char* const why[] = { "", "Opponent left", "Connection timed out", "Desync",
+                                       "Incompatible version", "Could not resume" };
+    if (slippiFlow()) {
+        int reason = pc_net_peer_status();
+        snprintf(slpcss_notice, sizeof slpcss_notice, "%s",
+                 reason > 0 && reason < (int) (sizeof why / sizeof why[0]) ? why[reason] : "Connection lost");
+        pc_net_disconnect();
+        pc_net_match_stop();
+        pc_net_peer_status_clear();
+        gm_SetNextGameModeStateId(state_css);
+        return;
+    }
+    gm_SetNextGameModeStateId(state_lobby);
 }
 #endif
 
@@ -349,7 +385,7 @@ void onExitCss(GameModeState* state)
         return;
     }
     if (pc_net_peer_status() != PC_NET_PEER_OK) {
-        gm_SetNextGameModeStateId(state_lobby);
+        routeAfterFailure();
         return;
     }
 #endif
@@ -427,6 +463,13 @@ bool gmOnline_SlippiCssFrame(void)
         z |= HSD_PadCopyStatus[p].trigger & HSD_PAD_Z;
     }
     if (slpcss_state == SLPCSS_SELECT) {
+        if (slpcss_notice[0]) {
+            cssStep(steps, &n, '!', "Error: %.48s", slpcss_notice);
+            snprintf(hint, sizeof hint, "Press Z to clear error");
+            if (z) {
+                slpcss_notice[0] = '\0';
+            }
+        }
         if (mnCharSel_SlippiStartReady()) {
             cssStep(steps, &n, '-', "Character selected", NULL);
             cssStep(steps, &n, '+', "Press START to %s",
@@ -551,7 +594,7 @@ void onExitSss(GameModeState* state)
 {
 #ifdef TARGET_PC
     if (pc_net_peer_status() != PC_NET_PEER_OK) {
-        gm_SetNextGameModeStateId(state_lobby);
+        routeAfterFailure();
         return;
     }
 #endif
@@ -624,7 +667,7 @@ void onEnterVs(GameModeState* state)
             return;
         }
     }
-    gmVsMelee_EnterVs(state, &online_vs, rankedRules, rankedPlayer);
+    gmVsMelee_EnterVs(state, &online_vs, slippiOrRankedRules, rankedPlayer);
 #else
     gmVsMelee_EnterVs(state, &online_vs, NULL, NULL);
 #endif
@@ -637,7 +680,7 @@ void onExitVs(GameModeState* state)
         if (rankedMode()) {
             pc_rank_session_abort("peer disconnected");
         }
-        gm_SetNextGameModeStateId(state_lobby);
+        routeAfterFailure();
         return;
     }
 #endif
@@ -694,7 +737,7 @@ void onExitSuddenDeath(GameModeState* state)
 {
 #ifdef TARGET_PC
     if (pc_net_peer_status() != PC_NET_PEER_OK) {
-        gm_SetNextGameModeStateId(state_lobby);
+        routeAfterFailure();
         return;
     }
 #endif
@@ -718,7 +761,7 @@ void onExitResults(GameModeState* state)
 {
 #ifdef TARGET_PC
     if (pc_net_peer_status() != PC_NET_PEER_OK) {
-        gm_SetNextGameModeStateId(state_lobby);
+        routeAfterFailure();
         return;
     }
 #endif
