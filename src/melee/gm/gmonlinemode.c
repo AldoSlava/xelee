@@ -235,7 +235,8 @@ static bool slippiFlow(void)
 
 bool gmOnline_SlippiFlow(void)
 {
-    return slippiFlow();
+    /* The kind outlasts the mode: VS. Mode's own CSS must not be Slippi's. */
+    return gm_GetCurrentGameMode() == GM_ONLINE && slippiFlow();
 }
 #endif
 
