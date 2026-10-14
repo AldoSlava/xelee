@@ -5699,6 +5699,36 @@ static void mnCharSel_HideOnlineRemote(void)
             }
         }
     }
+    /* Joint 85 holds the four door bars, one mesh object each; the player's
+     * own stays, under their name, and the empty three go. */
+    {
+        HSD_JObj* bars = NULL;
+        HSD_DObj* d;
+        int n = 0;
+        lb_80011E24(mnCharSel_804D6CC0, &bars, 85, -1);
+        if (bars != NULL) {
+            for (d = HSD_JObjGetDObj(bars); d != NULL; d = d->next, n++) {
+                if (n == local) {
+                    HSD_DObjClearFlags(d, DOBJ_HIDDEN);
+                } else {
+                    HSD_DObjSetFlags(d, DOBJ_HIDDEN);
+                }
+            }
+        }
+    }
+    {
+        /* ...and no HMN/CPU tag (the player indicator): nothing to toggle. */
+        CSSDoor* d = &mnCharSel_803F0DFC.doors[local];
+        if (d->player_indicator_joint != 0) {
+            cssHideJoint(d->player_indicator_joint);
+        }
+        if (d->cpuslider_joint != 0) {
+            cssHideJoint(d->cpuslider_joint);
+        }
+        if (d->cpuslider2_joint != 0) {
+            cssHideJoint(d->cpuslider2_joint);
+        }
+    }
     cssHideDoor(remote);
     cssHideDoor(2);
     cssHideDoor(3);
@@ -5733,6 +5763,17 @@ void mnCharSel_Scene_OnFrame(void)
         if (!dumped && mnCharSel_804D6CEC == 90 && getenv("MELEE_CSS_DUMP")) {
             int id;
             dumped = true;
+            {
+                int dd;
+                for (dd = 0; dd < 2; dd++) {
+                    CSSDoor* dr = &mnCharSel_803F0DFC.doors[dd];
+                    pc_log_line("css door %d joints: emblem %d costume %d team %d door %d bg %d indicator %d "
+                                "slidername %d cpuslider %d cpuslider2 %d", dd, dr->emblem_joint,
+                                dr->costume_joint, dr->team_joint, dr->door_joint, dr->bg_joint,
+                                dr->player_indicator_joint, dr->slidername_joint, dr->cpuslider_joint,
+                                dr->cpuslider2_joint);
+                }
+            }
             pc_log_line("css doors: p_kind %d %d %d %d, slot_type %d %d %d %d, x5 %d %d",
                         mnCharSel_803F0DFC.doors[0].p_kind, mnCharSel_803F0DFC.doors[1].p_kind,
                         mnCharSel_803F0DFC.doors[2].p_kind, mnCharSel_803F0DFC.doors[3].p_kind,
@@ -5749,9 +5790,11 @@ void mnCharSel_Scene_OnFrame(void)
                 if (j != NULL) {
                     Vec3 t;
                     HSD_JObjGetTranslation(j, &t);
-                    pc_log_line("cssjoint %3d x=%7.2f y=%7.2f z=%7.2f flags=%08x child=%d next=%d",
+                    pc_log_line("cssjoint %3d x=%7.2f y=%7.2f z=%7.2f flags=%08x child=%d next=%d dobj=%d",
                                 id, t.x, t.y, t.z, (unsigned) j->flags,
-                                j->child != NULL, j->next != NULL);
+                                j->child != NULL, j->next != NULL,
+                                !(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL)) &&
+                                    j->u.dobj != NULL);
                 }
             }
             for (m = 0; m < 3; m++) {

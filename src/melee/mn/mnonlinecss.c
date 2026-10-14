@@ -6,6 +6,7 @@
 #include <melee/gm/gmonlinemode.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <dolphin/gx/GXStruct.h>
@@ -44,7 +45,7 @@ static GXColor col_blue = { 0x50, 0xA0, 0xFF, 0xFF };
 static void drawPlate(UNUSED HSD_GObj* gobj, int pass)
 {
     static GXColor plate = { 0x0A, 0x14, 0x32, 0xFF };
-    if (pass != 2) {
+    if (pass != 2 || getenv("MELEE_CSS_NOPLATE")) {
         return;
     }
     hsd_80391A04(1.0f, 1.0f, 1);
@@ -109,8 +110,22 @@ void mnOnlineCss_Update(const char* title, const char* line1, const char* line2,
     setLine(&css_lines[css_title], title, false, &col_white);
     setLine(&css_lines[css_user_label], user[0] ? "User" : "", false, &col_dim);
     setLine(&css_lines[css_user_name], user, false, &col_white);
-    setLine(&css_lines[css_mark1], line1[0] ? (error ? "!" : "-") : "", error, &col_green);
-    setLine(&css_lines[css_mark2], line2[0] ? "+" : "", false, &col_blue);
+    {
+        /* Slippi's markers: a green dash for what is done, a blue plus for what
+         * is still to do (and a red mark for an error). */
+        bool done1 = strncmp(line1, "Character selected", 18) == 0 || strncmp(line1, "Locked in", 9) == 0;
+        bool done2 = strncmp(line2, "Playing", 7) == 0;
+        setLine(&css_lines[css_mark1], line1[0] ? (error ? "!" : done1 ? "-" : "+") : "", error,
+                done1 ? &col_green : &col_blue);
+        setLine(&css_lines[css_mark2], line2[0] ? (done2 ? "-" : "+") : "", false,
+                done2 ? &col_green : &col_blue);
+        if (css_lines[css_mark1].str[0] != '\0' && !error) {
+            HSD_SisLib_803A74F0(css_text, css_lines[css_mark1].entry, done1 ? &col_green : &col_blue);
+        }
+        if (css_lines[css_mark2].str[0] != '\0') {
+            HSD_SisLib_803A74F0(css_text, css_lines[css_mark2].entry, done2 ? &col_green : &col_blue);
+        }
+    }
     setLine(&css_lines[css_line1], line1, error, &col_white);
     setLine(&css_lines[css_line2], line2, false, &col_white);
     setLine(&css_lines[css_hint], hint, false, &col_dim);
