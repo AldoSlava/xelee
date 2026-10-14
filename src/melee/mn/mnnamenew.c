@@ -69,38 +69,83 @@ static struct {
 
 static void pc_finish(bool confirmed);
 
-/* Button hints as Slippi shows them: a small chip in the panel's lower corner
- * with the button's icon and what it does. A chip is a text box with a
- * background colour; the icons are drawn over it by pc_chip_icons. */
+/* Button hints in the menus' own language: a rounded outline in the gold of
+ * Melee's selected item with the button's icon and what it does, in the
+ * panel's lower corner. The outline and icon are drawn in a render callback;
+ * the label is a text box with no background. */
 #define CHIP_Y 9.0f  /* top edge, in the description line's text units */
 #define CHIP_H 1.5f
-#define CHIP_ICON 1.45f
+#define CHIP_ICON 1.3f
+#define CHIP_PAD 0.55f
+#define CHIP_CHAR 0.5f /* a label glyph's advance, text units */
+#define CHIP_STROKE 0.1f
+#define CHIP_ARC_STEPS 8
 static struct {
     int icon[2];
     float x[2]; /* chip's left edge */
+    float w[2];
     int n;
 } s_chips;
 
+static void pc_chip_ring(float x, float w, float cy)
+{
+    static const GXColor gold = { 0xF0, 0xC2, 0x26, 0xFF };
+    const float r = CHIP_H * 0.5f;
+    const float in = r - CHIP_STROKE;
+    float ox[4 * (CHIP_ARC_STEPS + 1)], oy[4 * (CHIP_ARC_STEPS + 1)];
+    float ix[4 * (CHIP_ARC_STEPS + 1)], iy[4 * (CHIP_ARC_STEPS + 1)];
+    int n = 0, c, k;
+    /* corners clockwise from the top left; each arc sweeps a quarter turn */
+    const float ccx[4] = { x + r, x + w - r, x + w - r, x + r };
+    const float ccy[4] = { cy + r - r, cy + r - r, cy - r + r, cy - r + r };
+    const float a0[4] = { 180.0f, 270.0f, 0.0f, 90.0f };
+    (void) ccy;
+    for (c = 0; c < 4; c++) {
+        for (k = 0; k <= CHIP_ARC_STEPS; k++) {
+            float a = (a0[c] + 90.0f * (float) k / CHIP_ARC_STEPS) * 0.017453293f;
+            float ca = cosf(a), sa = sinf(a);
+            /* y up in the world; the arcs' centres sit r in from the edges */
+            float cyc = (c < 2) ? cy + CHIP_H * 0.5f - r : cy - CHIP_H * 0.5f + r;
+            ox[n] = ccx[c] + r * ca;
+            oy[n] = cyc + r * sa;
+            ix[n] = ccx[c] + in * ca;
+            iy[n] = cyc + in * sa;
+            n++;
+        }
+    }
+    GXBegin(0x80, 0, (u16) (4 * n));
+    for (k = 0; k < n; k++) {
+        int j = (k + 1) % n;
+        GXPosition3f32(ox[k], oy[k], 17.0f);
+        GXColor4u8(gold.r, gold.g, gold.b, gold.a);
+        GXPosition3f32(ox[j], oy[j], 17.0f);
+        GXColor4u8(gold.r, gold.g, gold.b, gold.a);
+        GXPosition3f32(ix[j], iy[j], 17.0f);
+        GXColor4u8(gold.r, gold.g, gold.b, gold.a);
+        GXPosition3f32(ix[k], iy[k], 17.0f);
+        GXColor4u8(gold.r, gold.g, gold.b, gold.a);
+    }
+    GXEnd();
+}
+
 static void pc_chip_icons(UNUSED HSD_GObj* gobj, UNUSED int pass)
 {
-    int i, k;
+    int i;
     hsd_80391A04(1.0f, 1.0f, 1);
+    GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0); /* the ring sits at the text's depth */
+    GXSetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
     for (i = 0; i < s_chips.n; i++) {
-        float cx = s_chips.x[i] + 0.4f + CHIP_ICON * 0.5f;
         float cy = -(CHIP_Y + CHIP_H * 0.5f);
-        if (s_chips.icon[i] == PC_BUTTON_ICON_L) {
-            /* L and R sit together, as the stock SCROLL hint */
-            pc_button_icon_draw(PC_BUTTON_ICON_L, cx, cy, 17.0f, CHIP_ICON, CHIP_ICON);
-            pc_button_icon_draw(PC_BUTTON_ICON_R, cx + CHIP_ICON * 0.95f, cy, 17.0f, CHIP_ICON,
-                                CHIP_ICON);
-        } else {
-            pc_button_icon_draw(s_chips.icon[i], cx, cy, 17.0f, CHIP_ICON, CHIP_ICON);
-        }
-        (void) k;
+        pc_chip_ring(s_chips.x[i], s_chips.w[i], cy);
+    }
+    for (i = 0; i < s_chips.n; i++) {
+        float cx = s_chips.x[i] + CHIP_PAD + CHIP_ICON * 0.5f;
+        float cy = -(CHIP_Y + CHIP_H * 0.5f);
+        pc_button_icon_draw(s_chips.icon[i], cx, cy, 17.0f, CHIP_ICON, CHIP_ICON);
     }
 }
 
-static void pc_chip(float x, float w, const char* label, GXColor bg, float label_x)
+static void pc_chip(float x, float w, const char* label)
 {
     HSD_Text* text = HSD_SisLib_803A6754(0, (s32) mn_804D6BB4);
     text->pos_x = x;
@@ -112,26 +157,31 @@ static void pc_chip(float x, float w, const char* label, GXColor bg, float label
     text->font_size.y = 0.02f;
     text->default_kerning = 1;
     text->default_alignment = 0;
-    text->bg_color = bg;
+    text->bg_color.a = 0;
     text->text_color.r = text->text_color.g = text->text_color.b = text->text_color.a = 0xFF;
-    HSD_SisLib_803A6B98(text, label_x / 0.02f, 0.32f / 0.02f, "%s", label);
+    HSD_SisLib_803A6B98(text, (CHIP_PAD + CHIP_ICON + CHIP_PAD) / 0.02f, 0.32f / 0.02f, "%s", label);
+}
+
+static void pc_add_chip(float x, int icon, const char* label)
+{
+    const float w = CHIP_PAD + CHIP_ICON + CHIP_PAD + CHIP_CHAR * (float) strlen(label) + CHIP_PAD;
+    s_chips.x[s_chips.n] = x;
+    s_chips.w[s_chips.n] = w;
+    s_chips.icon[s_chips.n++] = icon;
+    pc_chip(x, w, label);
 }
 
 static void pc_make_chips(void)
 {
-    GXColor gray = { 0x58, 0x58, 0x68, 0xF0 };
-    GXColor purple = { 0x58, 0x30, 0x98, 0xF0 };
     HSD_GObj* g;
     s_chips.n = 0;
+    /* Y shifts (email and password) or fills (a code has no shift): the
+     * triggers press A when pointing at the screen, so not L and R. */
     if (s_pc.shiftable) {
-        s_chips.x[s_chips.n] = -15.0f;
-        s_chips.icon[s_chips.n++] = PC_BUTTON_ICON_L;
-        pc_chip(-15.0f, 5.0f, "SHIFT", gray, 3.5f);
+        pc_add_chip(-15.0f, PC_BUTTON_ICON_Y, "SHIFT");
     }
     if (s_pc.fill != NULL) {
-        s_chips.x[s_chips.n] = 10.4f;
-        s_chips.icon[s_chips.n++] = PC_BUTTON_ICON_Y;
-        pc_chip(10.4f, 5.4f, "AUTO FILL", purple, 2.3f);
+        pc_add_chip(s_pc.shiftable ? 8.0f : -15.0f, PC_BUTTON_ICON_Y, s_pc.shiftable ? "AUTO FILL" : "FILL");
     }
     if (s_chips.n > 0) {
         g = GObj_Create(6U, 7U, 0x80U);
@@ -1277,7 +1327,7 @@ static void pc_input(NameNewEntry* data)
             lbAudioAx_80024030(0);
             pc_finish(false);
         }
-    } else if (buttons & 0xC0) {
+    } else if ((buttons & 0x800) && s_pc.shiftable) {
         pc_shift(data);
     } else if ((buttons & 0x800) && s_pc.fill != NULL) {
         const char* fill = s_pc.fill(s_pc.user);

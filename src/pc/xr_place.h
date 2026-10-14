@@ -30,8 +30,8 @@ bool pc_xr_place_hold(void);
  * hold for it next pass. */
 void pc_xr_place_stage_ready(int grkind);
 /* The placement dummy scene (see xr_place.c): started when it opens; its
- * result is polled each frame (0 still placing, 1 adopted, 2 skipped, and
- * once non-zero it is reset). Placed or skipped once this launch: decided. */
+ * result is polled each frame (0 still placing, 1 adopted, and once
+ * non-zero it is reset). Placed once this launch: decided. */
 void pc_xr_place_dummy_start(void);
 int pc_xr_place_dummy_result(void);
 bool pc_xr_place_decided(void);

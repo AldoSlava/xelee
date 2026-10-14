@@ -38,9 +38,9 @@ static uint32_t s_down;
 /* The placement dummy scene (gm/gmonlinemode.c, ONLINE_KIND_PLACE) is the
  * scene: its stage is held for placing like a fight's, but the simulation
  * keeps ticking (the two fighters idle, the pads never reach them) and A
- * adopts the placement for every stage, B keeps the defaults. */
+ * adopts the placement for every stage (B resets it, as in a fight's hold). */
 static bool s_dummy;
-static int s_dummy_result; /* 0 running, 1 adopted, 2 skipped */
+static int s_dummy_result; /* 0 running, 1 adopted */
 static bool s_decided;     /* placed or skipped once this launch */
 
 static bool enabled(void) {
@@ -218,14 +218,19 @@ bool pc_xr_place_hold(void) {
             }
             rest_area_placed = true;
         }
-        static bool loaded;
-        if (!loaded) {
-            loaded = true;
-            load_image(0, "place-cards.png");
-            load_image(1, "place-legend.png");
-            load_image(2, "place-cards-hands.png");
-            load_image(3, "place-legend-hands.png");
-            load_clips();
+        /* The pictures that say "fight" for a fight's hold, "done" for the
+         * Place Stage menu flow; loaded again when the other one is needed. */
+        static int loaded = -1;
+        if (loaded != (s_dummy ? 1 : 0)) {
+            const bool first = loaded < 0;
+            loaded = s_dummy ? 1 : 0;
+            load_image(0, s_dummy ? "place-cards-done.png" : "place-cards.png");
+            load_image(1, s_dummy ? "place-legend-done.png" : "place-legend.png");
+            load_image(2, s_dummy ? "place-cards-hands-done.png" : "place-cards-hands.png");
+            load_image(3, s_dummy ? "place-legend-hands-done.png" : "place-legend-hands.png");
+            if (first) {
+                load_clips();
+            }
         }
         s_holding = grkind;
         s_cards = true;
@@ -253,9 +258,6 @@ bool pc_xr_place_hold(void) {
     if (done & PAD_BUTTON_B) {
         aurora_xr_reset_stage();
         pc_log_line("xr: stage %d back at its default placement", s_holding);
-        if (s_dummy) {
-            s_dummy_result = 2; /* skipped: the defaults stand */
-        }
     }
     if (s_dummy) {
         if (done & (PAD_BUTTON_A | PAD_BUTTON_START)) {

@@ -1598,13 +1598,37 @@ static void placeDummyTintJObj(HSD_JObj* j, u8 r, u8 g, u8 b, u8 a)
     }
 }
 
+#define PLACE_DUMMY_TINTED_MAX 16
+static HSD_GObj* placeDummyTinted[PLACE_DUMMY_TINTED_MAX];
+
+static bool placeDummyDone(HSD_GObj* g, bool force)
+{
+    int i;
+    for (i = 0; i < PLACE_DUMMY_TINTED_MAX; i++) {
+        if (placeDummyTinted[i] == g) {
+            return !force;
+        }
+    }
+    for (i = 0; i < PLACE_DUMMY_TINTED_MAX; i++) {
+        if (placeDummyTinted[i] == NULL) {
+            placeDummyTinted[i] = g;
+            break;
+        }
+    }
+    return false;
+}
+
+/* Every frame, for what has appeared since (the stage must never show as it is
+ * for even one frame); on frames 20 and 120 for everything, as the fighters'
+ * own code puts some materials back. */
 static void placeDummyTint(void)
 {
     HSD_GObj* g;
     int slot, plink;
     int frame = ++gm_vs_place_dummy_frame;
-    if (frame != 20 && frame != 120) {
-        return; /* the materials are rebuilt once, after everything has loaded */
+    bool force = frame == 20 || frame == 120;
+    if (frame == 1) {
+        memset(placeDummyTinted, 0, sizeof placeDummyTinted);
     }
     for (plink = 0; plink < 64; plink++) {
         for (g = HSD_GObjPLinkHead[plink]; g != NULL; g = g->next) {
@@ -1614,15 +1638,17 @@ static void placeDummyTint(void)
         }
     }
     for (g = HSD_GObjPLinkHead[5]; g != NULL; g = g->next) {
-        if (g->classifier == HSD_GOBJ_CLASS_STAGE && g->obj_kind == HSD_GObj_JObjKind) {
-            placeDummyTintJObj(GET_JOBJ(g), 0x20, 0xB0, 0x40, 0x70);
+        if (g->classifier == HSD_GOBJ_CLASS_STAGE && g->obj_kind == HSD_GObj_JObjKind &&
+            !placeDummyDone(g, force))
+        {
+            placeDummyTintJObj(GET_JOBJ(g), 0x20, 0xB0, 0x40, 0xA0);
             /* the translucent pass: blending is of no use in the opaque one */
             GET_JOBJ(g)->flags = (GET_JOBJ(g)->flags & ~JOBJ_ROOT_OPA) | JOBJ_ROOT_XLU;
         }
     }
     for (slot = 0; slot < 2; slot++) {
         g = Player_GetEntity(slot);
-        if (g != NULL && g->obj_kind == HSD_GObj_JObjKind) {
+        if (g != NULL && g->obj_kind == HSD_GObj_JObjKind && !placeDummyDone(g, force)) {
             placeDummyTintJObj(GET_JOBJ(g), 0xE0, 0x20, 0x20, 0xFF);
         }
     }
