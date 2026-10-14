@@ -374,10 +374,20 @@ bool gmOnline_SlippiCssStart(int character, int color)
     return true;
 }
 
+static void cssStep(OnlineCssStep* steps, int* n, char mark, const char* fmt, const char* arg)
+{
+    if (*n < CSS_STEPS_MAX) {
+        steps[*n].mark = mark;
+        snprintf(steps[*n].text, sizeof steps[*n].text, fmt, arg != NULL ? arg : "");
+        (*n)++;
+    }
+}
+
 bool gmOnline_SlippiCssFrame(void)
 {
-    char title[32], l1[64] = "", l2[64] = "", hint[64] = "";
-    bool error = false;
+    char title[32], hint[64] = "";
+    OnlineCssStep steps[CSS_STEPS_MAX];
+    int n = 0;
     u64 z = 0;
     PcNetSlippiMatch sm;
 
@@ -387,56 +397,60 @@ bool gmOnline_SlippiCssFrame(void)
     }
     if (slpcss_state == SLPCSS_SELECT) {
         if (mnCharSel_SlippiStartReady()) {
-            snprintf(l1, sizeof l1, "Character selected");
-            snprintf(l2, sizeof l2, "Press START to %s",
-                     online_kind == ONLINE_KIND_DIRECT ? "enter code" : "search");
+            cssStep(steps, &n, '-', "Character selected", NULL);
+            cssStep(steps, &n, '+', "Press START to %s",
+                    online_kind == ONLINE_KIND_DIRECT ? "enter code" : "search");
         } else {
-            snprintf(l1, sizeof l1, "Select your character");
+            cssStep(steps, &n, 'x', "Select your character", NULL);
         }
     } else {
+        /* The steps stack, as Slippi's: what is done stays, the current one
+         * follows it. */
         const char* why = NULL;
         const char* opp = pc_net_match_opponent_code();
         int st;
         pc_net_match_poll();
         st = pc_net_match_state(&why);
+        cssStep(steps, &n, '-', "Character selected", NULL);
+        cssStep(steps, &n, '-', "Locked in", NULL);
         if (slpcss_leave) {
-            snprintf(l1, sizeof l1, "Locked in");
+            cssStep(steps, &n, '-', "Playing: %.17s", opp);
         } else if (pc_net_peer_status() != PC_NET_PEER_OK || st == PC_MATCH_FAIL) {
-            snprintf(l1, sizeof l1, "Error");
-            snprintf(l2, sizeof l2, "%.56s", why != NULL ? why : "Connection lost");
+            cssStep(steps, &n, '!', "Error: %.48s", why != NULL ? why : "Connection lost");
             snprintf(hint, sizeof hint, "Press Z to clear error");
-            error = true;
             if (z) {
                 pc_net_match_stop();
                 pc_net_peer_status_clear();
                 slpcss_state = SLPCSS_SELECT;
             }
+            mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
+            return false;
         } else if (pc_net_match_slippi_match(&sm)) {
-            snprintf(l1, sizeof l1, "Locked in");
-            snprintf(l2, sizeof l2, "Playing: %.17s", opp != NULL ? opp : "");
+            cssStep(steps, &n, '-', "Playing: %.17s", opp);
             slpcss_leave = true;
+            mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
             return true;
         } else if (st == PC_MATCH_CONNECT) {
-            snprintf(l1, sizeof l1, "Connecting to %.17s", opp != NULL ? opp : "");
+            cssStep(steps, &n, 'x', "Connecting to %.17s", opp);
             snprintf(hint, sizeof hint, "Press Z to disconnect");
         } else if (st == PC_MATCH_READY) {
-            snprintf(l1, sizeof l1, "Waiting on %.17s", opp != NULL && opp[0] ? opp : "opponent");
+            cssStep(steps, &n, 'x', "Waiting on %.17s", opp != NULL && opp[0] ? opp : "opponent");
             snprintf(hint, sizeof hint, "Press Z to disconnect");
         } else {
             if (online_kind == ONLINE_KIND_DIRECT && direct_calling[0]) {
-                snprintf(l1, sizeof l1, "Searching for %.17s", direct_calling);
+                cssStep(steps, &n, 'x', "Searching for %.17s", direct_calling);
             } else {
-                snprintf(l1, sizeof l1, "Searching for opponent");
+                cssStep(steps, &n, 'x', "Searching for opponent", NULL);
             }
             snprintf(hint, sizeof hint, "Press Z to cancel");
         }
-        if (z && !error && !slpcss_leave) {
+        if (z && !slpcss_leave) {
             pc_log_line("css: search cancelled");
             pc_net_match_stop();
             slpcss_state = SLPCSS_SELECT;
         }
     }
-    mnOnlineCss_Update(title, l1, l2, hint, error, pc_net_match_slippi_name());
+    mnOnlineCss_Update(title, pc_net_match_slippi_name(), steps, n, hint);
     return false;
 }
 

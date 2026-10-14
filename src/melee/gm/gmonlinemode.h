@@ -27,8 +27,13 @@ bool gmOnline_SlippiFlow(void);
 /* The online CSS's status text (src/melee/mn/mnonlinecss.c), drawn by the
  * Slippi flow's state in gmonlinemode.c. */
 void mnOnlineCss_Create(void);
-void mnOnlineCss_Update(const char* title, const char* line1, const char* line2,
-                        const char* hint, bool error, const char* user);
+#define CSS_STEPS_MAX 3
+typedef struct OnlineCssStep {
+    char mark;      /* '-' done, '+' to do, 'x' in progress, '!' error */
+    char text[56];
+} OnlineCssStep;
+void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep* steps, int n,
+                        const char* hint);
 void mnOnlineCss_Destroy(void);
 /* Called every CSS frame while the Slippi flow owns the screen; true when the
  * match is agreed and the CSS should leave now. */

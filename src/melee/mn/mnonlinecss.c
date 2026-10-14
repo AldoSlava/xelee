@@ -1,7 +1,9 @@
 /* PC only: the status text Slippi draws on its online character select
- * ("Unranked Mode", "Select your character", "Searching for opponent", ...).
- * gmonlinemode.c owns the state and hands over four strings a frame; this file
- * only draws them, as SIS text on its own ortho canvas above the CSS. */
+ * ("Unranked Mode", "Character selected", "Locked in", "Searching for
+ * opponent", ...). gmonlinemode.c owns the state and hands over the steps a
+ * frame; this file only draws them, as SIS text on its own ortho canvas above
+ * the CSS, laid out as Slippi's: the user beside the panel, the mode title and
+ * a stack of marked steps to its right, a dim hint under them. */
 
 #include <melee/gm/gmonlinemode.h>
 
@@ -10,125 +12,106 @@
 #include <string.h>
 
 #include <dolphin/gx/GXStruct.h>
-#include <sysdolphin/baselib/displayfunc.h>
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/gobjgxlink.h>
-#include <sysdolphin/baselib/hsd_3915.h>
 #include <sysdolphin/baselib/sislib.h>
 
 #ifdef TARGET_PC
 
 #define CSS_LINE_LEN 64
 
-enum {
-    css_title, css_line1, css_line2, css_hint, css_user_label, css_user_name, css_mark1, css_mark2,
-    css_line_count
-};
-
 typedef struct CssLine {
     int entry;
     char str[CSS_LINE_LEN];
-    bool error;
+    int color; /* index into the palette, -1 unset */
 } CssLine;
 
+enum { c_white, c_dim, c_green, c_blue, c_red, c_count };
+
+static GXColor palette[c_count] = {
+    { 0xFF, 0xFF, 0xFF, 0xFF }, { 0xC8, 0xC8, 0xC8, 0xFF }, { 0x40, 0xE0, 0x60, 0xFF },
+    { 0x50, 0xA0, 0xFF, 0xFF }, { 0xFF, 0x60, 0x60, 0xFF },
+};
+
+enum { l_title, l_user_label, l_user_name, l_hint, l_mark, l_text = l_mark + CSS_STEPS_MAX,
+       l_count = l_text + CSS_STEPS_MAX };
+
 static HSD_Text* css_text;
-static CssLine css_lines[css_line_count];
+static CssLine css_lines[l_count];
 
-static GXColor col_white = { 0xFF, 0xFF, 0xFF, 0xFF };
-static GXColor col_dim = { 0xC8, 0xC8, 0xC8, 0xFF };
-static GXColor col_error = { 0xFF, 0x60, 0x60, 0xFF };
-static GXColor col_green = { 0x40, 0xE0, 0x60, 0xFF };
-static GXColor col_blue = { 0x50, 0xA0, 0xFF, 0xFF };
+#define BLOCK_X 380.0f
+#define BLOCK_Y 251.0f
+#define STEP_DY 22.5f
 
-/* Slippi replaces the rules banner with the mode title; the plate hides ours
- * (the rules text of the stock CSS) under it. */
-static void drawPlate(UNUSED HSD_GObj* gobj, int pass)
-{
-    static GXColor plate = { 0x0A, 0x14, 0x32, 0xFF };
-    if (pass != 2 || getenv("MELEE_CSS_NOPLATE")) {
-        return;
-    }
-    hsd_80391A04(1.0f, 1.0f, 1);
-    DrawRectangle(206.0f, -72.0f, 300.0f, 26.0f, &plate);
-}
-
-static void addLine(CssLine* l, float x, float y, float scale, GXColor* color)
+static void addLine(CssLine* l, float x, float y, float scale, int color)
 {
     l->str[0] = '\0';
-    l->error = false;
+    l->color = color;
     l->entry = HSD_SisLib_803A6B98(css_text, x, y, "%s", l->str);
     HSD_SisLib_803A7548(css_text, l->entry, scale, scale);
-    HSD_SisLib_803A74F0(css_text, l->entry, color);
+    HSD_SisLib_803A74F0(css_text, l->entry, &palette[color]);
 }
 
 /* Only a line whose text or tint changed touches the SIS buffer. */
-static void setLine(CssLine* l, const char* s, bool error, GXColor* normal)
+static void setLine(CssLine* l, const char* s, int color)
 {
     if (strcmp(l->str, s) != 0) {
         snprintf(l->str, sizeof(l->str), "%s", s);
         HSD_SisLib_803A70A0(css_text, l->entry, "%s", l->str);
     }
-    if (l->error != error) {
-        l->error = error;
-        HSD_SisLib_803A74F0(css_text, l->entry, error ? &col_error : normal);
+    if (l->color != color) {
+        l->color = color;
+        HSD_SisLib_803A74F0(css_text, l->entry, &palette[color]);
     }
 }
 
 void mnOnlineCss_Create(void)
 {
     int canvas;
+    int i;
     if (css_text != NULL) {
         return;
     }
     /* Ortho 640x480 canvas above the CSS cameras, as the lobby's. */
     canvas = HSD_SisLib_803A611C(0, NULL, 9, 0xD, 0, 0xE, 0, 0x13);
-    {
-        HSD_GObj* plate = GObj_Create(9, 0xD, 0);
-        GObj_SetupGXLink(plate, (GObj_RenderFunc) drawPlate, 0xE, 0);
-    }
     css_text = HSD_SisLib_803A6754(0, canvas);
     css_text->default_kerning = 1;
     memset(css_lines, 0, sizeof(css_lines));
-    /* Laid out as Slippi's: the user beside the panel, the status lines to
-     * their right, each with a small marker. */
-    addLine(&css_lines[css_title], 232.0f, 44.0f, 0.7f, &col_white);
-    addLine(&css_lines[css_user_label], 214.0f, 288.0f, 0.34f, &col_dim);
-    addLine(&css_lines[css_user_name], 214.0f, 302.0f, 0.46f, &col_white);
-    addLine(&css_lines[css_mark1], 372.0f, 312.0f, 0.42f, &col_green);
-    addLine(&css_lines[css_line1], 388.0f, 312.0f, 0.42f, &col_white);
-    addLine(&css_lines[css_mark2], 372.0f, 334.0f, 0.42f, &col_blue);
-    addLine(&css_lines[css_line2], 388.0f, 334.0f, 0.42f, &col_white);
-    addLine(&css_lines[css_hint], 372.0f, 360.0f, 0.38f, &col_dim);
+    addLine(&css_lines[l_title], BLOCK_X, BLOCK_Y, 0.42f, c_white);
+    addLine(&css_lines[l_user_label], 202.0f, BLOCK_Y, 0.3f, c_dim);
+    addLine(&css_lines[l_user_name], 202.0f, BLOCK_Y + 18.0f, 0.38f, c_white);
+    for (i = 0; i < CSS_STEPS_MAX; i++) {
+        float y = BLOCK_Y + 30.0f + STEP_DY * i;
+        addLine(&css_lines[l_mark + i], BLOCK_X, y, 0.34f, c_blue);
+        addLine(&css_lines[l_text + i], BLOCK_X + 16.0f, y, 0.34f, c_white);
+    }
+    addLine(&css_lines[l_hint], BLOCK_X, BLOCK_Y + 30.0f + STEP_DY * CSS_STEPS_MAX + 12.0f, 0.3f,
+            c_dim);
 }
 
-void mnOnlineCss_Update(const char* title, const char* line1, const char* line2,
-                        const char* hint, bool error, const char* user)
+void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep* steps, int n,
+                        const char* hint)
 {
+    int i;
     if (css_text == NULL) {
         return;
     }
-    setLine(&css_lines[css_title], title, false, &col_white);
-    setLine(&css_lines[css_user_label], user[0] ? "User" : "", false, &col_dim);
-    setLine(&css_lines[css_user_name], user, false, &col_white);
-    {
-        /* Slippi's markers: a green dash for what is done, a blue plus for what
-         * is still to do (and a red mark for an error). */
-        bool done1 = strncmp(line1, "Character selected", 18) == 0 || strncmp(line1, "Locked in", 9) == 0;
-        bool done2 = strncmp(line2, "Playing", 7) == 0;
-        setLine(&css_lines[css_mark1], line1[0] ? (error ? "!" : done1 ? "-" : "+") : "", error,
-                done1 ? &col_green : &col_blue);
-        setLine(&css_lines[css_mark2], line2[0] ? (done2 ? "-" : "+") : "", false,
-                done2 ? &col_green : &col_blue);
-        if (css_lines[css_mark1].str[0] != '\0' && !error) {
-            HSD_SisLib_803A74F0(css_text, css_lines[css_mark1].entry, done1 ? &col_green : &col_blue);
+    setLine(&css_lines[l_title], title, c_white);
+    setLine(&css_lines[l_user_label], user[0] ? "User" : "", c_dim);
+    setLine(&css_lines[l_user_name], user, c_white);
+    for (i = 0; i < CSS_STEPS_MAX; i++) {
+        char mark[2] = { 0, 0 };
+        int color = c_blue;
+        const char* text = "";
+        if (i < n) {
+            mark[0] = steps[i].mark;
+            color = steps[i].mark == '-' ? c_green : steps[i].mark == '!' ? c_red : c_blue;
+            text = steps[i].text;
         }
-        if (css_lines[css_mark2].str[0] != '\0') {
-            HSD_SisLib_803A74F0(css_text, css_lines[css_mark2].entry, done2 ? &col_green : &col_blue);
-        }
+        setLine(&css_lines[l_mark + i], mark, color);
+        setLine(&css_lines[l_text + i], text, i < n && steps[i].mark == '!' ? c_red : c_white);
     }
-    setLine(&css_lines[css_line1], line1, error, &col_white);
-    setLine(&css_lines[css_line2], line2, false, &col_white);
-    setLine(&css_lines[css_hint], hint, false, &col_dim);
+    setLine(&css_lines[l_hint], hint, c_dim);
 }
 
 void mnOnlineCss_Destroy(void)
@@ -142,8 +125,10 @@ void mnOnlineCss_Destroy(void)
 #else
 
 void mnOnlineCss_Create(void) {}
-void mnOnlineCss_Update(UNUSED const char* title, UNUSED const char* line1, UNUSED const char* line2,
-                        UNUSED const char* hint, UNUSED bool error, UNUSED const char* user) {}
+void mnOnlineCss_Update(UNUSED const char* title, UNUSED const char* user,
+                        UNUSED const OnlineCssStep* steps, UNUSED int n, UNUSED const char* hint)
+{
+}
 void mnOnlineCss_Destroy(void) {}
 
 #endif

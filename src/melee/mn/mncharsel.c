@@ -446,6 +446,14 @@ void mnCharSel_8025BD30(void)
     TextKerning* kerning;
     u32 match_type;
 
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        /* The rules banner stays empty: the match's rules are fixed. The text
+         * is built in string 0x4A, so leave that one empty. */
+        css_pal_string(0x4A)[0] = 0;
+        return;
+    }
+#endif
     kerning = DP(TextKerning, HSD_SisLib_804D1124[0][37].kerning);
 
     match_type = mnCharSel_804D6CB0->match_type;
@@ -2498,6 +2506,9 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
     f32 dx;
     f32 dy;
     int door;
+#ifdef TARGET_PC
+    int unused_local;
+#endif
 
     if (mnCharSel_804D6CB0->match_type == TRAINING_MODE) {
         n_doors = 2;
@@ -2999,7 +3010,13 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                     goto update_display;
                 }
 
-                if (mnCharSel_804D6CB0->match_type != 2) {
+                if (mnCharSel_804D6CB0->match_type != 2
+#ifdef TARGET_PC
+                    /* The rules bar opens the rules menu, which an online match
+                     * (fixed rules) has no use for. */
+                    && !cssOnline(&unused_local)
+#endif
+                    ) {
                     f32 cx3 = cursor->xC;
                     if (cx3 > -17.0f && cx3 < 15.0f && cursor->x10 > 22.0f) {
                         cursor->x8 = 1;
