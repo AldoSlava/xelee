@@ -1552,7 +1552,11 @@ void fn_8022AFEC(HSD_GObj* gp)
     state = data->state;
     if ((state == MENU_STATE_5 || state <= MENU_STATE_ENTER_TO ||
          state == MENU_STATE_EXIT_TO) &&
-        data->menu_kind != mn_804A04F0.cur_menu)
+        (data->menu_kind != mn_804A04F0.cur_menu
+#ifdef TARGET_PC
+         || data->pad_3 != (u8) mn_803EB6B0[data->menu_kind].selection_count
+#endif
+         ))
     {
         if (mn_804A04F0.entering_menu != 0) {
             data->state = MENU_STATE_ENTER_FROM;
@@ -1817,6 +1821,9 @@ HSD_GObj* mn_8022B3A0(u8 state)
     user_data->state = state;
     user_data->description = NULL;
 #ifdef TARGET_PC
+    /* The rows this panel was built with, so a rebuild of the same menu
+     * (Slippi's Logout) can tell the old panel to leave. */
+    user_data->pad_3 = (u8) mn_803EB6B0[mn_804A04F0.cur_menu].selection_count;
     for (idx = 0; idx < (int) ARRAY_SIZE(user_data->pc_label); idx++) {
         user_data->pc_label[idx] = NULL;
     }
