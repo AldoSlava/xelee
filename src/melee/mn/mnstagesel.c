@@ -128,6 +128,7 @@ struct StageSelUserData {
 #include "pc/net_rank_session.h"
 #include <sysdolphin/baselib/sislib.h>
 #include "pc/pc.h"
+#include "mnstagesel_slippi.h"
 
 /* A compact ranked list uses synchronized pads and makes both bans visible.
  * It does not depend on the archive's cursor geometry. */
@@ -288,6 +289,8 @@ static int netStageSel_Resolve(void)
  * pick. Like Slippi's static byte it stays as set for later picks. */
 static bool sss_frozen_enabled;
 static bool sss_frozen;
+static bool sss_name_refresh; /* the toggle flipped: remake the hovered name */
+#define SSS_ICON_STADIUM 18   /* Slippi's ID_GRPS */
 
 void mnStageSel_SetFrozenToggle(bool enabled)
 {
@@ -302,16 +305,22 @@ bool mnStageSel_FrozenToggled(void)
 static void frozenToggleFrame(void)
 {
     int i;
-    if (!sss_frozen_enabled || mnStageSel_804D6CAF != 0) {
+    if (!sss_frozen_enabled) {
+        return;
+    }
+    if (mnStageSel_804D6CAF != 0) {
+        mnStageSel_SlippiBannerFrame(false);
         return;
     }
     for (i = 0; i < 4; i++) {
         if (HSD_PadCopyStatus[i].trigger & HSD_PAD_Z) {
             sss_frozen = !sss_frozen;
+            sss_name_refresh = mnStageSel_804D6CAE == SSS_ICON_STADIUM;
             pc_log_line("sss: Frozen Stadium %s", sss_frozen ? "on" : "off");
             break;
         }
     }
+    mnStageSel_SlippiBannerFrame(mnStageSel_804D6CAE == SSS_ICON_STADIUM);
 }
 
 /* "Random" online: the offline roll uses the live RNG and a per-machine
@@ -498,7 +507,16 @@ void fn_80259D84(HSD_GObj* gobj)
         if (mnStageSel_804D6CAF == 0) {
             mnStageSel_80259C28();
         }
+#ifdef TARGET_PC
+        /* The Frozen toggle flipped: out with this name, in with the other
+         * caption (Slippi does the same with a fake icon id). */
+        if (temp_r31->x0 != mnStageSel_804D6CAE ||
+            (sss_name_refresh && mnStageSel_804D6CAE == SSS_ICON_STADIUM))
+        {
+            sss_name_refresh = false;
+#else
         if (temp_r31->x0 != mnStageSel_804D6CAE) {
+#endif
             if (temp_r31->x0 < 0x1E &&
                 mnStageSel_803F06D0[temp_r31->x0].x8 >= 2)
             {
@@ -556,6 +574,11 @@ void mnStageSel_80259ED8(int id)
     if (id < 0x1E && mnStageSel_803F06D0[id].x8 >= 2) {
         do_anim(jobj, 20.0F * mnStageSel_803F06D0[id].x9);
     }
+#ifdef TARGET_PC
+    if (id == SSS_ICON_STADIUM && sss_frozen_enabled && sss_frozen) {
+        mnStageSel_SlippiFrozenName(jobj);
+    }
+#endif
 }
 
 void fn_8025A090(HSD_GObj* gobj)
@@ -779,6 +802,11 @@ static inline void make_bg_model(HSD_JObj** out)
                           sss_models->menu_border.matanim_joint),
                        DP(HSD_ShapeAnimJoint,
                           sss_models->menu_border.shapeanim_joint));
+#ifdef TARGET_PC
+    if (sss_frozen_enabled) {
+        mnStageSel_SlippiBannerCreate(jobj, DP(HSD_Joint, sss_models->menu_border.joint));
+    }
+#endif
     *out = gobj->hsd_obj;
 }
 
