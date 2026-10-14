@@ -96,6 +96,11 @@ static void sdata2_order(void)
 }
 #endif
 
+#ifdef TARGET_PC
+static int mn_PcSelectionFrames(MenuKind kind, int selection);
+#else
+#define mn_PcSelectionFrames(kind, selection) (2 * (selection))
+#endif
 static u16 mn_803EAE68[] = {
     0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD,
 };
@@ -1225,7 +1230,7 @@ void mn_80229F60(HSD_GObj* gp, HSD_JObj* root, MainMenuSelection selection)
     HSD_JObjReqAnimAll(jobj, 1.0F);
     HSD_JObjAnimAll(jobj);
     HSD_JObjReqAnim(jobj,
-                    mn_803EB6B0[flow->cur_menu].start_frame + selection * 2);
+                    mn_803EB6B0[flow->cur_menu].start_frame + mn_PcSelectionFrames(flow->cur_menu, selection));
     mn_8022F3D8(jobj, 0xC, TOBJ_MASK);
     mn_8022F3D8(jobj, 0xD, TOBJ_MASK);
     mn_8022F3D8(jobj, 0xE, TOBJ_MASK);
@@ -1279,7 +1284,7 @@ void mn_8022A440(HSD_GObj* gp, HSD_JObj* root, MainMenuSelection selection)
     HSD_JObjReqAnimAll(r29, 0.0F);
     HSD_JObjAnimAll(r29);
     HSD_JObjReqAnim(r29,
-                    mn_803EB6B0[flow->cur_menu].start_frame + selection * 2);
+                    mn_803EB6B0[flow->cur_menu].start_frame + mn_PcSelectionFrames(flow->cur_menu, selection));
     mn_8022F3D8(r29, 0xC, TOBJ_MASK);
     mn_8022F3D8(r29, 0xD, TOBJ_MASK);
     mn_8022F3D8(r29, 0xE, TOBJ_MASK);
@@ -1625,6 +1630,9 @@ void fn_8022AFEC(HSD_GObj* gp)
         option_count = mn_803EB6B0[data2->menu_kind].selection_count & 0xFF;
         {
             int i;
+            for (i = 0; i < 12; i++) {
+                sp20[i] = NULL;
+            }
             for (i = 0; i < option_count; i++) {
                 temp_jobj = data2->tree[mn_803EAE68[i]];
                 if (temp_jobj == NULL) {
@@ -1637,6 +1645,14 @@ void fn_8022AFEC(HSD_GObj* gp)
         }
         if ((u8) selection_changed != false) {
             /// @todo problem spot
+#ifdef TARGET_PC
+            /* A panel whose rows were rebuilt fewer (Slippi's Logout) is
+             * updated once more with its old hover past the end: no joint. */
+            if (sp20[mn_80229A04_dontinline(mn_804A04F0.cur_menu,
+                                            mn_804A04F0.hovered_selection)] != NULL &&
+                sp20[mn_80229A04_dontinline(mn_804A04F0.cur_menu,
+                                            data2->hovered_selection)] != NULL)
+#endif
             {
                 MenuKind cur_menu = mn_804A04F0.cur_menu;
                 mn_80229F60(gp,
@@ -1644,6 +1660,10 @@ void fn_8022AFEC(HSD_GObj* gp)
                                 cur_menu, mn_804A04F0.hovered_selection)],
                             mn_804A04F0.hovered_selection);
             }
+#ifdef TARGET_PC
+            if (sp20[mn_80229A04_dontinline(mn_804A04F0.cur_menu,
+                                            data2->hovered_selection)] != NULL)
+#endif
             {
                 MenuKind cur_menu = mn_804A04F0.cur_menu;
                 mn_8022A440(gp,
@@ -1702,18 +1722,27 @@ void fn_8022AFEC(HSD_GObj* gp)
     }
 }
 
+#ifdef TARGET_PC
+/* Online Play sits third on the main menu and has no label texture; the
+ * rows below it keep the textures of the vanilla rows they came from. */
+static int mn_PcSelectionFrames(MenuKind kind, int selection)
+{
+    if (kind == MENU_KIND_MAIN && selection > SEL_MAIN_ONLINE) {
+        return 2 * (selection - 1);
+    }
+    return 2 * selection;
+}
+#endif
+
 /// @brief frame offset of a selection's cursor animation
 static inline int GetSelectionFrameOffset(MenuKind kind, int selection)
 {
 #ifdef TARGET_PC
-    /* Online Play sits third on the main menu and has no label texture; the
-     * rows below it keep the textures of the vanilla rows they came from. */
-    if (kind == MENU_KIND_MAIN && selection > SEL_MAIN_ONLINE) {
-        return 2 * (selection - 1);
-    }
-#endif
+    return mn_PcSelectionFrames(kind, selection);
+#else
     (void) kind;
     return 2 * selection;
+#endif
 }
 
 /// @brief counts the unlocked selections of a menu
