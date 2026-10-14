@@ -62,6 +62,7 @@ typedef struct PcNetSlippiMatch {
     uint8_t color[2];
     uint16_t stage;        /* external stage id */
     uint8_t alt_stage_mode;
+    char name[2][24];      /* display names by port, ASCII only (the splash draws them) */
     uint32_t rng_offset;   /* the decider's */
     bool decider;
 } PcNetSlippiMatch;

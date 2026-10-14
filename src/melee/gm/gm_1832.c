@@ -37,6 +37,7 @@
 #include <sysdolphin/baselib/wobj.h>
 
 #ifdef TARGET_PC
+#include "pc/net_match.h"
 #include "pc/pc.h"
 #include "pc/widescreen.h"
 #include <stdlib.h>
@@ -1023,6 +1024,59 @@ void fn_80186080(void)
 
 static char lbl_804D40B0[] = "IrRdMap";
 
+#ifdef TARGET_PC
+/* Slippi's InitVsSplash: a coloured "P1" and the player's name in the top
+ * corners (the local player on the left), and the stage's name at the bottom.
+ * Positions are Slippi's, in the canvas's 640x480 units. */
+static void splashOnlineText(void)
+{
+    static const GXColor player_color[2] = { { 0xE5, 0x4C, 0x4C, 0xFF }, { 0x4B, 0x4C, 0xE5, 0xFF } };
+    static const GXColor white = { 0xFF, 0xFF, 0xFF, 0xFF };
+    static const struct {
+        int id;
+        const char* name;
+    } stages[] = {
+        { 2, "Fountain of Dreams" }, { 3, "Pokemon Stadium" }, { 8, "Yoshi's Story" },
+        { 28, "Dream Land" },        { 31, "Battlefield" },    { 32, "Final Destination" },
+    };
+    PcNetSlippiMatch sm;
+    HSD_Text* text;
+    int port, k, e;
+    if (!pc_net_match_slippi_match(&sm)) {
+        return;
+    }
+    for (port = 0; port < 2; port++) {
+        const float x = port == sm.local_player ? 60.0f : 420.0f;
+        char label[4];
+        text = HSD_SisLib_803A6754(0, 0);
+        text->default_kerning = 1;
+        text->default_alignment = 0;
+        text->font_size.x = 1.0f;
+        text->font_size.y = 1.0f;
+        snprintf(label, sizeof label, "P%d", port + 1);
+        e = HSD_SisLib_803A6B98(text, x, 80.0f, "%s", label);
+        HSD_SisLib_803A7548(text, e, 0.5f, 0.5f);
+        HSD_SisLib_803A74F0(text, e, (GXColor*) &player_color[port]);
+        e = HSD_SisLib_803A6B98(text, x + 36.0f, 80.0f, "%s", sm.name[port]);
+        HSD_SisLib_803A7548(text, e, 0.5f, 0.5f);
+        HSD_SisLib_803A74F0(text, e, (GXColor*) &white);
+    }
+    for (k = 0; k < (int) (sizeof stages / sizeof stages[0]); k++) {
+        if (stages[k].id == sm.stage) {
+            text = HSD_SisLib_803A6754(0, 0);
+            text->default_kerning = 1;
+            text->default_alignment = 1;
+            text->font_size.x = 1.0f;
+            text->font_size.y = 1.0f;
+            e = HSD_SisLib_803A6B98(text, 320.0f, 440.0f, "%s", stages[k].name);
+            HSD_SisLib_803A7548(text, e, 0.6f, 0.6f);
+            HSD_SisLib_803A74F0(text, e, (GXColor*) &white);
+            break;
+        }
+    }
+}
+#endif
+
 void fn_801861B8(void)
 {
     HSD_Text* text;
@@ -1032,6 +1086,11 @@ void fn_801861B8(void)
 
     HSD_SisLib_803A611C(0, NULL, 9, 0x14, 0, 0xE, 0, 0x12);
     HSD_SisLib_803A62A0(0, "SdIntro.dat", "SIS_IntroData");
+#ifdef TARGET_PC
+    if (gm_vs_splash_online) {
+        splashOnlineText();
+    }
+#endif
 
     for (i = 0; i < (s32) lbl_8047368C.xEF; i++) {
         lbl_804735A8.x4[7 + i] = (HSD_JObj*) HSD_SisLib_803A6754(0, 0);

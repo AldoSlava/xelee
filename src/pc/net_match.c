@@ -891,6 +891,15 @@ static void slp_build_match(const PcSlippiSelections* theirs) {
     m->color[local] = s_pick_color;
     m->character[remote] = theirs->character_id;
     m->color[remote] = theirs->character_color;
+    for (int port = 0; port < 2; port++) {
+        const char* src = s_slippi_ticket.players[port == local ? local : remote].display_name;
+        size_t n = 0;
+        for (; src[n] != '\0' && n < sizeof m->name[port] - 1; n++) {
+            unsigned char c = (unsigned char) src[n];
+            m->name[port][n] = c >= 0x20 && c < 0x7F ? (char) c : '?';
+        }
+        m->name[port][n] = '\0';
+    }
     bool direct = mode == PC_MATCH_DIRECT;
     uint16_t stage = 0x1F;
     uint8_t alt = 0;
