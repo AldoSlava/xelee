@@ -13,6 +13,7 @@
 #include "gm_unsplit.h"
 #include "gmresult.h"
 #include "gmscene.h"
+#include "gmvsmode.h"
 #include "gmvsmelee.h"
 #include "types.h"
 #include <dolphin/pad.h>
@@ -37,6 +38,7 @@
 #include "pc/slippi/slp_user.h"
 #include "pc/net_rank_session.h"
 #include "pc/xr_pointer.h"
+#include "pc/xr_place.h"
 extern bool pc_net_slippi_active(void);
 extern const char* pc_get_net_target(void);
 extern void pc_set_net_target(const char* code);
@@ -62,6 +64,7 @@ enum {
     state_sudden_death = 4,
     state_results = 5, /* last: gmVsMelee_ExitResults skips challengers */
     state_intro = 6,   /* the VS splash: the Classic stage intro, between the stage and the fight */
+    state_place = 7,   /* XR: the stage-placement dummy (ONLINE_KIND_PLACE) */
 };
 
 #ifdef TARGET_PC
@@ -84,6 +87,8 @@ static void onEnterSuddenDeath(GameModeState*);
 static void onExitSuddenDeath(GameModeState*);
 static void onEnterResults(GameModeState*);
 static void onExitResults(GameModeState*);
+static void onEnterPlace(GameModeState*);
+static void onExitPlace(GameModeState*);
 static void onEnterIntro(GameModeState*);
 static void onExitIntro(GameModeState*);
 
@@ -177,6 +182,18 @@ GameModeState gm_Mode_Online_States[] = {
         },
     },
     {
+        state_place,
+        lbDvdPreload_2,
+        0,
+        onEnterPlace,
+        onExitPlace,
+        {
+            GS_VS,
+            &gmVsMelee_StartData,
+            &gmVsMelee_VsExitInfo,
+        },
+    },
+    {
         state_results,
         lbDvdPreload_3,
         0,
@@ -261,6 +278,10 @@ void onEnterLobby(UNUSED GameModeState* state)
 void onExitLobby(UNUSED GameModeState* state)
 {
 #ifdef TARGET_PC
+    if (online_kind == ONLINE_KIND_PLACE) {
+        gm_SetNextGameModeStateId(state_place);
+        return;
+    }
     PcNetSlippiMatch m;
     if (slippiFlow() && slippi_picked && pc_net_match_slippi_match(&m)) {
         gm_SetNextGameModeStateId(state_sss); /* forced stage: it exits at once */
@@ -662,6 +683,42 @@ void onExitSss(GameModeState* state)
     }
 #endif
 }
+
+#ifdef TARGET_PC
+/* XR: Battlefield with two idle fighters, tinted, while the player places the
+ * stage (gmvs.c, xr_place.c); A or B ends it and the mode goes on to the
+ * kind that asked, or back to the menu it was entered from. */
+static OnlineKind kind_after_place = ONLINE_KIND_PLACE;
+extern bool gm_vs_place_dummy;
+
+void gmOnline_SetKindAfterPlace(OnlineKind kind)
+{
+    kind_after_place = kind;
+}
+
+void onEnterPlace(GameModeState* state)
+{
+    pc_log_line("online: stage placement scene");
+    gm_vs_place_dummy = true;
+    pc_xr_place_dummy_start();
+    gmVsMode_PlaceDummyEnter(state);
+}
+
+void onExitPlace(UNUSED GameModeState* state)
+{
+    gm_vs_place_dummy = false;
+    if (kind_after_place != ONLINE_KIND_PLACE) {
+        online_kind = kind_after_place; /* straight on to Unranked or Direct */
+        kind_after_place = ONLINE_KIND_PLACE;
+        gm_ChangeGameModeAfterCurrentScene(GM_ONLINE);
+    } else {
+        gm_ChangeGameModeAfterCurrentScene(GM_MENU);
+    }
+}
+#else
+void onEnterPlace(UNUSED GameModeState* state) {}
+void onExitPlace(UNUSED GameModeState* state) {}
+#endif
 
 void onEnterIntro(GameModeState* state)
 {
@@ -1396,6 +1453,9 @@ void gm_Scene_OnlineLobby_OnEnter(UNUSED void* unused)
         loginBegin(); /* the keyboard builds its own screen */
         return;
     }
+    if (online_kind == ONLINE_KIND_PLACE) {
+        return; /* a pass-through to the placement scene */
+    }
 #endif
     mnOnlineLobby_Create();
 #ifdef TARGET_PC
@@ -1425,6 +1485,9 @@ void gm_Scene_OnlineLobby_OnExit(UNUSED void* unused)
 #ifdef TARGET_PC
     if (online_kind == ONLINE_KIND_LOGIN) {
         loginEnd();
+    }
+    if (online_kind == ONLINE_KIND_PLACE) {
+        return;
     }
 #endif
     mnOnlineLobby_Destroy();
@@ -1560,6 +1623,10 @@ void gm_Scene_OnlineLobby_OnFrame(void)
 
     if (mnNameNew_PcActive()) {
         return; /* the keyboard runs its own procs and takes the pad */
+    }
+    if (online_kind == ONLINE_KIND_PLACE) {
+        gm_801A4B60(); /* nothing to show: on to the placement scene */
+        return;
     }
     if (online_kind == ONLINE_KIND_LOGIN) {
         if (login_view) {

@@ -191,6 +191,7 @@ typedef enum OnlineMenuSelection {
 typedef enum SlippiMenuSelection {
     SEL_SLIPPI_UNRANKED = 0,
     SEL_SLIPPI_DIRECT = 1,
+    SEL_SLIPPI_PLACE = 2, /* XR only: Logout is one row lower then */
     SEL_SLIPPI_LOGOUT = 2,
 } SlippiMenuSelection;
 #endif

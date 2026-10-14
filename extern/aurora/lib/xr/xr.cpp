@@ -333,6 +333,11 @@ ArenaPose g_arena;
 // Where every stage starts (AURORA_XR_ARENA_POS, _YAW, _SCALE), before its
 // own scale.
 ArenaPose g_defaultArena;
+// A placement the player made on purpose for every stage (aurora_xr_adopt_stage):
+// a world pose, before any stage's scale. While set, a stage not placed yet
+// starts there instead of in front of the head.
+ArenaPose g_adoptedArena;
+bool g_adoptedSet = false;
 bool g_arenaInit = false;
 // The current stage (aurora_xr_set_stage; -1: none yet), and where the
 // player has put each stage this session. Placing one stage leaves the
@@ -6033,8 +6038,26 @@ extern "C" void aurora_xr_reset_stage(void) {
   std::lock_guard lock{g_arenaMutex};
   init_arena();
   g_stageArenas.erase(g_stage);
-  g_arena = g_defaultArena;
+  g_arena = g_adoptedSet ? g_adoptedArena : g_defaultArena;
   g_arena.scale *= g_stageScale;
+}
+
+extern "C" void aurora_xr_adopt_stage(void) {
+  using namespace aurora::xr;
+  std::lock_guard lock{g_arenaMutex};
+  init_arena();
+  g_adoptedArena = g_arena;
+  g_adoptedArena.scale /= g_stageScale;
+  g_adoptedSet = true;
+  g_stageArenas.clear();
+  Log.info("Arena adopted as every stage's start: {:.2f},{:.2f},{:.2f}, yaw {:.0f} deg, scale {:.5f}",
+           g_adoptedArena.pos.x, g_adoptedArena.pos.y, g_adoptedArena.pos.z, g_adoptedArena.yaw * 57.2958f,
+           g_adoptedArena.scale);
+}
+
+extern "C" bool aurora_xr_stage_adopted(void) {
+  std::lock_guard lock{aurora::xr::g_arenaMutex};
+  return aurora::xr::g_adoptedSet;
 }
 
 extern "C" void aurora_xr_set_placing_clip(int which, int width, int height, const unsigned char* rgba, int frames,
@@ -6099,9 +6122,14 @@ extern "C" void aurora_xr_set_stage(int stage, float x, float y, float z, float 
     // Not placed yet this session: in front of where the head is and looks,
     // like the placing cards, not of the tracking origin (which is wherever
     // the player last recentered).
-    g_arena = g_defaultArena;
-    g_arena.scale *= g_stageScale;
-    g_arenaToHead = true;
+    if (g_adoptedSet) {
+      g_arena = g_adoptedArena;
+      g_arena.scale *= g_stageScale;
+    } else {
+      g_arena = g_defaultArena;
+      g_arena.scale *= g_stageScale;
+      g_arenaToHead = true;
+    }
   }
   static const bool atHead = env_flag("AURORA_XR_ARENA_AT_HEAD", false);
   if (atHead)

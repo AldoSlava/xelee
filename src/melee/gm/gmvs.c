@@ -12,6 +12,9 @@
 #include "gmmultiman.h"
 #include "gmpause.h"
 #include "types.h"
+#ifdef TARGET_PC
+#include "pc/xr_place.h"
+#endif
 #include <dolphin/pad.h>
 #include <melee/cm/camera.h>
 #include <melee/db/db.h>
@@ -1561,10 +1564,12 @@ void fn_8016D634(void)
 }
 
 #ifdef TARGET_PC
-/* MELEE_PLACE_DUMMY=1: the stage-placement dummy. The stage's materials are
- * turned translucent green and the fighters flat red, every frame (the
- * fighters' own code sets some of them back). Presentation only: nothing
- * here is read by the sim. */
+/* The stage-placement dummy: the stage's materials are rebuilt translucent
+ * green and the fighters' flat red, once after everything has loaded (the
+ * material's TEV is compiled from its flags, so the rebuild recompiles it).
+ * Presentation only: nothing here is read by the sim. */
+bool gm_vs_place_dummy; /* the Slippi stage-placement scene (gmonlinemode.c) */
+int gm_vs_place_dummy_frame; /* its frames so far; zero as the scene opens */
 static void placeDummyTintJObj(HSD_JObj* j, u8 r, u8 g, u8 b, u8 a)
 {
     for (; j != NULL; j = j->next) {
@@ -1579,19 +1584,14 @@ static void placeDummyTintJObj(HSD_JObj* j, u8 r, u8 g, u8 b, u8 a)
                 m->mat->diffuse.g = m->mat->ambient.g = g;
                 m->mat->diffuse.b = m->mat->ambient.b = b;
                 m->mat->alpha = a / 255.0f;
-                {
-                    HSD_TObj* t;
-                    for (t = m->tobj; t != NULL; t = t->next) {
-                        /* ignore the texture: the material's colour alone */
-                        t->flags = (t->flags & ~(TEX_COLORMAP_MASK | TEX_ALPHAMAP_MASK)) |
-                                   TEX_COLORMAP_NONE | TEX_ALPHAMAP_NONE;
-                    }
-                }
-                m->rendermode &= ~(RENDER_TEXTURES | RENDER_TOON | RENDER_ALPHA_BITS);
+                m->tobj = NULL; /* no texture stage: the compile below leaves it out */
+                m->rendermode &= ~(RENDER_TEXTURES | RENDER_TOON | RENDER_SPECULAR | RENDER_VERTEX | RENDER_SHADOW |
+                                   RENDER_ALPHA_BITS);
                 m->rendermode |= RENDER_DIFFUSE | RENDER_ALPHA_MAT;
                 if (a < 255) {
                     m->rendermode |= RENDER_XLU | RENDER_NO_ZUPDATE;
                 }
+                HSD_MObjCompileTev(m);
             }
         }
         placeDummyTintJObj(j->child, r, g, b, a);
@@ -1601,10 +1601,23 @@ static void placeDummyTintJObj(HSD_JObj* j, u8 r, u8 g, u8 b, u8 a)
 static void placeDummyTint(void)
 {
     HSD_GObj* g;
-    int slot;
+    int slot, plink;
+    int frame = ++gm_vs_place_dummy_frame;
+    if (frame != 20 && frame != 120) {
+        return; /* the materials are rebuilt once, after everything has loaded */
+    }
+    for (plink = 0; plink < 64; plink++) {
+        for (g = HSD_GObjPLinkHead[plink]; g != NULL; g = g->next) {
+            if (g->classifier == HSD_GOBJ_CLASS_EFFECT && g->obj_kind == HSD_GObj_JObjKind) {
+                GET_JOBJ(g)->flags |= JOBJ_HIDDEN; /* stray glow and spawn sparkle */
+            }
+        }
+    }
     for (g = HSD_GObjPLinkHead[5]; g != NULL; g = g->next) {
         if (g->classifier == HSD_GOBJ_CLASS_STAGE && g->obj_kind == HSD_GObj_JObjKind) {
-            placeDummyTintJObj(GET_JOBJ(g), 0x30, 0xE0, 0x50, 0x70);
+            placeDummyTintJObj(GET_JOBJ(g), 0x20, 0xB0, 0x40, 0x70);
+            /* the translucent pass: blending is of no use in the opaque one */
+            GET_JOBJ(g)->flags = (GET_JOBJ(g)->flags & ~JOBJ_ROOT_OPA) | JOBJ_ROOT_XLU;
         }
     }
     for (slot = 0; slot < 2; slot++) {
@@ -1620,8 +1633,15 @@ void gm_Scene_Vs_OnFrame(void)
 {
     PAD_STACK(8);
 #ifdef TARGET_PC
-    if (getenv("MELEE_PLACE_DUMMY") != NULL) {
+    if (gm_vs_place_dummy) {
         placeDummyTint();
+        if (pc_xr_place_dummy_result() != 0) {
+            /* A or B: the scene ends, no outcome to record. */
+            controller.state.match_result = OUTCOME_TERMINATED;
+            fn_8016C7F0();
+            gm_801A4B60();
+            return;
+        }
     }
 #endif
     if (controller.start.on_frame_start != NULL) {

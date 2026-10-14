@@ -29,7 +29,19 @@ bool pc_xr_place_hold(void);
 /* A stage's fight geometry is ready in the 3D view (xr_scene.c): offer the
  * hold for it next pass. */
 void pc_xr_place_stage_ready(int grkind);
+/* The placement dummy scene (see xr_place.c): started when it opens; its
+ * result is polled each frame (0 still placing, 1 adopted, 2 skipped, and
+ * once non-zero it is reset). Placed or skipped once this launch: decided. */
+void pc_xr_place_dummy_start(void);
+int pc_xr_place_dummy_result(void);
+bool pc_xr_place_decided(void);
+/* A headset is presenting and placing is not turned off. */
+bool pc_xr_place_available(void);
 #else
+static inline void pc_xr_place_dummy_start(void) {}
+static inline int pc_xr_place_dummy_result(void) { return 0; }
+static inline bool pc_xr_place_decided(void) { return true; }
+static inline bool pc_xr_place_available(void) { return false; }
 static inline bool pc_xr_place_hold(void) { return false; }
 static inline void pc_xr_place_stage_ready(int grkind) { (void)grkind; }
 #endif

@@ -12,6 +12,7 @@
 
 #include "pc/net_match.h"
 #include "pc/slippi/slp_user.h"
+#include "pc/xr_place.h"
 
 /* Main Menu > Online Play. Each entry selects its GM_ONLINE lobby mode. The
  * labels are drawn text (the menu's own labels are textures with no room for
@@ -29,13 +30,26 @@ static const char* const online_descriptions[] = {
 };
 
 /* Online Play > Slippi: signed out there is only Login; signed in it is
- * Unranked, Direct and Logout. */
-static const char* const slippi_in_labels[] = { "Unranked", "Direct", "Logout" };
-static const char* const slippi_in_descriptions[] = {
+ * Unranked, Direct, Place Stage (only with a headset presenting) and Logout. */
+enum { row_unranked, row_direct, row_place, row_logout, row_count };
+static const char* const slippi_in_labels[row_count] = { "Unranked", "Direct", "Place Stage",
+                                                         "Logout" };
+static const char* const slippi_in_descriptions[row_count] = {
     "Play unranked matches.",
     "Play a specific person.",
+    "Place the stage in your room.",
     "Sign out of your Slippi account.",
 };
+
+/* The signed-in menu's row at `selection`, or -1. */
+static int slippiRow(int selection)
+{
+    const bool place = pc_xr_place_available();
+    if (selection < 0 || selection >= (place ? row_count : row_count - 1)) {
+        return -1;
+    }
+    return !place && selection >= row_place ? selection + 1 : selection;
+}
 
 static const char* notice;
 
@@ -43,7 +57,7 @@ static int slippi_built_count;
 
 int mnOnline_SlippiCount(void)
 {
-    return pc_net_match_slippi_ready() ? (int) ARRAY_SIZE(slippi_in_labels) : 1;
+    return pc_net_match_slippi_ready() ? (pc_xr_place_available() ? row_count : row_count - 1) : 1;
 }
 
 void mnOnline_SlippiBuilt(void)
@@ -65,8 +79,8 @@ const char* mnOnline_Label(MenuKind kind, int selection)
         if (!pc_net_match_slippi_ready()) {
             return selection == 0 ? "Login" : NULL;
         }
-        if (selection >= 0 && selection < (int) ARRAY_SIZE(slippi_in_labels)) {
-            return slippi_in_labels[selection];
+        if (slippiRow(selection) >= 0) {
+            return slippi_in_labels[slippiRow(selection)];
         }
     }
     return NULL;
@@ -86,8 +100,8 @@ const char* mnOnline_Description(MenuKind kind, int selection)
         if (!pc_net_match_slippi_ready()) {
             return selection == 0 ? "Sign in to your Slippi account." : NULL;
         }
-        if (selection >= 0 && selection < (int) ARRAY_SIZE(slippi_in_descriptions)) {
-            return slippi_in_descriptions[selection];
+        if (slippiRow(selection) >= 0) {
+            return slippi_in_descriptions[slippiRow(selection)];
         }
     }
     return NULL;
@@ -107,6 +121,18 @@ static void enterOnline(OnlineKind kind)
     gmOnline_SetKind(kind);
     data->pending_mode = GM_ONLINE;
     gm_801A4B60();
+}
+
+/* The first Unranked or Direct of a launch with a headset presenting places
+ * the stage first (src/pc/xr_place.h), then goes on to the mode. */
+static void enterAfterPlacing(OnlineKind kind)
+{
+    if (pc_xr_place_available() && !pc_xr_place_decided()) {
+        gmOnline_SetKindAfterPlace(kind);
+        enterOnline(ONLINE_KIND_PLACE);
+        return;
+    }
+    enterOnline(kind);
 }
 
 /* Up/Down wrap over `count` entries. */
@@ -168,14 +194,17 @@ void mnOnline_SlippiThink(HSD_GObj* gp)
             enterOnline(ONLINE_KIND_LOGIN);
             return;
         }
-        switch (mn_804A04F0.hovered_selection) {
-        case SEL_SLIPPI_UNRANKED:
-            enterOnline(ONLINE_KIND_UNRANKED);
+        switch (slippiRow(mn_804A04F0.hovered_selection)) {
+        case row_unranked:
+            enterAfterPlacing(ONLINE_KIND_UNRANKED);
             break;
-        case SEL_SLIPPI_DIRECT:
-            enterOnline(ONLINE_KIND_DIRECT);
+        case row_direct:
+            enterAfterPlacing(ONLINE_KIND_DIRECT);
             break;
-        case SEL_SLIPPI_LOGOUT:
+        case row_place:
+            enterOnline(ONLINE_KIND_PLACE);
+            break;
+        case row_logout:
             sfxForward();
             pc_slippi_account_forget();
             pc_net_match_slippi_refresh();

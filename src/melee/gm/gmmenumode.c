@@ -202,6 +202,10 @@ void onEnter(GameModeState* scene)
             data->menu_kind = MENU_KIND_ONLINE_SLIPPI;
             data->hovered_selection = 0;
             break;
+        case ONLINE_KIND_PLACE:
+            data->menu_kind = MENU_KIND_ONLINE_SLIPPI;
+            data->hovered_selection = SEL_SLIPPI_PLACE;
+            break;
         default:
             data->menu_kind = MENU_KIND_ONLINE;
             data->hovered_selection = SEL_ONLINE_LAN;

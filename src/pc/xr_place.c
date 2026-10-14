@@ -35,6 +35,13 @@ static bool s_cards;
  * down during the hold (a release only counts for a press seen here). */
 static uint32_t s_prev;
 static uint32_t s_down;
+/* The placement dummy scene (gm/gmonlinemode.c, ONLINE_KIND_PLACE) is the
+ * scene: its stage is held for placing like a fight's, but the simulation
+ * keeps ticking (the two fighters idle, the pads never reach them) and A
+ * adopts the placement for every stage, B keeps the defaults. */
+static bool s_dummy;
+static int s_dummy_result; /* 0 running, 1 adopted, 2 skipped */
+static bool s_decided;     /* placed or skipped once this launch */
 
 static bool enabled(void) {
     const char* v = getenv("MELEE_XR_PLACE");
@@ -151,6 +158,34 @@ static void end_hold(void) {
     s_holding = -1;
 }
 
+bool pc_xr_place_available(void) {
+    return enabled() && aurora_xr_active();
+}
+
+bool pc_xr_place_decided(void) {
+    return s_decided;
+}
+
+void pc_xr_place_dummy_start(void) {
+    s_dummy = true;
+    s_dummy_result = 0;
+    s_pending = -1;
+    s_holding = -1;
+}
+
+int pc_xr_place_dummy_result(void) {
+    const int r = s_dummy_result;
+    if (r != 0) {
+        s_dummy = false;
+        s_dummy_result = 0;
+        s_decided = true;
+        if (s_holding >= 0) {
+            end_hold();
+        }
+    }
+    return r;
+}
+
 void pc_xr_place_stage_ready(int grkind) {
     if (s_holding < 0) {
         s_pending = grkind;
@@ -160,7 +195,10 @@ void pc_xr_place_stage_ready(int grkind) {
 bool pc_xr_place_hold(void) {
     if (s_holding < 0) {
         if (s_pending < 0) {
-            return false;
+            if (!s_dummy || aurora_xr_active()) {
+                return false;
+            }
+            s_pending = 0; /* no XR scene to announce the stage: flat testing */
         }
         const int grkind = s_pending;
         s_pending = -1;
@@ -168,13 +206,13 @@ bool pc_xr_place_hold(void) {
          * (no runtime, no session yet) never waits for one. Netplay: the
          * peer starts the match on the agreed frame whatever this side
          * shows, so the stage keeps its default placement. */
-        if (!enabled() || !aurora_xr_active() || pc_net_active()) {
+        if (!s_dummy && (!enabled() || !aurora_xr_active() || pc_net_active())) {
             return false;
         }
         /* All-Star's rest area comes back after every fight: placed once a
          * session, it keeps that. */
         static bool rest_area_placed;
-        if (grkind == 0x42) { /* Gr_Kind_Heal */
+        if (!s_dummy && grkind == 0x42) { /* Gr_Kind_Heal */
             if (rest_area_placed) {
                 return false;
             }
@@ -215,6 +253,17 @@ bool pc_xr_place_hold(void) {
     if (done & PAD_BUTTON_B) {
         aurora_xr_reset_stage();
         pc_log_line("xr: stage %d back at its default placement", s_holding);
+        if (s_dummy) {
+            s_dummy_result = 2; /* skipped: the defaults stand */
+        }
+    }
+    if (s_dummy) {
+        if (done & (PAD_BUTTON_A | PAD_BUTTON_START)) {
+            aurora_xr_adopt_stage();
+            pc_log_line("xr: placement adopted for every stage");
+            s_dummy_result = 1;
+        }
+        return false; /* the fighters keep idling */
     }
     if (done & (PAD_BUTTON_A | PAD_BUTTON_START)) {
         pc_log_line("xr: stage %d placed; the fight begins", s_holding);

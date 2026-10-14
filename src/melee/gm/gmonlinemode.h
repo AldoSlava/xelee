@@ -17,6 +17,7 @@ typedef enum OnlineKind {
     ONLINE_KIND_RANKED = 3,
     ONLINE_KIND_PROFILE = 4,
     ONLINE_KIND_LOGIN = 5, /* Slippi sign-in: the keyboard screen, not a match */
+    ONLINE_KIND_PLACE = 6, /* XR: the stage-placement scene, then back to the menu */
 } OnlineKind;
 
 void gmOnline_SetKind(OnlineKind kind);
@@ -24,6 +25,9 @@ OnlineKind gmOnline_GetKind(void);
 /* True while a Slippi account is signed in and the mode is Unranked or Direct:
  * the CSS comes first and the search follows (see gmonlinemode.c). */
 bool gmOnline_SlippiFlow(void);
+/* After a placement scene started by Unranked or Direct on a launch with no
+ * placement yet, the mode goes on to that one instead of back to the menu. */
+void gmOnline_SetKindAfterPlace(OnlineKind kind);
 
 /* The online CSS's status text (src/melee/mn/mnonlinecss.c), drawn by the
  * Slippi flow's state in gmonlinemode.c. */
