@@ -353,6 +353,15 @@ std::atomic<bool> g_hudOnTop{false};
 // The stage's highest floor (game units; NaN: unknown), for the HUD.
 float g_stageTop = std::numeric_limits<float>::quiet_NaN();
 
+// Set by the game every frame a menu draws as a window (aurora_xr_menu_window):
+// the menu camera's draws are replayed per eye like a fight, with the screen's
+// pose in place of the arena's, so the menu's depth shows as parallax. The
+// camera's distance to the plane that sits at the screen, and that plane's
+// height (game units), under g_arenaMutex; the time of the last call.
+std::atomic<int64_t> g_menuWindowNs{0};
+float g_menuWindowDist = 100.f, g_menuWindowPlaneH = 50.f;
+bool menu_window_active();
+
 // Set by the game every fight frame (aurora_xr_set_paused): the fight is
 // paused, so the controllers point and grab instead of playing.
 std::atomic<bool> g_fightPaused{false};
@@ -1530,6 +1539,11 @@ struct PaceProbe {
 
 
 int64_t monotonic_ns() { return std::chrono::steady_clock::now().time_since_epoch().count(); }
+
+bool menu_window_active() {
+  const int64_t t = g_menuWindowNs.load();
+  return t != 0 && monotonic_ns() - t < 250000000;
+}
 
 void pace_display(uint64_t frame, XrTime displayTime) {
   std::lock_guard lock{g_pace.mutex};
@@ -3612,11 +3626,14 @@ bool render_xr_frame() {
       ++g_stereoLate;
   }
   // Held fights place the arena; menus place the screen.
-  const bool screenShown = !fight && g_streams[kScreen].haveImage;
-  const bool pointing = fight && held && B.focused;
+  // A menu drawn as a window: 3D frames like a fight's, but the screen's
+  // hands, pointer and bar, and none of the fight's HUD or placing.
+  const bool menuWindow = fight && menu_window_active();
+  const bool screenShown = (!fight || menuWindow) && g_streams[kScreen].haveImage;
+  const bool pointing = fight && !menuWindow && held && B.focused;
   const bool screenPointing = screenShown && B.focused;
   locate_hands(fs.predictedDisplayTime);
-  update_grab(fight ? Target::Arena : Target::Screen, pointing || screenPointing);
+  update_grab(fight && !menuWindow ? Target::Arena : Target::Screen, pointing || screenPointing);
   // On the screen the grips stay Z unless a laser is on it.
   const bool onScreen = screenPointing && std::any_of(G.hands.begin(), G.hands.end(), [](const Hand& h) {
                           return h.engaged || h.clicking || h.inside || h.hit >= 0.f;
@@ -3692,7 +3709,7 @@ bool render_xr_frame() {
     proj.views = projViews.data();
     // No HUD while the stage is held for placing, cards open or not.
     const bool showHud = hud.haveImage && (now - hud.lastRelease < std::chrono::milliseconds(250) || !flatSince) &&
-                         placing == 0;
+                         placing == 0 && !menuWindow;
     if (showHud) {
       hudQuad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
       hudQuad.space = B.space;
@@ -3714,7 +3731,13 @@ bool render_xr_frame() {
     layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&proj);
     if (showHud && !hudUnder)
       layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&hudQuad);
-    if (placing > 0) {
+    if (menuWindow) {
+      add_screen_bar(pointers);
+      if (onScreen)
+        build_pointer_layers(pointers, true);
+      for (uint32_t i = 0; i < pointers.count; ++i)
+        layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&pointers.quads[i]);
+    } else if (placing > 0) {
       build_placing_layers(placingLayers, placing);
       for (uint32_t i = 0; i < placingLayers.count; ++i)
         layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&placingLayers.quads[i]);
@@ -4327,6 +4350,43 @@ Mat4 arena_transform() {
   const float ty = a.pos.y - a.scale * ctr[1];
   const float tz = a.pos.z - (-s * ctr[0] + c * ctr[2]);
   return {c, 0.f, s, tx, 0.f, a.scale, 0.f, ty, -s, 0.f, c, tz, 0.f, 0.f, 0.f, 1.f};
+}
+
+// The menu window: the game camera's space -> the room. The plane the camera
+// looks at (its distance d) lands on the screen's content; depth keeps its
+// proportion times AURORA_XR_MENU_DEPTH. A = this · V_game, so the replay's
+// A · V_game⁻¹ leaves exactly this.
+Mat4 menu_window_transform() {
+  float d, planeH;
+  {
+    std::lock_guard lock{g_arenaMutex};
+    d = g_menuWindowDist;
+    planeH = g_menuWindowPlaneH;
+  }
+  static const float depth = env_float("AURORA_XR_MENU_DEPTH", 1.f);
+  const ScreenPose s = screen_pose();
+  const auto& st = g_streams[kScreen];
+  const float quadH = s.width * screen_aspect();
+  // The content's rectangle in the quad (the picture is letterboxed).
+  float cx = 0.f, cy = 0.f, contentH = quadH;
+  const uint32_t cw = g_contentW, ch = g_contentH;
+  if (st.width > 0 && st.height > 0 && cw > 0 && ch > 0) {
+    const auto vp = webgpu::calculate_present_viewport(st.width, st.height, cw, ch);
+    cx = ((vp.left + vp.width * 0.5f) / static_cast<float>(st.width) - 0.5f) * s.width;
+    cy = (0.5f - (vp.top + vp.height * 0.5f) / static_cast<float>(st.height)) * quadH;
+    contentH = vp.height / static_cast<float>(st.height) * quadH;
+  }
+  const float k = contentH / planeH, kz = k * depth;
+  const float x = s.orientation.x, y = s.orientation.y, z = s.orientation.z, w = s.orientation.w;
+  const float r[9] = {1 - 2 * (y * y + z * z), 2 * (x * y - z * w),     2 * (x * z + y * w),
+                      2 * (x * y + z * w),     1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+                      2 * (x * z - y * w),     2 * (y * z + x * w),     1 - 2 * (x * x + y * y)};
+  // room = pos + R · (cx + k·x, cy + k·y, kz·(z + d))
+  const XrVector3f o{cx, cy, kz * d};
+  return {r[0] * k, r[1] * k, r[2] * kz, s.pos.x + r[0] * o.x + r[1] * o.y + r[2] * o.z,
+          r[3] * k, r[4] * k, r[5] * kz, s.pos.y + r[3] * o.x + r[4] * o.y + r[5] * o.z,
+          r[6] * k, r[7] * k, r[8] * kz, s.pos.z + r[6] * o.x + r[7] * o.y + r[8] * o.z,
+          0.f,      0.f,      0.f,       1.f};
 }
 
 constexpr char kComposeShader[] = R"(
@@ -5460,7 +5520,14 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
   // C = P_eye · V_eye · A · T · V_game⁻¹, with T a draw's extra placement
   // (aurora_xr_world_transform; identity for index 0).
   const Mat4 cameraToWorld = inverse_affine(frame.xrWorldView);
-  const Mat4 arena = arena_transform();
+  Mat4 arena;
+  if (menu_window_active()) {
+    const auto& v = frame.xrWorldView;
+    arena = mul(menu_window_transform(),
+                {v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], 0.f, 0.f, 0.f, 1.f});
+  } else {
+    arena = arena_transform();
+  }
   const size_t transforms = std::min<size_t>(worldTransforms.size() + 1, gfx::XrMaxTransforms);
   struct {
     std::array<Mat4, 2> m;
@@ -6138,4 +6205,16 @@ extern "C" bool aurora_xr_pace(void) {
   // presentation; 0 without one).
   aurora::gfx::set_xr_game_frame_tick(ticked ? g_lastTickFrame.load() : 0);
   return ticked;
+}
+
+extern "C" void aurora_xr_menu_window(float dist, float plane_height) {
+  using namespace aurora::xr;
+  if (!(dist > 0.f) || !(plane_height > 0.f))
+    return;
+  {
+    std::lock_guard lock{g_arenaMutex};
+    g_menuWindowDist = dist;
+    g_menuWindowPlaneH = plane_height;
+  }
+  g_menuWindowNs = monotonic_ns();
 }

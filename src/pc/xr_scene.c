@@ -20,7 +20,9 @@
 #include <melee/ft/ftlib.h>
 #include <melee/pl/player.h>
 #include <melee/cm/camera.h>
+#include <sysdolphin/baselib/cobj.h>
 #include <sysdolphin/baselib/dobj.h>
+#include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/jobj.h>
 
 #include <math.h>
@@ -922,6 +924,42 @@ void pc_xr_hud_camera(void) {
     }
     s_category = AURORA_XR_HUD;
     aurora_xr_camera(AURORA_XR_HUD, NULL);
+}
+
+/* MELEE_XR_MENU_WINDOW=0 keeps menus on the flat virtual screen. */
+static bool menu_window_wanted(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("MELEE_XR_MENU_WINDOW");
+        on = e == NULL || e[0] != '0';
+    }
+    return on && aurora_xr_active() && !s_flat_view;
+}
+
+void pc_xr_menu_window_render(HSD_GObj* gobj, intptr_t pass) {
+    HSD_CObj* cobj = gobj->hsd_obj;
+    /* A perspective camera looking at a point: the plane through its
+     * interest is what sits at the screen. */
+    if (!menu_window_wanted() || cobj == NULL || cobj->projection_type != PROJ_PERSPECTIVE) {
+        HSD_GObj_803910D8(gobj, pass);
+        return;
+    }
+    if (HSD_CObjSetCurrent(cobj)) {
+        Vec3 eye, interest;
+        HSD_CObjGetEyePosition(cobj, &eye);
+        HSD_CObjGetInterest(cobj, &interest);
+        const float dx = eye.x - interest.x, dy = eye.y - interest.y, dz = eye.z - interest.z;
+        const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+        const float fov = cobj->projection_param.perspective.fov * 0.01745329252f;
+        s_category = AURORA_XR_WORLD;
+        aurora_xr_camera(AURORA_XR_WORLD, cobj->view_mtx);
+        aurora_xr_world_clip(NULL);
+        aurora_xr_world_transform(NULL);
+        aurora_xr_menu_window(dist, 2.f * dist * tanf(fov * 0.5f));
+        HSD_GObj_80390ED0(gobj, 7);
+        HSD_CObjEndCurrent();
+        pc_xr_mono_camera();
+    }
 }
 
 void pc_xr_mono_camera(void) {

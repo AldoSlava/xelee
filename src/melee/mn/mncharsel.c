@@ -319,6 +319,7 @@ static struct CSSDoorsData2 data2 = {
 #ifdef TARGET_PC
 #include "pc/region.h"
 #include "pc/xr_pointer.h"
+#include "pc/xr_scene.h"
 /* The character-select header and token counters are composed by index out
  * of SdSlChr, and the USA build's layout does not exist on PAL: there the
  * digits are string 73 (one byte per glyph, see sislib.static.h), 72 is the
@@ -4382,7 +4383,11 @@ s32 mnCharSel_802640A0(void)
         cobj = HSD_CObjLoadDesc(MenMain_cam = DP(HSD_CObjDesc, css_data_table->cam));
         HSD_GObjObject_80390A70(gobj, HSD_GObj_CameraKind, cobj);
     }
+#ifdef TARGET_PC
+    GObj_SetupGXLinkMax(gobj, pc_xr_menu_window_render, 0);
+#else
     GObj_SetupGXLinkMax(gobj, HSD_GObj_803910D8, 0);
+#endif
     gobj->gxlink_prios = 0x1F;
     HSD_GObj_SetupProc(gobj, mn_8022BA1C, 5);
     ctx = HSD_SisLib_803A611C(0, gobj, 7, 8, 0x80, 1, 0x80, 0);

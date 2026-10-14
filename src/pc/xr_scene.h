@@ -8,6 +8,7 @@
 #define PC_XR_SCENE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +24,12 @@ void pc_xr_camera_focus(const float interest[3]);
 void pc_xr_world_camera(const float view[3][4]);
 /* After HSD_CObjSetCurrent of the HUD camera (if/ifall.c). */
 void pc_xr_hud_camera(void);
+/* A menu's perspective camera as a window onto its scene in the room
+ * (docs/quest-xr.md, "Menu windows"): a GObj render callback that replaces
+ * HSD_GObj_803910D8 for the camera, drawing the same things. Stays the flat
+ * screen when MELEE_XR_MENU_WINDOW=0 or no XR session is presenting. */
+struct HSD_GObj;
+void pc_xr_menu_window_render(struct HSD_GObj* gobj, intptr_t pass);
 /* While on, the fight and HUD cameras draw only the flat frame, so XR shows
  * the virtual screen: for screens the game draws over a fight that has
  * ended (Stage Clear's bonus tally, gm/gmregclear.c). Each scene starts
@@ -85,6 +92,7 @@ static inline void pc_xr_stage_load(void) {}
 static inline void pc_xr_world_camera(const float view[3][4]) { (void)view; }
 static inline void pc_xr_camera_focus(const float interest[3]) { (void)interest; }
 static inline void pc_xr_hud_camera(void) {}
+#define pc_xr_menu_window_render HSD_GObj_803910D8
 static inline void pc_xr_flat_view(bool on) { (void)on; }
 static inline void pc_xr_mono_camera(void) {}
 struct HSD_JObj;

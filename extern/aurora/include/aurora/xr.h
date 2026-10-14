@@ -46,6 +46,14 @@ bool aurora_xr_screen_back(void);
  * is presenting. */
 enum { AURORA_XR_MONO = 0, AURORA_XR_WORLD = 1, AURORA_XR_HUD = 2, AURORA_XR_HIDDEN = 6 };
 
+/* A menu camera drawing as a window (call each frame it does, after its
+ * aurora_xr_camera(AURORA_XR_WORLD, view)): its world draws are replayed per
+ * eye with the virtual screen's pose in place of the arena's, so the menu's
+ * depth shows as parallax. `dist` is the camera's distance to the plane that
+ * sits at the screen (its interest), `plane_height` that plane's height, both
+ * in game units. Lapses 250 ms after the last call. Any thread. */
+void aurora_xr_menu_window(float dist, float plane_height);
+
 /* Lock-step pacing: when the headset runs at a multiple of 60 Hz, blocks
  * until it is time for the next game frame (every display frame at 60 Hz,
  * every other at 120 Hz) and returns true; the caller then skips its own
