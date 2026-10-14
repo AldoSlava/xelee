@@ -479,7 +479,7 @@ bool gmOnline_SlippiCssStart(int character, int color)
     slippi_picked = true;
     if (online_kind == ONLINE_KIND_DIRECT) {
         /* The code is typed on Melee's Name Entry screen, straight from here. */
-        mnCharSel_SlippiKeyboard(slpcss_code, 11, "Enter your opponent's code. Y: fill  L/R: shift",
+        mnCharSel_SlippiKeyboard(slpcss_code, 11, "Enter your opponent's connect code. Y: fill",
                                  slpDirectDone, slpDirectFill, NULL);
         return true;
     }
@@ -1233,14 +1233,14 @@ static int loginThread(void* user)
 static void loginOpenEmail(void)
 {
     login_step = LOGIN_ENTRY;
-    mnNameNew_PcOpen(login_ext, login_email, LOGIN_FIELD_MAX, false,
+    mnNameNew_PcOpen(login_ext, login_email, LOGIN_FIELD_MAX, false, true,
                      "Enter the email of your Slippi account.", loginEmailDone, NULL, false, NULL);
 }
 
 static void loginOpenPassword(void)
 {
     login_step = LOGIN_ENTRY;
-    mnNameNew_PcOpen(login_ext, "", LOGIN_FIELD_MAX, true,
+    mnNameNew_PcOpen(login_ext, "", LOGIN_FIELD_MAX, true, true,
                      "Enter your password. L/R: shift.", loginPasswordDone, NULL, false, NULL);
 }
 

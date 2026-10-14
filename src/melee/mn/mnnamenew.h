@@ -46,9 +46,11 @@ typedef bool (*MnNameNewDoneFn)(bool confirmed, const char* text, void* user);
 typedef const char* (*MnNameNewFillFn)(void* user);
 /* `css`: the screen is opened from the CSS, so on leaving it the CSS is built
  * again (as it is when a nametag entry ends) before `done` runs. */
+/* `shiftable`: the keys are lowercase and L/R (Shift) capitalises them, as for
+ * an email or password; otherwise they are capitals only, as for a code. */
 void mnNameNew_PcOpen(HSD_Archive* ext_all, const char* initial, int max_len, bool mask,
-                      const char* description, MnNameNewDoneFn done, MnNameNewFillFn fill,
-                      bool css, void* user);
+                      bool shiftable, const char* description, MnNameNewDoneFn done,
+                      MnNameNewFillFn fill, bool css, void* user);
 bool mnNameNew_PcActive(void);
 #endif
 /* 3EE720 */ extern char* mnNameNew_803EE720[];

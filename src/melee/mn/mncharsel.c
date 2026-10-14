@@ -5974,8 +5974,8 @@ void mnCharSel_SlippiKeyboard(const char* initial, int max_len, const char* desc
     mnOnlineCss_Destroy();
     mn_8022F138(1, 8);
     HSD_SisLib_803A5E70();
-    mnNameNew_PcOpen(mnCharSel_804D6CD4, initial, max_len, false, description, done, fill, true,
-                     user);
+    mnNameNew_PcOpen(mnCharSel_804D6CD4, initial, max_len, false, false, description, done, fill,
+                     true, user);
     mnCharSel_804D6CF6 = 5;
 }
 

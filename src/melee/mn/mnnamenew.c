@@ -53,6 +53,7 @@ static struct {
     char text[PC_NAME_MAX + 1];
     int max_len;
     bool shift;
+    bool shiftable; /* email and password: lowercase, Shift for capitals; a code has no Shift */
     bool mask;
     char desc[160];
     MnNameNewDoneFn done;
@@ -76,7 +77,7 @@ static void pc_fill_keys(void)
     int j;
     for (j = 0; j < 50; j++) {
         char c = pc_rows[j % 5][9 - j / 5];
-        if (s_pc.shift && c >= 'A' && c <= 'Z') {
+        if (s_pc.shiftable && !s_pc.shift && c >= 'A' && c <= 'Z') {
             c = (char) (c + 32);
         }
         s_pc.key_ch[j] = c;
@@ -1144,6 +1145,9 @@ static void pc_backspace(void)
 
 static void pc_shift(NameNewEntry* data)
 {
+    if (!s_pc.shiftable) {
+        return;
+    }
     s_pc.shift = !s_pc.shift;
     lbAudioAx_80024030(1);
     mnNameNew_KeySetup(data, 2);
@@ -1236,13 +1240,14 @@ bool mnNameNew_PcActive(void)
 }
 
 void mnNameNew_PcOpen(HSD_Archive* ext_all, const char* initial, int max_len, bool mask,
-                      const char* description, MnNameNewDoneFn done, MnNameNewFillFn fill,
-                      bool css, void* user)
+                      bool shiftable, const char* description, MnNameNewDoneFn done,
+                      MnNameNewFillFn fill, bool css, void* user)
 {
     memset(&s_pc, 0, sizeof s_pc);
     snprintf(s_pc.text, sizeof s_pc.text, "%s", initial != NULL ? initial : "");
     s_pc.max_len = max_len > PC_NAME_MAX ? PC_NAME_MAX : max_len;
     s_pc.mask = mask;
+    s_pc.shiftable = shiftable;
     snprintf(s_pc.desc, sizeof s_pc.desc, "%s", description != NULL ? description : "");
     s_pc.done = done;
     s_pc.fill = fill;
