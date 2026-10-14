@@ -376,6 +376,9 @@ struct NetSession {
     bool hs_host;
     bool direct;   /* MELEE_NET: no lobby, so the session agrees its own match */
     uint32_t seed; /* agreed RNG seed (0: none) */
+    /* Slippi: the decider's rngOffset. It is the match's first seed and the
+     * constant SyncRNG adds every frame (gmvs.c slippiSyncRng). */
+    uint32_t rng_offset;
     int32_t start_frame;
     int32_t ck_from; /* checksums before this frame are not compared */
 

@@ -85,6 +85,8 @@ bool pc_net_send_datagram(const void* data, size_t size, uint32_t address, uint1
 
 /* RNG seed agreed for the session (pc_net_connect / match handshake). */
 uint32_t pc_net_seed(void);
+/* The Slippi session's rngOffset (see slippiSyncRng in gmvs.c). */
+uint32_t pc_net_rng_offset(void);
 
 /* Match handshake progress: 0 idle, 1 pending, 2 done, 3 failed (15 s). */
 int pc_net_handshake_state(void);

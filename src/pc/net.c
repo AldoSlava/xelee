@@ -822,6 +822,7 @@ static void slp_setup_cb(void* user, uint32_t seed, int32_t start_frame) {
         return;
     }
     net.seed = seed;
+    net.rng_offset = seed; /* until the selections flow supplies the decider's */
     *HSD_RandSeedPtr = seed;
     net.start_frame = start_frame;
     net.hs = HS_DONE;
@@ -2154,6 +2155,7 @@ static void session_reset(void) {
     net.direct = false; /* pc_net_init() sets it back for a MELEE_NET session */
     net.seed = 0;
     s_slippi_setup_host = false;
+    net.rng_offset = 0;
     net.start_frame = -1;
     net.ck_from = 0;
     snaps_free();
@@ -3059,6 +3061,9 @@ static void head_check(void) {
 static void fight_reseed(int32_t f) {
     if (!net.active || net.hs != HS_DONE || f <= net.start_frame || !in_fight()) {
         return;
+    }
+    if (pc_net_slippi_active()) {
+        return; /* Slippi's own SyncRNG process does this (gmvs.c) */
     }
     uint32_t x = net.seed ^ ((uint32_t)f * 0x9e3779b9u);
     x ^= x >> 16;

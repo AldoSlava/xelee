@@ -148,7 +148,12 @@ NOTES = [
     ("SkipNewInputFetchOnRollback", "engine", "N/A", "rollback loop"),
     ("StartEngineLoop", "engine", "N/A", "rollback loop"),
     ("TriggerSendInput", "engine", "N/A", "input send path; ours is slp_net/slp_session"),
-    ("InitOnlinePlay", "engine", "N/A", "per-match init; ours is net.c connect + slippi_rules_force"),
+    ("InitOnlinePlay", "gameplay", "PARTIAL",
+     "SyncRNG ported (gmvs.c slippiMatchInit/slippiSyncRng: seed = rngOffset at match start, then "
+     "rotl32(scene frame, 16) + rngOffset every frame from a p_link 7 process, as in the asm); "
+     "rngOffset is our agreed seed until the selections flow supplies the decider's. The match "
+     "state block (characters, colors, stage, teams from both players' selections) is not built yet "
+     "(docs/slippi-online-flow-plan.md, stage 1)."),
     ("HandleRumble", "engine", "N/A", "rumble during rollback"),
     ("EXIFileLoad", "engine", "N/A", "Dolphin EXI file transfer"),
     ("Hacks/", "engine", "N/A", "Dolphin crash/assert workarounds"),

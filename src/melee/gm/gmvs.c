@@ -51,6 +51,7 @@
 #include "pc/slp.h"
 #include "pc/net.h"
 #include "pc/pc.h"
+#include <sysdolphin/baselib/random.h>
 #endif
 
 static u32 lbl_803D5620[] = {
@@ -2105,12 +2106,41 @@ bool fn_8016E5C0(StartMeleeData* arg0)
     return false;
 }
 
+#ifdef TARGET_PC
+extern bool pc_net_slippi_active(void);
+
+/* Slippi's SyncRNG (Online/Core/InitOnlinePlay.asm, installed as a process in
+ * p_link 7 at priority 0): every frame the seed becomes the scene frame
+ * counter rotated by 16 bits, plus the match's rngOffset. Draws before this
+ * process runs in a frame use the previous frame's value, so it has to sit in
+ * the same list slot as Slippi's to agree with a Dolphin peer draw for draw. */
+static void slippiSyncRng(UNUSED HSD_GObj* gobj)
+{
+    u32 f = gm_801A4BB8();
+    *HSD_RandSeedPtr = ((f << 16) | (f >> 16)) + pc_net_rng_offset();
+}
+
+/* InitOnlinePlay, at the top of the match setup: the seed starts as the
+ * rngOffset, and the SyncRNG process is installed. */
+static void slippiMatchInit(void)
+{
+    HSD_GObj* gobj;
+    if (!pc_net_active() || !pc_net_slippi_active()) {
+        return;
+    }
+    *HSD_RandSeedPtr = pc_net_rng_offset();
+    gobj = GObj_Create(4, 7, 0);
+    HSD_GObj_SetupProc(gobj, slippiSyncRng, 0);
+}
+#endif
+
 void fn_8016E730(StartMeleeData* arg0)
 {
     HSD_GObj* temp_r30;
     VsSceneController* r30;
 
 #ifdef TARGET_PC
+    slippiMatchInit(); /* Slippi's InitOnlinePlay precedes SendGameInfo */
     pc_slp_match_start(arg0); /* Slippi's SendGameInfo hooks here too */
 #endif
     db_Setup();

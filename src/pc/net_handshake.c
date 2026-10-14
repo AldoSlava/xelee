@@ -170,6 +170,10 @@ uint32_t pc_net_seed(void) {
     return net.seed;
 }
 
+uint32_t pc_net_rng_offset(void) {
+    return net.rng_offset;
+}
+
 int pc_net_handshake_state(void) {
     return net.hs;
 }
@@ -781,6 +785,7 @@ static void slp_direct(void) {
             net.hs = HS_PENDING;
             s_hs_t0 = SDL_GetTicksNS();
             net.seed = net.seed != 0 ? net.seed : *HSD_RandSeedPtr;
+            net.rng_offset = net.seed; /* until the selections flow supplies the decider's */
             seed_apply();
             net.start_frame = net.tick_frame + hs_lead();
             if (pc_net_slippi_send_setup(net.seed, net.start_frame)) {
