@@ -188,7 +188,7 @@ static void slippiHudNameShow(int slot, bool show)
         return;
     }
     if (t == NULL) {
-        const float w = 100.0f, h = 17.0f;
+        const float w = 92.0f, h = 13.5f;
         t = HSD_SisLib_803A6754(2, un_804D6D7C);
         t->default_alignment = 1;
         t->default_kerning = 1;
@@ -197,10 +197,10 @@ static void slippiHudNameShow(int slot, bool show)
         t->box_size_y = h;
         t->bg_color.r = t->bg_color.g = t->bg_color.b = 0x10;
         t->bg_color.a = 0x90;
-        t->pos_x = 102.0f + 150.7f * (float) slot - w * 0.5f;
-        t->pos_y = 439.5f - h * 0.5f;
-        HSD_SisLib_803A6B98(t, w * 0.5f, 2.0f, "%s", name);
-        HSD_SisLib_803A7548(t, 0, 0.4f, 0.4f);
+        t->pos_x = 54.7f + 151.3f * (float) slot;
+        t->pos_y = 451.6f;
+        HSD_SisLib_803A6B98(t, w * 0.5f, -18.8f, "%s", name);
+        HSD_SisLib_803A7548(t, 0, 0.27f, 0.27f);
         un_hud_names[slot] = t;
     }
     t->hidden = 0;
