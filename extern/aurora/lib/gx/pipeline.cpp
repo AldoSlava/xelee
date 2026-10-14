@@ -205,7 +205,14 @@ static void render_direct(const DrawData& data, const wgpu::RenderPassEncoder& p
   const std::array immediateOffsets{data.immediateRange.offset};
   pass.SetBindGroup(3, resources.uniformBindGroup, immediateOffsets.size(), immediateOffsets.data());
 #else
-  pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
+#if defined(AURORA_ENABLE_OPENXR)
+  if (gfx::xr_motion_replay() && gfx::xr_motion_zero_prev() && data.immediateData.xrPrevMtx != 0) {
+    DrawImmediateData imm = data.immediateData;
+    imm.xrPrevMtx = 0;
+    pass.SetImmediates(0, &imm, sizeof(imm));
+  } else
+#endif
+    pass.SetImmediates(0, &data.immediateData, sizeof(data.immediateData));
 #endif
   const std::array offsets{data.uniformRange.offset};
   pass.SetBindGroup(1, resources.uniformBindGroup, offsets.size(), offsets.data());
@@ -294,7 +301,7 @@ bool joins(const DrawData& first, const DrawData& d) {
   if (batch_pipeline(d) != batch_pipeline(first) || sXrBatch.members.size() >= 128 ||
       sXrBatch.memberIndices + draw_index_count(d) > 65536 * 4)
     return false;
-  if (sXrBatch.motion)
+  if (sXrBatch.motion && !d.xrMotionMaterial)
     return true;
   return d.bindGroups.textureBindGroup == first.bindGroups.textureBindGroup && d.dstAlpha == first.dstAlpha &&
          d.uniformSharedKey == first.uniformSharedKey &&
@@ -336,6 +343,8 @@ void emit_batch(const wgpu::RenderPassEncoder& pass) {
     uint32_t* rec = records + i * kRecordWords;
     static_assert(sizeof(d.immediateData) == 16 * 4);
     std::memcpy(rec, &d.immediateData, sizeof(d.immediateData));
+    if (b.motion && gfx::xr_motion_zero_prev())
+      rec[3] = 0; // xrPrevMtx
     rec[16] = d.uniformRange.offset / 4;
     table[i * 2] = vbase;
     table[i * 2 + 1] = tableWord + n * 2 + i * kRecordWords;

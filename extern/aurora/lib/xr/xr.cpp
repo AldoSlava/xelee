@@ -152,6 +152,7 @@ struct Stream {
   std::chrono::steady_clock::time_point lastRelease{};
   uint64_t releases = 0;
   std::array<XrView, 2> shownViews{}; // Stereo: poses of the last released image
+  uint64_t shownTick = 0;             // the game tick of the last released image
   std::array<int32_t, 2> shownRect{};  // Stereo: its rendered size (0: all)
   // Debug dump (AURORA_XR_DUMP)
   VkBuffer dumpBuf = VK_NULL_HANDLE;
@@ -886,6 +887,8 @@ bool create_swapchain(Stream& st) {
   std::vector<XrSwapchainImageVulkan2KHR> imgs(n, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR});
   XR_TRY(xrEnumerateSwapchainImages(st.swapchain, n, &n, reinterpret_cast<XrSwapchainImageBaseHeader*>(imgs.data())));
   st.slots = std::vector<Slot>(n);
+  Log.info("XR swapchain {}: {} images, {}x{} x{}", static_cast<int>(&st - g_streams.data()), n, st.width, st.height,
+           st.layers);
   for (uint32_t i = 0; i < n; ++i) {
     Slot& s = st.slots[i];
     s.image = imgs[i].image;
@@ -1481,9 +1484,43 @@ struct Presentation {
 std::atomic<uint32_t> g_earlyEyes{0}, g_earlyResumed{0};
 // SpaceWarp: 3D frames dropped for starting too late (render_eyes), logged.
 std::atomic<uint32_t> g_appSwDropped{0};
+// ... frames submitted although late (tweak late), the next one skipped for it,
+// and motion passes that followed a tick that never went out (tweak gap).
+std::atomic<uint32_t> g_appSwLate{0}, g_appSwPlannedSkip{0}, g_appSwGapCut{0};
 // Staged frames retired unshown, a later one being due too (release_staged),
 // and hand-overs that found no swapchain image even after waiting for one.
 std::atomic<uint32_t> g_stagedStale{0}, g_stagedNoImage{0};
+std::array<std::atomic<uint32_t>, 5> g_noImageBy{};
+// XR loops that handed the 3D stream no new image (logged), by why: [0] no
+// frame in flight (the game or its recording is late), [1] the oldest still
+// being drawn (GPU), [2] finished but held for its slot, [3] finished and due
+// but no swapchain image / lost to a newer frame. [4] loops that did release.
+std::array<uint32_t, 5> g_missWhy{};
+// Loops that submitted SpaceWarp's images from another game tick than the 3D
+// image's, per image: [0] motion, [1] depth, [2] HUD (hud is only counted). Logged.
+std::array<uint32_t, 3> g_tickMismatch{};
+// Live presentation modes (XR thread), from the environment and then, if
+// AURORA_XR_TWEAK names a file, its "lead=N set=N cutout=N trans=N epoch=N gap=N late=N" (read twice a
+// second), so a build can be compared mid-fight:
+//   lead: 1 poses predicted for the frame's display time (publish_views).
+//   set: 1 a tick's 3D, motion and depth go out together (compute_gate).
+//   cutout, trans: 1 alpha-tested / translucent draws in the motion pass.
+//   epoch: 1 the previous-pose state SpaceWarp's vectors pair with advances
+//     only when a frame's eyes go out (a dropped frame no longer becomes the
+//     epoch the next one pairs against, while the runtime holds an older image).
+//   gap: 1 after a tick that never went out, the motion pass pairs no draw
+//     with its recorded previous matrices (render_eyes).
+//   late: 1 a frame over AURORA_XR_APPSW_DROP_MS late is drawn and submitted
+//     anyway; the next one, if it is late too, is skipped (render_eyes).
+struct Tweaks {
+  bool lead = true;
+  bool set = true;
+  bool cutout = true;
+  bool trans = true;
+  bool epoch = true;
+  bool gap = true;
+  bool late = false;
+} g_tweak;
 bool appsw_on() { return B.appSw; }
 // 3D frames done over 1 ms after the slot they're released in, so far
 // (pacing probe; dynamic resolution's brake).
@@ -1831,6 +1868,78 @@ bool import_dawn_semaphores(PendingAccess& fromDawn, std::vector<VkSemaphore>& o
 
 bool release_staged(Stream& st, bool& released);
 
+// SpaceWarp frames go out as sets: a game tick's 3D, motion and depth images
+// (and its HUD) are handed over together or not at all. Each stream used to
+// hand over its own oldest finished frame as its own swapchain image came
+// free, so when one stream lacked an image the others went on without it
+// and the compositor got motion vectors and depth of another tick than the
+// picture (up to a quarter of a bad window's loops on four-CPU Brinstar).
+// Each loop picks the newest tick finished in all of the three; older frames
+// are retired, and the tick is released only if the three have an image to
+// copy into, else it waits as it is (a newer one, if it comes, replaces it).
+// AURORA_XR_SET_HANDOVER=0 turns it off.
+struct HandoverGate {
+  bool on = false;
+  uint64_t tick = 0; // 0: no set is due
+  bool blocked = false;
+} g_gate;
+
+bool gated_stream(const Stream& st) {
+  return &st == &g_streams[kStereo] || &st == &g_streams[kHud] || &st == &g_streams[kMotion] ||
+         &st == &g_streams[kMotionDepth];
+}
+
+// g_mutex held.
+bool has_ready_tick(Stream& st, uint64_t tick) {
+  for (Slot& sl : st.ring)
+    if (sl.state == SlotState::Ready && sl.tickFrame == tick && !held_for_slot(st, sl))
+      return true;
+  return false;
+}
+
+bool has_free_image(Stream& st) {
+  std::lock_guard lock{g_mutex};
+  for (const Slot& sl : st.slots)
+    if (sl.state == SlotState::Free)
+      return true;
+  return false;
+}
+
+bool compute_gate() {
+  g_gate = {};
+  if (!g_tweak.set || !appsw_on() || g_displayPerGameFrame <= 0 || !g_streams[kStereo].staged ||
+      !g_streams[kMotion].staged || !g_streams[kMotionDepth].staged)
+    return true;
+  g_gate.on = true;
+  {
+    std::lock_guard lock{g_mutex};
+    for (Slot& sl : g_streams[kStereo].ring) {
+      if (sl.state != SlotState::Ready || sl.tickFrame == 0 || sl.tickFrame <= g_gate.tick ||
+          held_for_slot(g_streams[kStereo], sl))
+        continue;
+      if (has_ready_tick(g_streams[kMotion], sl.tickFrame) && has_ready_tick(g_streams[kMotionDepth], sl.tickFrame))
+        g_gate.tick = sl.tickFrame;
+    }
+  }
+  if (g_gate.tick == 0)
+    return true;
+  // The three images the compositor needs together, the 3D one longest.
+  for (const int id : {kStereo, kMotion, kMotionDepth}) {
+    Stream& st = g_streams[id];
+    if (has_free_image(st))
+      continue;
+    if (!acquire_ahead(st, id == kStereo ? 6'000'000 : 2'000'000))
+      return false;
+    if (!has_free_image(st)) {
+      g_gate.blocked = true;
+      ++g_stagedNoImage;
+      ++g_noImageBy[id];
+      break;
+    }
+  }
+  return true;
+}
+
 bool release_ready(Stream& st, bool& released) {
   if (st.staged)
     return release_staged(st, released);
@@ -2003,7 +2112,8 @@ bool release_staged(Stream& st, bool& released) {
             (index < 0 || st.ring[i].acquireSeq < st.ring[index].acquireSeq))
           index = i;
       }
-      if (index < 0 || st.ring[index].state != SlotState::Ready || held_for_slot(st, st.ring[index]))
+      const bool gated = g_gate.on && gated_stream(st);
+      if (index < 0 || st.ring[index].state != SlotState::Ready || (!gated && held_for_slot(st, st.ring[index])))
         return true;
       // A later frame due too: this one is stale, retired unshown. The
       // loop hands over one frame per loop, and with SpaceWarp's 60 Hz loop
@@ -2013,9 +2123,20 @@ bool release_staged(Stream& st, bool& released) {
       // motion vectors of one frame on the picture of another: SpaceWarp's
       // distortion grew through a Temple fight).
       bool newerDue = false;
-      for (int i = 0; i < static_cast<int>(st.ring.size()) && !newerDue; ++i)
-        newerDue = i != index && st.ring[i].state == SlotState::Ready &&
-                   st.ring[i].acquireSeq > st.ring[index].acquireSeq && !held_for_slot(st, st.ring[i]);
+      if (gated) {
+        // The set's tick goes out (if its images are there); older frames
+        // are retired; none newer than it is due yet.
+        const uint64_t tick = st.ring[index].tickFrame;
+        if (g_gate.tick == 0 || tick > g_gate.tick)
+          return true;
+        newerDue = tick < g_gate.tick;
+        if (!newerDue && g_gate.blocked)
+          return true;
+      } else {
+        for (int i = 0; i < static_cast<int>(st.ring.size()) && !newerDue; ++i)
+          newerDue = i != index && st.ring[i].state == SlotState::Ready &&
+                     st.ring[i].acquireSeq > st.ring[index].acquireSeq && !held_for_slot(st, st.ring[i]);
+      }
       if (newerDue) {
         retire = true;
         fromDawn = std::move(st.ring[index].fromDawn);
@@ -2039,8 +2160,10 @@ bool release_staged(Stream& st, bool& released) {
       for (int i = 0; i < static_cast<int>(st.slots.size()); ++i)
         if (st.slots[i].state == SlotState::Free)
           image = i;
-      if (image < 0)
+      if (image < 0) {
         ++g_stagedNoImage;
+        ++g_noImageBy[&st - g_streams.data()];
+      }
     }
     if (retire) {
       // Retire: wait for Dawn's work on it, then it's free (release_staged's
@@ -2145,6 +2268,7 @@ bool release_staged(Stream& st, bool& released) {
     st.haveImage = true;
     st.lastRelease = std::chrono::steady_clock::now();
     st.shownViews = views;
+    st.shownTick = r.tickFrame;
     st.shownRect = rect;
     ++st.releases;
     released = true;
@@ -2239,8 +2363,12 @@ void update_pacing() {
                                    : std::string{"not a multiple of 60 Hz, game keeps its own timer"});
 }
 
-// Publish where the eyes will be at this frame's display time, for the
-// render worker's next 3D frame.
+// Publish where the eyes will be when the render worker's next 3D frame is
+// shown. The frame starts on this loop's tick but, under fixed-latency
+// presentation, is handed over `latency` loops later: the pose it carries is
+// predicted for that display time, not this loop's, or the compositor has to
+// bridge the whole hold (17-50 ms of head motion) by reprojection alone.
+// AURORA_XR_POSE_LEAD=0 predicts for this loop's display time.
 void publish_views(XrTime displayTime) {
   XrViewLocateInfo vli{XR_TYPE_VIEW_LOCATE_INFO};
   vli.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -2253,9 +2381,25 @@ void publish_views(XrTime displayTime) {
     return;
   const bool valid = (vs.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) != 0 &&
                      (vs.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) != 0;
+  std::array<XrView, 2> renderViews = views;
+  const bool lead = g_tweak.lead;
+  const int latency = g_present.latency;
+  if (valid && lead && latency > 0 && g_displayPerGameFrame > 0) {
+    const int64_t period = g_loopPeriodNs > 0 ? g_loopPeriodNs
+                                              : static_cast<int64_t>(1e9 / std::max(g_displayHz.load(), 1.f));
+    XrViewLocateInfo ahead = vli;
+    ahead.displayTime = displayTime + static_cast<int64_t>(latency) * period;
+    XrViewState as{XR_TYPE_VIEW_STATE};
+    std::array<XrView, 2> aheadViews{{{XR_TYPE_VIEW}, {XR_TYPE_VIEW}}};
+    uint32_t an = 0;
+    if (XR_SUCCEEDED(xrLocateViews(B.session, &ahead, &as, 2, &an, aheadViews.data())) && an == 2 &&
+        (as.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) != 0 &&
+        (as.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) != 0)
+      renderViews = aheadViews;
+  }
   std::lock_guard lock{g_viewMutex};
   if (valid) {
-    g_latestViews = views;
+    g_latestViews = renderViews;
     g_viewsValid = true;
     const XrVector3f &l = views[0].pose.position, &r = views[1].pose.position;
     B.head = {(l.x + r.x) * 0.5f, (l.y + r.y) * 0.5f, (l.z + r.z) * 0.5f};
@@ -3467,6 +3611,61 @@ void sync_boundary() {
 #endif
 }
 
+void poll_tweaks() {
+  static bool init = false;
+  static const char* path = std::getenv("AURORA_XR_TWEAK");
+  static int calls = 0;
+  if (!init) {
+    init = true;
+    g_tweak.lead = env_flag("AURORA_XR_POSE_LEAD", true);
+    g_tweak.set = env_flag("AURORA_XR_SET_HANDOVER", true);
+    g_tweak.cutout = env_flag("AURORA_XR_APPSW_CUTOUT", true);
+    g_tweak.trans = env_flag("AURORA_XR_APPSW_TRANSLUCENT", true);
+    g_tweak.epoch = env_flag("AURORA_XR_APPSW_EPOCH", true);
+    g_tweak.gap = env_flag("AURORA_XR_APPSW_GAP", true);
+    g_tweak.late = env_flag("AURORA_XR_APPSW_LATE", false);
+    gfx::set_xr_motion_classes((g_tweak.cutout ? 1u : 0u) | (g_tweak.trans ? 2u : 0u));
+  }
+  if (path == nullptr || ++calls % 30 != 0)
+    return;
+  FILE* f = std::fopen(path, "r");
+  if (f == nullptr)
+    return;
+  char line[128] = {0};
+  const bool got = std::fgets(line, sizeof line, f) != nullptr;
+  std::fclose(f);
+  if (!got)
+    return;
+  Tweaks t = g_tweak;
+  for (const char* q = line; *q != '\0';) {
+    int v = 0;
+    if (std::sscanf(q, "lead=%d", &v) == 1)
+      t.lead = v != 0;
+    else if (std::sscanf(q, "set=%d", &v) == 1)
+      t.set = v != 0;
+    else if (std::sscanf(q, "cutout=%d", &v) == 1)
+      t.cutout = v != 0;
+    else if (std::sscanf(q, "trans=%d", &v) == 1)
+      t.trans = v != 0;
+    else if (std::sscanf(q, "epoch=%d", &v) == 1)
+      t.epoch = v != 0;
+    else if (std::sscanf(q, "gap=%d", &v) == 1)
+      t.gap = v != 0;
+    else if (std::sscanf(q, "late=%d", &v) == 1)
+      t.late = v != 0;
+    while (*q != '\0' && *q != ' ')
+      ++q;
+    while (*q == ' ')
+      ++q;
+  }
+  if (t.lead != g_tweak.lead || t.set != g_tweak.set || t.cutout != g_tweak.cutout || t.trans != g_tweak.trans ||
+      t.epoch != g_tweak.epoch || t.gap != g_tweak.gap || t.late != g_tweak.late)
+    Log.info("XR tweak: lead {}, set {}, cutout {}, trans {}, epoch {}, gap {}, late {}", t.lead, t.set, t.cutout,
+             t.trans, t.epoch, t.gap, t.late);
+  g_tweak = t;
+  gfx::set_xr_motion_classes((t.cutout ? 1u : 0u) | (t.trans ? 2u : 0u));
+}
+
 bool render_xr_frame() {
   XrFrameState fs{XR_TYPE_FRAME_STATE};
   {
@@ -3558,12 +3757,30 @@ bool render_xr_frame() {
   section(0);
 
   const auto now = std::chrono::steady_clock::now();
+  poll_tweaks();
+  if (!compute_gate())
+    return false;
   // Hand finished images to the runtime, then line up the next ones for the
   // render worker.
   for (int i = 0; i < kStreamCount; ++i) {
     bool released = false;
     if (!release_ready(g_streams[i], released))
       return false;
+    if (i == kStereo && appsw_on()) {
+      if (released) {
+        ++g_missWhy[4];
+      } else {
+        std::lock_guard lock{g_mutex};
+        int why = 0;
+        for (const Slot& sl : g_streams[i].ring) {
+          if (sl.state == SlotState::Rendering)
+            why = std::max(why, 1);
+          else if (sl.state == SlotState::Ready)
+            why = std::max(why, held_for_slot(g_streams[i], const_cast<Slot&>(sl)) ? 2 : 3);
+        }
+        ++g_missWhy[why];
+      }
+    }
     section(1 + i * 2);
     if (!acquire_ahead(g_streams[i]))
       return false;
@@ -3665,6 +3882,11 @@ bool render_xr_frame() {
       // plane, 1 infinitely far.
       const auto& mvs = g_streams[kMotion];
       const auto& mds = g_streams[kMotionDepth];
+      if (i == 0 && appsw_on()) {
+        g_tickMismatch[0] += mvs.shownTick != stereo.shownTick ? 1 : 0;
+        g_tickMismatch[1] += mds.shownTick != stereo.shownTick ? 1 : 0;
+        g_tickMismatch[2] += hud.haveImage && hud.shownTick != stereo.shownTick ? 1 : 0;
+      }
       if (appsw_on() && mvs.haveImage && mds.haveImage) {
         auto& sw = spaceWarp[i];
         sw = {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB};
@@ -3800,18 +4022,28 @@ bool render_xr_frame() {
              "3D images shown 1/2/3/4+ display frames: {}/{}/{}/{}; presented {} display frames after the tick "
              "({} held, raised {} times for late frames); XR loop: wait to end {:.1f} ms at most, {} over 4 ms; gaps {:.1f} ms at most, {} over 10 ms; "
              "{:.1f} ms least before display; slow loops' sections (most ms, times largest): {}; "
+             "loops by 3D hand-over (none in flight/drawing/held/no image/released) {}/{}/{}/{}/{}; "
+             "no image by stream (screen/3D/HUD/motion/depth) {}/{}/{}/{}/{}; "
+             "submitted from another tick than the 3D image (motion/depth/HUD) {}/{}/{}; "
+             "AppSW: {} submitted late, {} planned skips, {} motion passes cut after a gap; "
              "early eyes {} ({} redrawn, {} dropped late, {} staged retired stale, {} without an image); image waits (most ms, over 2 ms) 3D {:.1f}/{} HUD {:.1f}/{} screen {:.1f}/{}{}",
              B.framesShown / secs, 100.0 * B.fightFrames / std::max<uint64_t>(B.framesShown, 1),
              B.releasedSinceStats[kScreen] / secs, B.releasedSinceStats[kStereo] / secs,
              B.releasedSinceStats[kHud] / secs, B.shownHistogram[0], B.shownHistogram[1], B.shownHistogram[2],
              B.shownHistogram[3], g_present.latency, g_present.held, g_present.raisedForLate, B.loopMaxNs / 1e6, B.loopOver4,
-             B.gapMaxNs / 1e6, B.gapOver10, B.leadMinNs / 1e6, sections, g_earlyEyes.exchange(0),
+             B.gapMaxNs / 1e6, B.gapOver10, B.leadMinNs / 1e6, sections, g_missWhy[0], g_missWhy[1], g_missWhy[2],
+             g_missWhy[3], g_missWhy[4], g_noImageBy[0].exchange(0),
+             g_noImageBy[1].exchange(0), g_noImageBy[2].exchange(0), g_noImageBy[3].exchange(0),
+             g_noImageBy[4].exchange(0), g_tickMismatch[0], g_tickMismatch[1], g_tickMismatch[2],
+             g_appSwLate.exchange(0), g_appSwPlannedSkip.exchange(0), g_appSwGapCut.exchange(0), g_earlyEyes.exchange(0),
              g_earlyResumed.exchange(0), g_appSwDropped.exchange(0), g_stagedStale.exchange(0), g_stagedNoImage.exchange(0),
              g_acquireWaitMaxNs[kStereo] / 1e6, g_acquireWaitsOver2[kStereo],
              g_acquireWaitMaxNs[kHud] / 1e6, g_acquireWaitsOver2[kHud], g_acquireWaitMaxNs[kScreen] / 1e6,
              g_acquireWaitsOver2[kScreen], pace_summary());
     g_acquireWaitMaxNs = {};
     g_acquireWaitsOver2 = {};
+    g_missWhy = {};
+    g_tickMismatch = {};
     B.sectionMaxNs = {};
     B.sectionWorst = {};
     B.loopMaxNs = B.gapMaxNs = 0;
@@ -4455,9 +4687,22 @@ struct Renderer3D {
   // SpaceWarp: per world transform, last frame's game world -> room matrix
   // (A · T) and game camera -> room (A · T · V_game⁻¹), for the motion
   // vectors' previous positions; prevCount 0: none yet.
-  std::array<Mat4, gfx::XrMaxTransforms> prevWorldToRoom{}, prevCameraToRoom{};
-  size_t prevCount = 0;
-  std::array<XrView, 2> prevViews{}; // last frame's eye poses (AURORA_XR_APPSW_HEAD)
+  // The state of a frame whose eyes went out (the poses are last frame's eye
+  // poses, AURORA_XR_APPSW_HEAD), by its game tick: the newest, and the one
+  // before it (a tick's eyes can be encoded twice, early and resumed, and
+  // both pair with the frame before it).
+  struct PrevEpoch {
+    std::array<Mat4, gfx::XrMaxTransforms> worldToRoom{}, cameraToRoom{};
+    size_t count = 0; // 0: none yet
+    std::array<XrView, 2> views{};
+    uint64_t tick = 0;
+  };
+  PrevEpoch epochCur, epochBefore;
+  // The late-submit policy: the frame after one submitted late is skipped if
+  // it is late too; one tick's decision is made once.
+  bool skipNextLate = false;
+  uint64_t decidedTick = 0;
+  bool decidedDrop = false;
   // SpaceWarp, early eyes: the motion pass goes to the GPU before the eyes
   // wait for their image, into these, copied into the SpaceWarp images after.
   wgpu::Texture motionColor, motionDepth;
@@ -5477,12 +5722,19 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
   // the head's motion left out; with our reversed depth that doubled the
   // image on sideways head motion).
   static const float headShare = std::clamp(env_float("AURORA_XR_APPSW_HEAD", 1.f), 0.f, 1.f);
-  const bool havePrevViews = R.prevCount != 0;
+  // The frame these vectors pair with: the last whose eyes went out (before
+  // this tick, if this tick's eyes were already encoded once).
+  const uint64_t thisTick = frame.xrTickFrame;
+  const Renderer3D::PrevEpoch& base =
+      g_tweak.epoch && thisTick != 0 && R.epochCur.tick == thisTick ? R.epochBefore : R.epochCur;
+  const int perGame = std::max(g_displayPerGameFrame.load(), 1);
+  const bool gap = g_tweak.gap && thisTick != 0 && base.tick != 0 && thisTick > base.tick + static_cast<uint64_t>(perGame);
+  const bool havePrevViews = base.count != 0;
   for (int eye = 0; eye < 2; ++eye) {
     const Mat4 eyeToClip = mul(projection(views[eye].fov, 0.05f), view_from_pose(views[eye].pose));
     const Mat4 prevEyeToClip =
         havePrevViews ? mul(projection(views[eye].fov, 0.05f),
-                            view_from_pose(blend_pose(views[eye].pose, R.prevViews[eye].pose, headShare)))
+                            view_from_pose(blend_pose(views[eye].pose, base.views[eye].pose, headShare)))
                       : eyeToClip;
     for (size_t t = 0; t < transforms; ++t) {
       Mat4 world = cameraToWorld;
@@ -5517,8 +5769,8 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
         worldToRoom[t] = mul(arena, place);
         cameraToRoom[t] = mul(arena, world);
         mv[t].prev[eye] =
-            mul(prevEyeToClip, mul(t < R.prevCount ? R.prevWorldToRoom[t] : worldToRoom[t], cameraToWorld));
-        mv[t].prevM[eye] = mul(prevEyeToClip, t < R.prevCount ? R.prevCameraToRoom[t] : cameraToRoom[t]);
+            mul(prevEyeToClip, mul(t < base.count ? base.worldToRoom[t] : worldToRoom[t], cameraToWorld));
+        mv[t].prevM[eye] = mul(prevEyeToClip, t < base.count ? base.cameraToRoom[t] : cameraToRoom[t]);
         mv[t].enabled[0] = 1;
         // The clipped geometry's dissolve, as 1 - opacity (0: solid).
         // The entry's layout: move 3x4, planes, fades, opacity.
@@ -5533,14 +5785,26 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       }
     }
   }
+  Renderer3D::PrevEpoch newEpoch;
   if (g_multiview) {
     for (size_t t = 0; t < transforms; ++t)
       webgpu::g_queue.WriteBuffer(R.mvUniforms[t], 0, &mv[t], sizeof(mv[t]));
-    R.prevWorldToRoom = worldToRoom;
-    R.prevCameraToRoom = cameraToRoom;
-    R.prevViews = views;
-    R.prevCount = transforms;
+    newEpoch.worldToRoom = worldToRoom;
+    newEpoch.cameraToRoom = cameraToRoom;
+    newEpoch.views = views;
+    newEpoch.count = transforms;
+    newEpoch.tick = thisTick;
+    if (!g_tweak.epoch)
+      R.epochCur = newEpoch;
   }
+  // This frame's eyes went out: it is the epoch the next one pairs with.
+  const auto commitEpoch = [&] {
+    if (!g_multiview || !g_tweak.epoch)
+      return;
+    if (R.epochCur.tick != thisTick || thisTick == 0)
+      R.epochBefore = R.epochCur;
+    R.epochCur = newEpoch;
+  };
 
   // Direct path: the framebuffer's format matches the shared 3D image and
   // there is no MSAA to resolve, so both eyes render straight into the shared
@@ -5586,12 +5850,46 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
     // AURORA_XR_APPSW_DROP_MS: how late (0: never drop).
     static const float dropMs = env_float("AURORA_XR_APPSW_DROP_MS", 16.7f);
     const int64_t tickNs = appsw_on() && dropMs > 0.f && R.renderedTick != 0 ? pace_wait_ns(R.renderedTick) : 0;
-    if (tickNs != 0 && monotonic_ns() - tickNs > static_cast<int64_t>(dropMs * 1e6)) {
+    // AURORA_XR_APPSW_LATE (tweak late): the frame is drawn although late,
+    // and the next, if also late, is skipped to give its images back at once
+    // (what a late frame held into the next loop used to sink Brinstar to 33
+    // frames a second). One decision per tick: the resumed redraw of a frame
+    // whose eyes went out early is not judged again.
+    bool drop = false;
+    if (tickNs != 0) {
+      if (R.decidedTick == R.renderedTick) {
+        drop = R.decidedDrop;
+      } else {
+        const bool late = monotonic_ns() - tickNs > static_cast<int64_t>(dropMs * 1e6);
+        if (late && g_tweak.late && !R.skipNextLate) {
+          R.skipNextLate = true;
+          ++g_appSwLate;
+        } else if (late) {
+          drop = true;
+          if (g_tweak.late)
+            ++g_appSwPlannedSkip;
+          R.skipNextLate = false;
+        } else {
+          R.skipNextLate = false;
+        }
+        R.decidedTick = R.renderedTick;
+        R.decidedDrop = drop;
+      }
+    }
+    if (drop) {
       R.missedStereo = true;
       ++g_appSwDropped;
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
       return false;
     }
+    // After a tick that never went out: no draw pairs with its own previous
+    // matrices (gap), for the early motion pass and the later one alike.
+    struct ZeroPrev {
+      explicit ZeroPrev(bool on) { gfx::set_xr_motion_zero_prev(on); }
+      ~ZeroPrev() { gfx::set_xr_motion_zero_prev(false); }
+    } zeroPrev(gap);
+    if (gap)
+      ++g_appSwGapCut;
     render_motion_early(frame, passes);
     if (auto dst = acquire_slot(stereo, wait, R.early && g_deferEyes)) {
       gfx::XrReplayTarget t;
@@ -5648,6 +5946,7 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       ++R.timing.worldFrames;
       R.renderedViews = views;
       R.renderedStereo = true;
+      commitEpoch();
       if (appsw_on())
         render_motion(cmd, frame, passes);
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
@@ -5670,6 +5969,7 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       compose(cmd, dst, {0, 1}, kZoneCompose3D);
       R.renderedViews = views;
       R.renderedStereo = true;
+      commitEpoch();
       g_skipPresent = !env_flag("AURORA_XR_FIGHT_SCREEN", false);
     } else {
       R.missedStereo = true;

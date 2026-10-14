@@ -1448,6 +1448,20 @@ void set_xr_motion_layout(const RenderTargetLayout& layout) noexcept {
 const RenderTargetLayout* xr_motion_layout() noexcept { return g_xrMotionLayout.load(std::memory_order_acquire); }
 
 namespace {
+std::atomic<uint32_t> g_xrMotionClasses{3};
+} // namespace
+
+void set_xr_motion_classes(uint32_t bits) noexcept { g_xrMotionClasses.store(bits, std::memory_order_relaxed); }
+
+namespace {
+std::atomic<bool> g_xrMotionZeroPrev{false};
+} // namespace
+
+void set_xr_motion_zero_prev(bool on) noexcept { g_xrMotionZeroPrev.store(on, std::memory_order_relaxed); }
+bool xr_motion_zero_prev() noexcept { return g_xrMotionZeroPrev.load(std::memory_order_relaxed); }
+uint32_t xr_motion_classes() noexcept { return g_xrMotionClasses.load(std::memory_order_relaxed); }
+
+namespace {
 
 void update_xr_transform() {
   uint8_t index = 0;

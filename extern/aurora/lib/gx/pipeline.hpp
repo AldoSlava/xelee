@@ -48,6 +48,9 @@ struct DrawData {
   // position and normal matrices, hashed (draws batch only when it agrees).
   gfx::PipelineRef xrBatchPipeline = 0;
   gfx::PipelineRef xrMotionBatchPipeline = 0;
+  // The motion twin keeps the game's fragment stage (a cutout or translucent
+  // one): batched only with draws of the same material, like the eyes' are.
+  bool xrMotionMaterial = false;
   uint64_t uniformSharedKey = 0;
 };
 

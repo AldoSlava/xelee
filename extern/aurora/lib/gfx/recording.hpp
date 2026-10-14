@@ -155,6 +155,17 @@ const RenderTargetLayout* xr_multiview_layout() noexcept;
 // SpaceWarp's motion vectors (null = none), published like the above.
 void set_xr_motion_layout(const RenderTargetLayout& layout) noexcept;
 const RenderTargetLayout* xr_motion_layout() noexcept;
+// Which extra classes of draw the motion pass takes: bit 0 alpha-tested
+// (cutouts), bit 1 blended without depth writes (translucent). Settable live
+// (lib/xr's tweak file) to compare their cost.
+void set_xr_motion_classes(uint32_t bits) noexcept;
+uint32_t xr_motion_classes() noexcept;
+// Render worker: the motion pass about to be encoded follows a game tick that
+// never went out, so a draw's own previous matrices (recorded against that
+// tick) would pair it with a frame the runtime never saw: every draw goes in
+// as fixed in the game world instead (its depth and the head's motion stay).
+void set_xr_motion_zero_prev(bool on) noexcept;
+bool xr_motion_zero_prev() noexcept;
 // Render worker: encode_xr_replay is replaying with a view mask.
 bool xr_multiview_replay() noexcept;
 // Render worker: ... and into the motion vectors (gx::DrawData::xrMotionPipeline).
