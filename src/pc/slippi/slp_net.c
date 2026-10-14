@@ -346,14 +346,20 @@ int32_t pc_slippi_net_time_offset_us(const PcSlippiNet* n) {
 
 /* Handle one received packet's body (after the message id). */
 static void on_message(PcSlippiNet* n, uint8_t mid, PcSlippiReader* r, uint64_t now_us) {
-    (void)now_us;
     switch (mid) {
     case PC_SLIPPI_MSG_PAD: {
         uint8_t ack[16];
         size_t ack_len = 0;
         int slot = -1;
+        PcSlippiReader peek = *r;
+        int32_t pkt_frame = pc_slippi_get_i32(&peek);
         if (pc_slippi_session_on_pads(&n->session, r, &slot, ack, sizeof ack, &ack_len)) {
             send_ack_raw(n, ack, ack_len);
+        }
+        /* Slippi takes a clock-offset sample from every pad packet, whether
+         * or not it carried a new frame. */
+        if (slot >= 0) {
+            pc_slippi_session_note_offset(&n->session, slot, pkt_frame, now_us);
         }
         break;
     }

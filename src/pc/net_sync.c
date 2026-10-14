@@ -92,6 +92,9 @@ void adv_note(int remote_adv, int local_adv) {
  * out the frame either side that loss and reordering move it by, not to
  * average out a noisy estimator. */
 static int32_t offset_us(void) {
+    if (net.slippi) {
+        return pc_net_slippi_time_offset_us();
+    }
     if (s_offset_n == 0) {
         return 0;
     }

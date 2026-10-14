@@ -923,6 +923,13 @@ static bool s_slippi_recv(void) {
     return got;
 }
 
+/* Slippi's clock-offset estimate (CalcTimeOffsetUs): positive = we run ahead
+ * of the peer. A Slippi session measures phase this way instead of from the
+ * frame advantages the custom packets carry. */
+int32_t pc_net_slippi_time_offset_us(void) {
+    return s_slippi_on ? pc_slippi_adapter_time_offset_us(&s_slippi) : 0;
+}
+
 bool pc_net_slippi_active(void) {
     return s_slippi_on;
 }
@@ -2703,8 +2710,12 @@ bool pc_net_slippi_adopt(int local_player, uint32_t rng_offset) {
     net.remote = 1 - net.local;
     net.connect_timeout_ms = MATCH_CONNECT_TIMEOUT_MS;
     const char* delay = getenv("MELEE_NET_DELAY");
-    net.delay_auto = delay ? strcmp(delay, "auto") == 0 : s_configured_delay < 0;
-    net.delay = net.delay_auto ? 2 : delay ? atoi(delay) : s_configured_delay;
+    /* Each Slippi client picks its own input delay (2 by default) and labels
+     * its pads with the frame they apply to, so nothing is negotiated: auto
+     * delay announces changes over the tunnelled lane, which a Dolphin peer
+     * does not have. */
+    net.delay_auto = false;
+    net.delay = delay ? atoi(delay) : s_configured_delay;
     if (net.delay < 0 || net.delay >= RING / 2) {
         net.delay = 2;
     }
@@ -2721,7 +2732,10 @@ bool pc_net_slippi_adopt(int local_player, uint32_t rng_offset) {
     memset(&cb, 0, sizeof cb);
     pc_slippi_net_set_callbacks(link, &cb);
     pc_slippi_adapter_start_game(&s_slippi, s_slippi_now_us());
-    s_slippi_sent_upto = -1;
+    /* Slippi numbers the online frames from 1 (the engine's counter, which is
+     * our net.frame): frame 0 is never exchanged, and a peer's first packet
+     * carries 1 .. delay as neutral pads plus the first real one. */
+    s_slippi_sent_upto = 0;
     s_slippi_ever_heard = false;
     s_slippi_on = true;
     net.slippi = true;

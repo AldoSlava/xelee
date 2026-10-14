@@ -39,6 +39,7 @@ __attribute__((weak)) bool pc_slippi_adapter_send_setup(PcSlippiAdapter* a, uint
 }
 __attribute__((weak)) void pc_slippi_adapter_set_checksum(PcSlippiAdapter* a, int32_t f, uint32_t c) { (void) a, (void) f, (void) c; }
 __attribute__((weak)) void pc_slippi_adapter_start_game(PcSlippiAdapter* a, uint64_t t) { (void) a, (void) t; }
+__attribute__((weak)) int32_t pc_slippi_adapter_time_offset_us(const PcSlippiAdapter* a) { (void) a; return 0; }
 __attribute__((weak)) int pc_slippi_adapter_status(const PcSlippiAdapter* a) { (void) a; return 0; }
 __attribute__((weak)) bool pc_slippi_checksum_is_hard_desync(uint32_t l, uint32_t r) { return l != r; }
 __attribute__((weak)) bool pc_slippi_net_connect(PcSlippiNet* n, const char* ip, uint16_t p) { (void) n, (void) ip, (void) p; return false; }

@@ -502,6 +502,7 @@ void rel_reset(void);
 
 void handshake_msg(uint8_t type, const uint8_t* payload, int len);
 void rules_restore(void);
+int32_t pc_net_slippi_time_offset_us(void);
 void handshake_direct(void);
 
 /* ---- net_sync.c ------------------------------------------------------- */
