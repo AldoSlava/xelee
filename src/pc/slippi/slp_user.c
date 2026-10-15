@@ -420,7 +420,7 @@ bool pc_slippi_account_discover(PcSlippiAccount* out) {
     const char* localappdata = getenv("LOCALAPPDATA");
     const char* xdg = getenv("XDG_CONFIG_HOME");
     const char* home = getenv("HOME");
-    char win1[1200], win2[1200], lin[1200], mac[1200];
+    char win1[1200], win2[1200], lin[1200], mac[1200], xdgRoot[1200];
     if (appdata != NULL && appdata[0] != '\0') {
         snprintf(win1, sizeof win1, "%s/Slippi Launcher", appdata);
         roots[n++] = win1;
@@ -436,9 +436,8 @@ bool pc_slippi_account_discover(PcSlippiAccount* out) {
         roots[n++] = mac;
     }
     if (xdg != NULL && xdg[0] != '\0') {
-        char x[1200];
-        snprintf(x, sizeof x, "%s/Slippi Launcher", xdg);
-        roots[n++] = x;
+        snprintf(xdgRoot, sizeof xdgRoot, "%s/Slippi Launcher", xdg);
+        roots[n++] = xdgRoot;
     }
     for (int i = 0; i < n; i++) {
         if (try_root(roots[i], out)) {
