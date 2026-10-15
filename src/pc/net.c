@@ -36,6 +36,7 @@
 #include <dolphin/ar.h>
 #include <dolphin/os.h>
 #include <dolphin/vi.h>
+#include <melee/gm/gmvs.h>
 #include <melee/gm/gmvsmelee.h>
 #include <melee/lb/lb_0195.h>
 #include <sysdolphin/baselib/controller.h>
@@ -62,6 +63,8 @@ struct NetSession net = {
 static WirePad s_local_ring[RING];   /* indexed by frame & (RING-1) */
 static WirePad s_remote_ring[RING];  /* real input, or the prediction in use */
 static int32_t s_remote_have = -1;   /* newest contiguous real remote frame */
+static int32_t s_end_frame = -1;     /* game_over_note: first tick with a result */
+static bool s_game_over;             /* the match end can no longer be rolled back */
 static int32_t s_remote_newest = -1; /* newest frame the peer reported holding */
 static int32_t s_last_acked = -1;    /* newest local frame the peer holds */
 static int32_t s_rb_frame = -1;      /* oldest mispredicted frame not rolled back yet */
@@ -1557,6 +1560,9 @@ static void check_desync(void) {
         return;
     }
     int32_t upto = confirmed_frame();
+    if (s_game_over && upto > s_end_frame) {
+        upto = s_end_frame; /* the GAME! frames after it ran on predictions */
+    }
     int32_t from = s_ck_checked + 1 > net.ck_from ? s_ck_checked + 1 : net.ck_from;
     if (from <= net.frame - RING) {
         from = net.frame - RING + 1; /* aged out of s_ck_ring */
@@ -2107,6 +2113,8 @@ static void session_reset(void) {
     net.tick_frame = -1;
     net.resim = false;
     s_remote_have = s_remote_newest = s_last_acked = s_rb_frame = s_ck_checked = -1;
+    s_end_frame = -1;
+    s_game_over = false;
     for (int i = 0; i < RING; i++) {
         s_rck[i].frame = -1;
     }
@@ -3070,6 +3078,44 @@ static bool wait_input(int32_t need, const char* reason) {
  * arrives and differs, that frame's snapshot is restored and every frame
  * since is ticked again from the input rings with the resim flag on. */
 
+/* Slippi's "game confirmed over" (StartEngineLoop.asm): once the match result
+ * has held for more than its rollback limit, no rollback can undo it, and
+ * from then on Dolphin neither stalls nor rolls back nor needs our inputs for
+ * the GAME! frames that remain. It stops sending its own as well, since a
+ * peer at its rollback limit keeps advancing without one. Waiting for those
+ * inputs here deadlocked the end of a match whenever Dolphin reached the end
+ * already at its limit (a 90 ms link: both sides froze and the set dropped
+ * on the silence timeout). So the end is confirmed here by the same rule, and
+ * the frames after it run on predictions with nothing to wait for.
+ *
+ * One condition stricter than Slippi's: the result's own frame must be backed
+ * by the peer's real inputs with no rollback pending, so everything up to it
+ * is final (check_desync still compares up to there). The peer sent those:
+ * it simulated that frame itself, and a frame it simulates is a frame whose
+ * input it sends. */
+static void game_over_note(int32_t f) {
+    if (!s_slippi_on || s_game_over) {
+        return;
+    }
+    if (!in_fight() || gmVs_GetSceneState()->match_result == 0) {
+        s_end_frame = -1;
+        return;
+    }
+    if (s_end_frame < 0) {
+        s_end_frame = f;
+    }
+    if (f - s_end_frame > WINDOW && s_remote_have >= s_end_frame && s_rb_frame < 0) {
+        s_game_over = true;
+        pc_log_line("net: game confirmed over at frame %d (result from frame %d)", f,
+            s_end_frame);
+    }
+}
+
+/* Only the fight it was confirmed in: a scene after it waits as usual. */
+static bool game_over(void) {
+    return s_game_over && in_fight();
+}
+
 static void predict(int32_t f) {
     static const WirePad neutral;
     s_remote_ring[f & (RING - 1)] =
@@ -3662,13 +3708,18 @@ static void fresh_tick(PADStatus* head, bool raw) {
             pure_loads_fetch();
         }
         int32_t need = lockstep ? net.frame : (net.frame >= WINDOW ? net.frame - WINDOW : 0);
-        if (!wait_input(need, lockstep ? "lockstep" : "window")) {
+        if (game_over()) {
+            /* The GAME! frames: nothing left to wait for or roll back. */
+            if (s_remote_have < net.frame) {
+                predict(net.frame);
+            }
+        } else if (!wait_input(need, lockstep ? "lockstep" : "window")) {
             return;
         }
-        if ((net.frame % SYNC_INTERVAL) == 0 && net.frame > 0) {
+        if ((net.frame % SYNC_INTERVAL) == 0 && net.frame > 0 && !game_over()) {
             time_sync();
         }
-        if (s_remote_have < net.frame) {
+        if (s_remote_have < net.frame && !game_over()) {
             if (!snap_predicted(net.frame) && !wait_input(net.frame, "snapshot fallback")) {
                 return;
             }
@@ -4052,7 +4103,11 @@ bool pc_net_after_tick(bool scene_ending) {
         }
         return false;
     }
+    game_over_note(net.tick_frame);
     recv_inputs();
+    if (game_over()) {
+        s_rb_frame = -1; /* Slippi stops rolling back once the game is over */
+    }
     if (s_rb_frame >= 0) {
         int32_t f = s_rb_frame;
         s_rb_frame = -1;

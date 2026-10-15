@@ -434,6 +434,12 @@ struct GameSceneInfo* gm_804D6720;
  * harness never runs a match, so a default-constructed one at speed 1.0 is
  * what the tests want. */
 StartMeleeData gmVsMelee_StartData = {.rules = {.game_speed = 1.0F}};
+/* net.c reads the match result to confirm a Slippi game over; no harness
+ * match ever ends. */
+static VsSceneState s_vs_state;
+VsSceneState* gmVs_GetSceneState(void) {
+    return &s_vs_state;
+}
 PadLibData HSD_PadLibData;
 static u32 s_seed_val;
 u32* HSD_RandSeedPtr = &s_seed_val;
