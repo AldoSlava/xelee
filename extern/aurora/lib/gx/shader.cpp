@@ -2758,11 +2758,11 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
     }
     if (multiview && batch == 2 && motion == 0 && config.lineMode == 0) {
       bindless_batch_rewrite(shaderSource);
-      // AURORA_XR_DUMP_BINDLESS_WGSL=<dir>: the first 20 of these shaders,
-      // to read what a failed pipeline was given.
+      // AURORA_XR_DUMP_BINDLESS_WGSL=<dir>: every one of these shaders, to
+      // read what a failed pipeline was given (AURORA_LOG_SHADER_BUILDS
+      // names the one being built).
       static const char* dumpDir = std::getenv("AURORA_XR_DUMP_BINDLESS_WGSL");
-      static std::atomic<int> dumped{0};
-      if (dumpDir != nullptr && dumped.fetch_add(1) < 20) {
+      if (dumpDir != nullptr) {
         const std::string path = fmt::format("{}/bindless_{:x}.wgsl", dumpDir, hash);
         if (FILE* f = std::fopen(path.c_str(), "w")) {
           std::fwrite(shaderSource.data(), 1, shaderSource.size(), f);
@@ -2792,6 +2792,13 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
                         ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8) + (layout.xrMotion << 9) + (layout.xrBatch << 11),
                                     xxh3_hash(normalAttachment, xxh3_hash(config)))
                         : xxh3_hash(normalAttachment, xxh3_hash(config));
+  // AURORA_LOG_SHADER_BUILDS=1: a line before each shader is built (and its
+  // pipeline compiled right after), so a crash in the driver's compiler
+  // names the shader (the WGSL dump files go by the same hash).
+  static const bool logBuilds = std::getenv("AURORA_LOG_SHADER_BUILDS") != nullptr;
+  if (logBuilds)
+    Log.info("building shader {:x} (views {}, motion {}, batch {})", hash, layout.viewCount, layout.xrMotion,
+             layout.xrBatch);
 #ifdef __EMSCRIPTEN__
   // Blend/depth variants share shader code. Browser rendering is single-threaded;
   // retain modules for this device rather than compiling them for each pipeline.

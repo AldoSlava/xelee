@@ -219,7 +219,13 @@ TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat, 
       .dimension = wgpu::TextureViewDimension::e2D,
   };
   auto attachmentTextureView = texture.CreateView(&textureViewDescriptor);
-  wgpu::TextureView sampleTextureView = attachmentTextureView;
+  // Sampled through a view of its own that is only for sampling: a view
+  // with the texture's render-attachment usage can't go into a resource
+  // table (bindless eye batches, gx pipeline.cpp).
+  const auto sampleViewLabel = fmt::format("{} sample view", label);
+  textureViewDescriptor.label = sampleViewLabel.c_str();
+  textureViewDescriptor.usage = wgpu::TextureUsage::TextureBinding;
+  wgpu::TextureView sampleTextureView = texture.CreateView(&textureViewDescriptor);
   return std::make_shared<TextureRef>(std::move(texture), std::move(sampleTextureView),
                                       std::move(attachmentTextureView), size, wgpuFormat, 1, gxFormat);
 }
@@ -252,7 +258,13 @@ TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, co
       .dimension = wgpu::TextureViewDimension::e2D,
   };
   auto attachmentTextureView = texture.CreateView(&textureViewDescriptor);
-  wgpu::TextureView sampleTextureView = attachmentTextureView;
+  // Sampled through a view of its own that is only for sampling: a view
+  // with the texture's render-attachment usage can't go into a resource
+  // table (bindless eye batches, gx pipeline.cpp).
+  const auto sampleViewLabel = fmt::format("{} sample view", label);
+  textureViewDescriptor.label = sampleViewLabel.c_str();
+  textureViewDescriptor.usage = wgpu::TextureUsage::TextureBinding;
+  wgpu::TextureView sampleTextureView = texture.CreateView(&textureViewDescriptor);
   return std::make_shared<TextureRef>(std::move(texture), std::move(sampleTextureView),
                                       std::move(attachmentTextureView), size, wgpuFormat, 1, gxFormat);
 }
