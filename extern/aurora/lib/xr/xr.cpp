@@ -513,6 +513,9 @@ struct Bridge {
   XrSwapchain beamSwapchain = XR_NULL_HANDLE, dotSwapchain = XR_NULL_HANDLE;
   XrSwapchain barSwapchain = XR_NULL_HANDLE; // the screen's grab bar
   XrSwapchain backSwapchain = XR_NULL_HANDLE; // the Back button beside it
+  // SpaceWarp's motion vectors for an image submitted again: all zero, so
+  // the compositor reprojects it for the head without moving anything in it.
+  XrSwapchain zeroMotionSwapchain = XR_NULL_HANDLE;
   bool hasColorScaleBias = false;
 
   uint64_t framesShown = 0, fightFrames = 0;
@@ -3190,19 +3193,22 @@ void free_finished_uploads(bool all = false) {
   });
 }
 
-// Fill a one-image swapchain once; the runtime keeps showing it.
-bool create_static_swapchain(XrSwapchain& out, uint32_t w, uint32_t h, const std::vector<uint8_t>& rgba) {
+// Fill a one-image swapchain once; the runtime keeps showing it. Without
+// pixels (rgba empty) it is cleared to zero instead, in `format` with
+// `layers` layers (else the swapchains' own format, one layer).
+bool create_static_swapchain(XrSwapchain& out, uint32_t w, uint32_t h, const std::vector<uint8_t>& rgba,
+                             int64_t format = 0, uint32_t layers = 1) {
   XrSwapchainCreateInfo ci{XR_TYPE_SWAPCHAIN_CREATE_INFO};
   ci.createFlags = XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT;
   // Color attachment: released in that layout, as OpenXR expects of color images.
   ci.usageFlags =
       XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
-  ci.format = B.swapFormat;
+  ci.format = format != 0 ? format : B.swapFormat;
   ci.sampleCount = 1;
   ci.width = w;
   ci.height = h;
   ci.faceCount = 1;
-  ci.arraySize = 1;
+  ci.arraySize = layers;
   ci.mipCount = 1;
   if (XR_FAILED(xrCreateSwapchain(B.session, &ci, &out))) {
     ci.createFlags = 0;
@@ -3218,24 +3224,26 @@ bool create_static_swapchain(XrSwapchain& out, uint32_t w, uint32_t h, const std
   VkCommandBuffer cmd = VK_NULL_HANDLE;
   VkFence fence = VK_NULL_HANDLE;
   const auto upload = [&]() -> bool {
-    VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bci.size = rgba.size();
-    bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    VK_TRY(vkCreateBuffer(B.dev, &bci, nullptr, &buf));
-    VkMemoryRequirements req;
-    vkGetBufferMemoryRequirements(B.dev, buf, &req);
-    VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    mai.allocationSize = req.size;
-    mai.memoryTypeIndex =
-        find_memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (mai.memoryTypeIndex == UINT32_MAX)
-      return false;
-    VK_TRY(vkAllocateMemory(B.dev, &mai, nullptr, &mem));
-    VK_TRY(vkBindBufferMemory(B.dev, buf, mem, 0));
-    void* p = nullptr;
-    VK_TRY(vkMapMemory(B.dev, mem, 0, rgba.size(), 0, &p));
-    std::memcpy(p, rgba.data(), rgba.size());
-    vkUnmapMemory(B.dev, mem);
+    if (!rgba.empty()) {
+      VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+      bci.size = rgba.size();
+      bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+      VK_TRY(vkCreateBuffer(B.dev, &bci, nullptr, &buf));
+      VkMemoryRequirements req;
+      vkGetBufferMemoryRequirements(B.dev, buf, &req);
+      VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+      mai.allocationSize = req.size;
+      mai.memoryTypeIndex =
+          find_memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+      if (mai.memoryTypeIndex == UINT32_MAX)
+        return false;
+      VK_TRY(vkAllocateMemory(B.dev, &mai, nullptr, &mem));
+      VK_TRY(vkBindBufferMemory(B.dev, buf, mem, 0));
+      void* p = nullptr;
+      VK_TRY(vkMapMemory(B.dev, mem, 0, rgba.size(), 0, &p));
+      std::memcpy(p, rgba.data(), rgba.size());
+      vkUnmapMemory(B.dev, mem);
+    }
 
     uint32_t index = 0;
     XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
@@ -3255,16 +3263,22 @@ bool create_static_swapchain(XrSwapchain& out, uint32_t w, uint32_t h, const std
     VkImageMemoryBarrier bar{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     bar.srcQueueFamilyIndex = bar.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     bar.image = imgs[index].image;
-    bar.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    bar.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
     bar.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     bar.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     bar.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                          nullptr, 1, &bar);
-    VkBufferImageCopy region{};
-    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.imageExtent = {w, h, 1};
-    vkCmdCopyBufferToImage(cmd, buf, imgs[index].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    if (rgba.empty()) {
+      const VkClearColorValue zero{};
+      vkCmdClearColorImage(cmd, imgs[index].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1,
+                           &bar.subresourceRange);
+    } else {
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageExtent = {w, h, 1};
+      vkCmdCopyBufferToImage(cmd, buf, imgs[index].image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    }
     // The layout OpenXR expects a released color swapchain image in.
     bar.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     bar.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -3946,19 +3960,25 @@ bool render_xr_frame() {
         g_tickMismatch[1] += mds.shownTick != stereo.shownTick ? 1 : 0;
         g_tickMismatch[2] += hud.haveImage && hud.shownTick != stereo.shownTick ? 1 : 0;
       }
-      // An image submitted again (no new one since) goes without its
-      // vectors, so the compositor timewarps it instead of extrapolating the
-      // same motion a second time. AURORA_XR_APPSW_REPEAT=1: vectors on every
-      // submit, as before.
+      // An image submitted again (no new one since) goes with zero vectors,
+      // so the compositor reprojects it for the head instead of
+      // extrapolating the same motion a second time. Not without SpaceWarp
+      // info: a frame without it turns SpaceWarp off for the runtime, which
+      // re-paces the loop to the display's rate and back on the next frame;
+      // each late frame flipped it twice and the flips made more late
+      // frames (138 flips in 40 s of four-CPU Brinstar, images held 4+
+      // display frames). AURORA_XR_APPSW_REPEAT=1: the image's own vectors
+      // on every submit, as before 096d7da.
       static const bool swOnRepeat = env_flag("AURORA_XR_APPSW_REPEAT", false);
       static uint64_t lastSwTick = 0;
       const bool repeat = stereo.shownTick != 0 && stereo.shownTick == lastSwTick;
       if (i == 1)
         lastSwTick = stereo.shownTick;
-      if (appsw_on() && mvs.haveImage && mds.haveImage && (swOnRepeat || !repeat)) {
+      const bool zeroVectors = repeat && !swOnRepeat && B.zeroMotionSwapchain != XR_NULL_HANDLE;
+      if (appsw_on() && mvs.haveImage && mds.haveImage && (swOnRepeat || !repeat || zeroVectors)) {
         auto& sw = spaceWarp[i];
         sw = {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB};
-        sw.motionVectorSubImage.swapchain = mvs.swapchain;
+        sw.motionVectorSubImage.swapchain = zeroVectors ? B.zeroMotionSwapchain : mvs.swapchain;
         sw.motionVectorSubImage.imageRect = {{0, 0}, {static_cast<int32_t>(mvs.width), static_cast<int32_t>(mvs.height)}};
         sw.motionVectorSubImage.imageArrayIndex = static_cast<uint32_t>(i);
         sw.appSpaceDeltaPose = {{0.f, 0.f, 0.f, 1.f}, {0.f, 0.f, 0.f}};
@@ -4191,6 +4211,10 @@ bool setup() {
       return false;
   if (g_streams[kStereo].staged)
     Log.info("3D images staged: {} of our own per stream, copied into the swapchains", g_streams[kStereo].ring.size());
+  if (const auto& mv = g_streams[kMotion]; B.appSw && mv.width > 0 &&
+                                           !create_static_swapchain(B.zeroMotionSwapchain, mv.width, mv.height, {},
+                                                                    mv.swapFormat, mv.layers))
+    Log.warn("SpaceWarp: no zero motion vectors; images submitted again go without SpaceWarp info");
   if (!create_input())
     Log.warn("Controller input unavailable");
   if (!create_pointer_textures())
@@ -4240,7 +4264,8 @@ void teardown() {
       B.destroyHandTracker(ht);
     ht = XR_NULL_HANDLE;
   }
-  for (XrSwapchain* sc : {&B.beamSwapchain, &B.dotSwapchain, &B.barSwapchain, &B.backSwapchain}) {
+  for (XrSwapchain* sc : {&B.beamSwapchain, &B.dotSwapchain, &B.barSwapchain, &B.backSwapchain,
+                          &B.zeroMotionSwapchain}) {
     if (*sc)
       xrDestroySwapchain(*sc);
     *sc = XR_NULL_HANDLE;
