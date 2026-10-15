@@ -112,9 +112,8 @@
           <div id="auth-signed-in-n" class="row" style="display:none" data-desc="Your Slippi display name."><span class="name">Display name</span><span id="auth-name" class="readout"></span></div>
           <div class="row" data-desc="1-8 letters or digits. Used for LAN play."><span class="name">Local player name</span><input type="text" id="net-name" maxlength="8" value="PLAYER" /></div>
           <div class="row" data-desc="Automatic adapts to your connection. Changes apply next match."><span class="name">Input delay</span><button id="net-delay" class="value">Auto</button></div>
-          <p class="footnote">Matchmaking starts in the game: VS. Mode, then Online, then Unranked or Direct Connect.</p>
         </div>
-        <p id="settings-status">Saved automatically.</p>
+        <p id="settings-status" style="display: none;"></p>
       </div>
     </div>
     <div id="descbar"><p id="desc">Pick a disc to play.</p></div>

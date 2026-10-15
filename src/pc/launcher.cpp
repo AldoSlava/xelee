@@ -415,7 +415,7 @@ class Launcher final : public Rml::EventListener {
             e->SetClass("error", error);
         // The disc panel is hidden behind the settings; say it there too.
         if (settings)
-            text("settings-status", value);
+            note(value);
     }
     void save() {
         std::string error;
@@ -487,6 +487,8 @@ class Launcher final : public Rml::EventListener {
             text("desc", desc);
         if (!e)
             return;
+        // Only one plate lit: the open page's gives way to Back's.
+        document->SetClass("on-back", e->GetId() == "back");
         if (!settings) {
             for (const char* t : themes)
                 if (e->GetId() == t)
@@ -706,12 +708,18 @@ class Launcher final : public Rml::EventListener {
         notice();
         quiet = false;
     }
+    // The line under the settings rows, shown only while it has something
+    // to say (settings save as they change, so that goes without saying).
+    void note(const std::string& value) {
+        text("settings-status", value);
+        if (auto* e = element("settings-status"))
+            e->SetProperty("display", value.empty() ? "none" : "block");
+    }
     void notice() {
-        text("settings-status",
-            prefs.render_scale >= 6 ?
-                resolution_name(prefs.render_scale) +
-                    " native needs a lot of video memory; drop it if the game stutters." :
-                std::string("Saved automatically."));
+        note(prefs.render_scale >= 6 ?
+                 resolution_name(prefs.render_scale) +
+                     " native needs a lot of video memory; drop it if the game stutters." :
+                 std::string());
     }
     void show_settings(bool show) {
         settings = show;
@@ -956,9 +964,8 @@ class Launcher final : public Rml::EventListener {
             prefs.reverb = false;
             save();
             refresh_settings();
-            text("settings-status",
-                "Performance preset: internal resolution 1x, anti-aliasing off, filtering 1x "
-                "and reverb off. Anti-aliasing and filtering apply after a restart.");
+            note("Performance preset: internal resolution 1x, anti-aliasing off, filtering 1x "
+                 "and reverb off. Anti-aliasing and filtering apply after a restart.");
             element("performance")->Focus();
         } else if (id == "fps") {
             prefs.fps = !prefs.fps;

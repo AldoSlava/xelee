@@ -155,6 +155,12 @@ button {
     font-effect: none;
     decorator: ninepatch(small-on, small-on-inner, 4dp 30.5dp 4dp 21.5dp);
 }
+/* The cursor on Back: the open page's plate goes back to idle. */
+.on-back .plate.small.selected {
+    color: #e8b84a;
+    font-effect: outline(2dp #000000);
+    decorator: ninepatch(small, small-inner, 4dp 30.5dp 4dp 21.5dp);
+}
 .plate.small:focus {
     color: #141008;
     font-effect: none;
@@ -405,7 +411,6 @@ input.range sliderarrowdec, input.range sliderarrowinc { width: 0; height: 0; }
 .info { padding: 10dp 12dp 14dp; }
 .info h3 { font-size: 20dp; font-weight: bold; color: #ffd84a; margin-bottom: 4dp; }
 .info p { font-size: 16dp; line-height: 1.5; color: #d8dae6; }
-.footnote { font-size: 14dp; color: #9da2bb; margin: 10dp 12dp 0; }
 #settings-status { font-size: 14dp; color: #9da2bb; margin: 10dp 12dp 0; }
 
 /* ---- Description bar ---------------------------------------------------- */
