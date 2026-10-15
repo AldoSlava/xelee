@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <span>
 #include <string>
 #include <string_view>
@@ -1075,10 +1076,22 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
     constexpr std::array disableToggles{
         "timestamp_quantization",
     };
+    // AURORA_DAWN_VALIDATION=1: Dawn's validation in a release build too, so
+    // a bad call is reported where it's made instead of crashing the backend.
+    // allow_unsafe_apis: the multiview eyes' multisampled and transient
+    // arrays, which WebGPU forbids and Vulkan has (our Dawn fork).
+    std::vector<const char*> enabled(enableToggles.begin(), enableToggles.end());
+    if (const char* v = std::getenv("AURORA_DAWN_VALIDATION"); v != nullptr && v[0] == '1') {
+      std::erase_if(enabled, [](const char* t) {
+        return std::string_view{t} == "skip_validation" || std::string_view{t} == "disable_robustness";
+      });
+      enabled.push_back("allow_unsafe_apis");
+      Log.info("Dawn validation on (AURORA_DAWN_VALIDATION)");
+    }
     wgpu::DawnTogglesDescriptor togglesDescriptor(wgpu::DawnTogglesDescriptor::Init{
         .nextInChain = &cacheDescriptor,
-        .enabledToggleCount = enableToggles.size(),
-        .enabledToggles = enableToggles.data(),
+        .enabledToggleCount = enabled.size(),
+        .enabledToggles = enabled.data(),
         .disabledToggleCount = disableToggles.size(),
         .disabledToggles = disableToggles.data(),
     });
@@ -1131,6 +1144,14 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
     }
 #ifndef __EMSCRIPTEN__
     g_device.SetLoggingCallback(wgpu_log);
+#endif
+#if defined(WEBGPU_DAWN) && !defined(__EMSCRIPTEN__)
+    if (const char* v = std::getenv("AURORA_DAWN_VALIDATION"); v != nullptr && v[0] == '1') {
+      std::string used;
+      for (const char* t : dawn::native::GetTogglesUsed(g_device.Get()))
+        used += std::string{t} + " ";
+      Log.info("Dawn toggles: {}", used);
+    }
 #endif
   }
   g_queue = g_device.GetQueue();

@@ -5063,9 +5063,12 @@ bool ensure_direct(const gfx::RenderTargetLayout& layout) {
   // MSAA: every attachment multisampled and, where the device allows,
   // transient: on a tiler they then live only in tile memory, and only the
   // resolve into the shared image reaches memory.
+  // AURORA_XR_TRANSIENT=0: ordinary attachments. Dawn's validation
+  // (AURORA_DAWN_VALIDATION) rejects transient arrays, which Vulkan allows.
   const bool msaa = g_xrSamples > 1;
   const auto usage = wgpu::TextureUsage::RenderAttachment |
-                     (msaa && device.HasFeature(wgpu::FeatureName::TransientAttachments)
+                     (msaa && device.HasFeature(wgpu::FeatureName::TransientAttachments) &&
+                              env_flag("AURORA_XR_TRANSIENT", true)
                           ? wgpu::TextureUsage::TransientAttachment
                           : wgpu::TextureUsage::None);
   const wgpu::TextureDescriptor dd{.label = "XR 3D depth",
