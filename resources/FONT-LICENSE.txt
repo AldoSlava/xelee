@@ -1,5 +1,5 @@
 font.ttf, font-bold.ttf: Liberation Sans.
-menu.ttf, menu-bold.ttf: Noto Sans SemiCondensed, cut to Latin
+menu.ttf, menu-bold.ttf, menu-heavy.ttf: Noto Sans SemiCondensed, cut to Latin
 (tools/launcher_art/make_launcher_art.py).
 
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)

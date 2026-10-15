@@ -524,7 +524,7 @@ class Launcher final : public Rml::EventListener {
         enabled("choose", !busy());
         enabled("verify", verification.valid() || (supported && !busy()));
         enabled("settings", !busy());
-        text("verify", verification.valid() ? "Cancel Verify" : "Verify Disc");
+        text("verify-label", verification.valid() ? "Cancel Verify" : "Verify Disc");
         focus_ids = {"play", "choose", "verify", "settings", "quit"};
         auto ustate = pc::updater::get_state();
         if ((ustate.status == pc::updater::Status::UpdateAvailable ||
@@ -1521,11 +1521,14 @@ extern "C" int pc_launcher_run(const char* command_line_disc, SDL_Window* window
             return -1;
         }
         Rml::LoadFontFace((resources / "font-bold.ttf").string());
-        /* The menus' face (Noto Sans SemiCondensed, cut to Latin). Liberation
-         * covers what it lacks. */
+        /* The menus' face (Noto Sans SemiCondensed, cut to Latin), with its
+         * ExtraBold for the plates' names. Liberation covers what it lacks. */
         for (const char* face : {"menu.ttf", "menu-bold.ttf"})
             if (!Rml::LoadFontFace((resources / face).string()))
                 SDL_Log("Launcher: could not load %s", face);
+        if (!Rml::LoadFontFace((resources / "menu-heavy.ttf").string(), false,
+                static_cast<Rml::Style::FontWeight>(800)))
+            SDL_Log("Launcher: could not load menu-heavy.ttf");
         Rml::LoadFontFace((resources / "font.ttf").string(), true);
         aurora::rmlui::set_ui_scale(prefs.scale);
         aurora_set_resampler(static_cast<AuroraSampler>(prefs.filter_mode));

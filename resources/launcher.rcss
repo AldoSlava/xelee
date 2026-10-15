@@ -8,19 +8,20 @@
 @spritesheet launcher {
     src: launcher/sprites.png;
     resolution: 2x;
-    plate: 0px 0px 480px 112px;
-    plate-inner: 54px 8px 351px 96px;
-    plate-on: 512px 0px 480px 112px;
-    plate-on-inner: 566px 8px 351px 96px;
-    small: 0px 112px 480px 88px;
-    small-inner: 43px 120px 376px 72px;
-    small-on: 512px 112px 480px 88px;
-    small-on-inner: 555px 120px 376px 72px;
-    disc: 0px 200px 136px 136px;
-    arrow-l: 144px 200px 28px 40px;
-    arrow-r: 180px 200px 28px 40px;
-    arrow-l-dark: 216px 200px 28px 40px;
-    arrow-r-dark: 252px 200px 28px 40px;
+    plate: 0px 0px 480px 136px;
+    plate-inner: 65px 41px 306px 60px;
+    plate-on: 512px 0px 480px 136px;
+    plate-on-inner: 577px 41px 306px 60px;
+    small: 0px 136px 480px 100px;
+    small-inner: 49px 168px 351px 40px;
+    small-on: 512px 136px 480px 100px;
+    small-on-inner: 561px 168px 351px 40px;
+    disc: 0px 236px 160px 160px;
+    disc-plate: 0px 236px 166px 160px;
+    arrow-l: 174px 236px 28px 40px;
+    arrow-r: 210px 236px 28px 40px;
+    arrow-l-dark: 246px 236px 28px 40px;
+    arrow-r-dark: 282px 236px 28px 40px;
 }
 
 div, p, h1, h2, h3 { display: block; }
@@ -124,47 +125,52 @@ button {
 }
 
 .plate {
-    height: 56dp;
-    padding: 0 48dp 0 34dp;
-    line-height: 56dp;
-    font-size: 27dp;
-    color: #e8b84a;
+    height: 68dp;
+    padding: 0 56dp 0 38dp;
+    line-height: 70dp;  /* centred on the black window, which sits low */
+    font-size: 37dp;
+    font-weight: 800;
+    color: #dba63c;
     font-effect: outline(2dp #000000);
-    decorator: ninepatch(plate, plate-inner, 4dp 37.5dp 4dp 27dp);
+    decorator: ninepatch(plate, plate-inner, 20.5dp 54.5dp 17.5dp 32.5dp);
     transition: transform 0.12s cubic-out;
 }
 .plate:hover { color: #ffe9a8; }
 .plate:focus {
     color: #141008;
     font-effect: none;
-    decorator: ninepatch(plate-on, plate-on-inner, 4dp 37.5dp 4dp 27dp), image(disc none scale-none right center);
+    decorator: image(disc-plate none scale-none right center), ninepatch(plate-on, plate-on-inner, 20.5dp 54.5dp 17.5dp 32.5dp);
     transform: translateX(-14dp) scale(1.04);
 }
+.plate span { display: inline-block; }
+/* The selected plate's name leans, as Melee's does. */
+.plate:focus span, .plate.small.selected span { transform: skewX(-10deg); }
+.on-back .plate.small.selected span { transform: none; }
 .plate:disabled { color: #6c604a; cursor: default; }
 .plate:disabled:focus { color: #4c4434; }
 
 .plate.small {
-    height: 44dp;
-    line-height: 44dp;
-    padding: 0 38dp 0 26dp;
-    font-size: 21dp;
-    decorator: ninepatch(small, small-inner, 4dp 30.5dp 4dp 21.5dp);
+    height: 50dp;
+    line-height: 53dp;
+    padding: 0 42dp 0 28dp;
+    font-size: 22dp;
+    decorator: ninepatch(small, small-inner, 16dp 40dp 14dp 24.5dp);
 }
 .plate.small.selected {
     color: #141008;
     font-effect: none;
-    decorator: ninepatch(small-on, small-on-inner, 4dp 30.5dp 4dp 21.5dp);
+    decorator: ninepatch(small-on, small-on-inner, 16dp 40dp 14dp 24.5dp);
 }
 /* The cursor on Back: the open page's plate goes back to idle. */
 .on-back .plate.small.selected {
-    color: #e8b84a;
+    color: #dba63c;
     font-effect: outline(2dp #000000);
-    decorator: ninepatch(small, small-inner, 4dp 30.5dp 4dp 21.5dp);
+    decorator: ninepatch(small, small-inner, 16dp 40dp 14dp 24.5dp);
 }
 .plate.small:focus {
     color: #141008;
     font-effect: none;
-    decorator: ninepatch(small-on, small-on-inner, 4dp 30.5dp 4dp 21.5dp), image(disc none contain right center);
+    decorator: image(disc-plate none contain right center), ninepatch(small-on, small-on-inner, 16dp 40dp 14dp 24.5dp);
     transform: translateX(-10dp);
 }
 
@@ -172,7 +178,7 @@ button {
 
 #home { flex: 1; min-height: 0; display: flex; align-items: center; }
 #plates { width: 44%; max-width: 470dp; flex-shrink: 0; }
-#plates .plate { margin-bottom: 12dp; }
+#plates .plate { margin-bottom: 0; }
 /* Melee staggers its plates along a shallow curve. */
 #play { margin-left: 46dp; margin-right: 0; }
 #choose { margin-left: 22dp; margin-right: 24dp; }
@@ -196,8 +202,6 @@ button {
     border: 2dp #b8bccb60;
     border-left: 6dp #b8bccb40;
     border-radius: 6dp 18dp 18dp 6dp;
-    transform: perspective(900dp) rotateY(10deg);
-    transform-origin: left center;
 }
 .side-label {
     font-size: 15dp;
@@ -211,7 +215,6 @@ button {
     font-weight: bold;
     color: #ffffff;
     margin: 6dp 0 4dp;
-    transform: skewX(-8deg);
     word-break: break-word;
 }
 #disc-info { font-size: 18dp; color: #d8dae6; margin: 0 0 6dp; }
@@ -286,7 +289,7 @@ button.mini.primary { border-color: #e0b030; }
     justify-content: center;
     margin-right: 22dp;
 }
-#categories .plate { margin-bottom: 9dp; }
+#categories .plate { margin-bottom: 0; }
 #tab-graphics { margin-left: 22dp; }
 #tab-audio { margin-left: 10dp; margin-right: 12dp; }
 #tab-cheats { margin-right: 22dp; }
@@ -457,8 +460,7 @@ input.range sliderarrowdec, input.range sliderarrowinc { width: 0; height: 0; }
     body { padding: 12dp 16dp 4dp; }
     #titlebar { height: 46dp; margin-top: -20dp; }
     #title, #title-sub { font-size: 28dp; }
-    .plate { height: 46dp; line-height: 46dp; font-size: 22dp; }
-    #plates .plate { margin-bottom: 7dp; }
+    #plates .plate { margin-bottom: 2dp; }
     .row { min-height: 38dp; }
     #descbar { height: 56dp; padding: 4dp 14dp; margin-top: 8dp; }
     #desc { font-size: 16dp; }
