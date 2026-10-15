@@ -1193,7 +1193,7 @@ void bindless_batch_rewrite(std::string& src) {
 } // namespace
 
 std::string build_shader_source(const ShaderConfig& config, uint32_t normalAttachment, uint32_t viewCount,
-                                bool softClip, uint32_t motion, uint32_t batch) noexcept {
+                                uint32_t softClip, uint32_t motion, uint32_t batch) noexcept {
   ZoneScoped;
   const auto hash = xxh3_hash(normalAttachment, xxh3_hash(config));
   const auto info = build_shader_info(config);
@@ -2515,7 +2515,43 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
       // passthrough shows through gradually and depth stays exact. Only these
       // pipelines discard (discard costs early depth). Not clip_distances:
       // Adreno 740 fails to create multiview pipelines that write them.
-      if (softClip) {
+      if (softClip == 2) {
+        // An opacity-only fade (no clip plane in play, aurora_xr_world_clips4_fade
+        // with planes that all pass): the opacity straight from the uniform, no
+        // plane distances, so no interpolants beyond the GX shader's own. The
+        // plane variant's two extra vec4s cost a forced fade of all four
+        // fighters ~12 ms of eye pass on the Quest 3, dithered or blended.
+        static const bool fadeBlend = std::getenv("AURORA_XR_FADE_BLEND") != nullptr;
+        // AURORA_XR_FADE_NONE=1 (a measurement): the variant without the
+        // fade itself (no discard, no blend: drawn opaque).
+        static const bool fadeNone = std::getenv("AURORA_XR_FADE_NONE") != nullptr;
+        const auto fsAt = shaderSource.find("fn fs_main(");
+        const auto fsBody = fsAt == std::string::npos ? fsAt : shaderSource.find("{", fsAt);
+        if (fsBody != std::string::npos && !fadeNone) {
+          shaderSource.insert(fsBody + 1, "\n    let xr_cov = 1.0 - bitcast<f32>(xr.enabled.y);");
+          if (fadeBlend) {
+            for (const std::string_view ret : {"\n    return prev;", "\n    out_frag.color = prev;"}) {
+              if (const auto at = shaderSource.find(ret, fsBody); at != std::string::npos) {
+                shaderSource.replace(at, ret.size(),
+                                     ret.find("return") != std::string_view::npos
+                                         ? "\n    return vec4f(prev.rgb * xr_cov, xr_cov);"
+                                         : "\n    out_frag.color = vec4f(prev.rgb * xr_cov, xr_cov);");
+                break;
+              }
+            }
+          } else {
+            shaderSource.insert(fsBody + 1 + std::string_view("\n    let xr_cov = 1.0 - bitcast<f32>(xr.enabled.y);").size(),
+                                "\n    if (xr_bayer(in.pos.xy) >= xr_cov) { discard; }");
+            const std::string vsHead = "struct VertexOutput {";
+            if (const auto v0 = shaderSource.find(vsHead); v0 != std::string::npos)
+              shaderSource.insert(v0, "fn xr_bayer(p: vec2f) -> f32 {\n"
+                                      "    let y = vec2u(p).y;\n"
+                                      "    let x = vec2u(p).x ^ y;\n"
+                                      "    let m = ((x & 1u) << 3u) | ((y & 1u) << 2u) | (x & 2u) | ((y >> 1u) & 1u);\n"
+                                      "    return (f32(m) + 0.5) / 16.0;\n}\n\n");
+          }
+        }
+      } else if (softClip) {
         const std::string vsHead = "struct VertexOutput {";
         const auto v0 = shaderSource.find(vsHead);
         const auto v1 = v0 == std::string::npos ? v0 : shaderSource.find("};", v0);
@@ -2534,8 +2570,26 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
           // Eight planes' distances, four to a vec4 (the inter-stage
           // budget: GX shaders can use 14 of the 16 slots). The opacity is
           // read straight from the uniform, which the fragment stage sees.
+          // AURORA_XR_FADE_BLEND=1 (a prototype, measured against the
+          // dither): the fade blends instead of discarding (gx.cpp makes the
+          // pipeline premultiplied, without depth writes).
+          static const bool fadeBlend = std::getenv("AURORA_XR_FADE_BLEND") != nullptr;
+          if (fadeBlend) {
+            shaderSource.insert(fsBody + 1, "\n    let xr_d = min(in.xr_fade_a, in.xr_fade_b);"
+                                            "\n    let xr_cov = clamp(min(min(xr_d.x, xr_d.y), min(xr_d.z, xr_d.w)), 0.0, 1.0) * (1.0 - bitcast<f32>(xr.enabled.y));");
+            for (const std::string_view ret : {"\n    return prev;", "\n    out_frag.color = prev;"}) {
+              if (const auto at = shaderSource.find(ret, fsBody); at != std::string::npos) {
+                const std::string to = ret.find("return") != std::string_view::npos
+                                           ? "\n    return vec4f(prev.rgb * xr_cov, xr_cov);"
+                                           : "\n    out_frag.color = vec4f(prev.rgb * xr_cov, xr_cov);";
+                shaderSource.replace(at, ret.size(), to);
+                break;
+              }
+            }
+          } else {
           shaderSource.insert(fsBody + 1, "\n    let xr_d = min(in.xr_fade_a, in.xr_fade_b);"
                                           "\n    if (xr_bayer(in.pos.xy) >= clamp(min(min(xr_d.x, xr_d.y), min(xr_d.z, xr_d.w)), 0.0, 1.0) * (1.0 - bitcast<f32>(xr.enabled.y))) { discard; }");
+          }
           // The distance to the plane in fade bands, interpolated (it is
           // linear, so exact) and clamped per fragment. A per-vertex 0/1 would
           // blend across triangles that span the plane. Fade band 0 is a hard
@@ -2800,7 +2854,8 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
     }
   }
   const auto hash = layout.viewCount > 1
-                        ? xxh3_hash(layout.viewCount + (layout.xrSoftClip << 8) + (layout.xrMotion << 9) + (layout.xrBatch << 11),
+                        ? xxh3_hash(layout.viewCount + (std::min(layout.xrSoftClip, 1u) << 8) + (layout.xrMotion << 9) +
+                                        (layout.xrBatch << 11) + (layout.xrSoftClip == 2 ? 1u << 20 : 0u),
                                     xxh3_hash(normalAttachment, xxh3_hash(config)))
                         : xxh3_hash(normalAttachment, xxh3_hash(config));
   // AURORA_LOG_SHADER_BUILDS=1: a line before each shader is built (and its
@@ -2819,7 +2874,7 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
   if (auto it = modules.find(hash); it != modules.end()) return it->second;
 #endif
   const auto genStart = std::chrono::steady_clock::now();
-  const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip != 0,
+  const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip,
                                                  layout.xrMotion, layout.xrBatch);
   webgpu::record_compile_stat("aurora.BuildWGSL",
                               static_cast<int>(std::chrono::duration_cast<std::chrono::microseconds>(

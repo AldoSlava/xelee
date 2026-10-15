@@ -939,19 +939,33 @@ void pc_xr_mono_camera(void) {
  * would have lost them. The visibility test still runs and sets its flags,
  * so nothing the game reads changes. Presentation only: the 3D view draws
  * them, the flat frame's camera can't see them anyway. MELEE_XR_OFFSCREEN=0
- * keeps the game's behavior. */
-bool pc_xr_fighter_offscreen_begin(void) {
-    static int on = -1;
-    if (on < 0) {
+ * keeps the game's behavior; =2 draws every fighter this way (to measure it). */
+static int offscreen_mode(void) {
+    static int mode = -1;
+    if (mode < 0) {
         const char* v = getenv("MELEE_XR_OFFSCREEN");
-        on = v == NULL || *v != '0';
+        mode = v == NULL ? 1 : *v == '0' ? 0 : *v == '2' ? 2 : 1;
     }
+    return mode;
+}
+
+bool pc_xr_fighter_offscreen_forced(void) { return offscreen_mode() == 2 && aurora_xr_active(); }
+
+bool pc_xr_fighter_offscreen_begin(void) {
+    const int on = offscreen_mode() != 0;
     if (!on || !aurora_xr_active() || s_category != AURORA_XR_WORLD) {
         return false;
     }
-    /* 1.5 pulses a second, from 30% to 85% (dithered). */
+    /* 1.5 pulses a second, from 30% to 85% (dithered). MELEE_XR_OFFSCREEN_OPACITY:
+     * a fixed opacity instead (a measurement). */
     const double t = (double)SDL_GetTicksNS() * 1e-9;
-    const float opacity = 0.575f + 0.275f * (float)sin(t * 2.0 * 3.14159265 * 1.5);
+    static float fixed_opacity = -2.f;
+    if (fixed_opacity == -2.f) {
+        const char* v = getenv("MELEE_XR_OFFSCREEN_OPACITY");
+        fixed_opacity = v != NULL ? (float)atof(v) : -1.f;
+    }
+    const float opacity = fixed_opacity >= 0.f ? fixed_opacity
+                                               : 0.575f + 0.275f * (float)sin(t * 2.0 * 3.14159265 * 1.5);
     float planes[AURORA_XR_MAX_CLIPS][4], fades[AURORA_XR_MAX_CLIPS];
     const int n = s_follow != NULL && s_follow_placed && pc_xr_mixed_reality() ? follow_planes(planes, fades) : 0;
     aurora_xr_world_clips4_fade((const float(*)[4])planes, fades, n, opacity);

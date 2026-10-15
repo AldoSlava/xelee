@@ -401,7 +401,11 @@ void ftDrawCommon_80080E18(HSD_GObj* gobj, intptr_t arg1)
     if (fp->is_sleeping) {
         return;
     }
-    if (!ftLib_UpdateScreenVisibility(gobj)) {
+    if (!ftLib_UpdateScreenVisibility(gobj)
+#ifdef TARGET_PC
+        || pc_xr_fighter_offscreen_forced()
+#endif
+    ) {
 #ifdef TARGET_PC
         /* Off the flat camera: the 3D view still shows it (pc/xr_scene.c). */
         offscreen_xr = pc_xr_fighter_offscreen_begin();

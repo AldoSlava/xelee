@@ -1032,17 +1032,32 @@ static gfx::PipelineRef xr_twin(const gfx::RenderTargetLayout& layout, gfx::Pipe
   return ref;
 }
 
-static gfx::PipelineRef xr_soft_twin(const gfx::RenderTargetLayout& mv) noexcept {
-  static gfx::RenderTargetLayout soft;
-  static uint64_t softFor = 0;
-  if (softFor != mv.key) {
-    softFor = mv.key;
-    soft = mv;
-    soft.xrSoftClip = 1;
-    gfx::detail::finalize_render_target_layout(soft);
+// `opacityOnly`: the fade has no plane in play, only an opacity (the
+// variant without plane distances, xrSoftClip 2).
+static gfx::PipelineRef xr_soft_twin(const gfx::RenderTargetLayout& mv, bool opacityOnly = false) noexcept {
+  static gfx::RenderTargetLayout soft[2];
+  static uint64_t softFor[2] = {0, 0};
+  const int v = opacityOnly ? 1 : 0;
+  if (softFor[v] != mv.key) {
+    softFor[v] = mv.key;
+    soft[v] = mv;
+    soft[v].xrSoftClip = opacityOnly ? 2 : 1;
+    gfx::detail::finalize_render_target_layout(soft[v]);
   }
+  const auto& soft_ = soft[v];
   auto& cache = sDrawCache;
-  return xr_twin(soft, cache.xrSoftRef, cache.xrSoftForPipeline, cache.xrSoftForLayout);
+  return xr_twin(soft_, cache.xrSoftRef, cache.xrSoftForPipeline, cache.xrSoftForLayout);
+}
+
+// The fade has only an opacity: every clip plane passes (0, 0, 0, 1).
+static bool xr_fade_opacity_only() noexcept {
+  const auto* clip = gfx::xr_clip_camera();
+  if (clip == nullptr || clip->opacity >= 1.f)
+    return false;
+  for (const auto& p : clip->planes)
+    if (p[0] != 0.f || p[1] != 0.f || p[2] != 0.f || p[3] != 1.f)
+      return false;
+  return true;
 }
 
 // The eye pipeline for a world draw's vertices (0: not drawn in the eyes).
@@ -1083,7 +1098,7 @@ static gfx::PipelineRef xr_world_pipeline(const u8* raw, u16 vtxCount, XrClipCla
     case XrClipClass::Outside:
       return 0;
     case XrClipClass::Straddle:
-      return xr_soft_twin(*mv);
+      return xr_soft_twin(*mv, xr_fade_opacity_only());
     case XrClipClass::Inside:
       break;
     }
@@ -1771,11 +1786,17 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& 
   // Clipped world draws merge only with draws of their own class (inside,
   // straddling, outside), so a merged draw never needs the dithering
   // pipeline just because some of it straddles.
-  // Straddling draws don't merge: each keeps its own eye index list.
+  // Straddling draws don't merge: each keeps its own eye index list. Except
+  // under an opacity-only fade (off-screen fighters, Brinstar's rising
+  // acid): every draw straddles there and none builds an index list (no
+  // plane cuts a triangle). Unmerged, a faded fighter reached the eye and
+  // motion passes as its hundreds of tiny GX draws: forcing all four
+  // fighters to fade took the eyes from 4.2 to 16.2 ms on the Quest 3,
+  // dithered, blended or drawn opaque alike.
   if (canMerge && gfx::xr_soft_clip_active()) {
     XrClipClass cls;
     canMerge = xr_world_pipeline(vertexData.data(), vtxCount, &cls) == lastDraw->xrPipeline &&
-               cls != XrClipClass::Straddle && lastDraw->xrIndexCount == 0;
+               (cls != XrClipClass::Straddle || xr_fade_opacity_only()) && lastDraw->xrIndexCount == 0;
   }
 #endif
   // AURORA_LOG_QUADPOS=1: log the vertex POSITIONS of untextured 4-vertex

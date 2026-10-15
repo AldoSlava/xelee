@@ -459,7 +459,13 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
   const float depthBias = (UseReversedZ ? -1.0f : 1.0f) * std::bit_cast<float>(config.polygonOffsetBits);
   const float depthBiasSlopeScale = (UseReversedZ ? -1.0f : 1.0f) * std::bit_cast<float>(config.polygonOffsetScaleBits);
   const float depthBiasClamp = webgpu::g_hasCoreFeatures ? std::bit_cast<float>(config.polygonOffsetClampBits) : 0.0f;
-  const bool writesDepth = config.depthCompare && config.depthUpdate;
+  // AURORA_XR_FADE_BLEND=1 (prototype): soft-clip fades blend (premultiplied)
+  // without depth writes instead of dithering (shader.cpp).
+  static const bool fadeBlend = std::getenv("AURORA_XR_FADE_BLEND") != nullptr;
+  static const bool fadeNone = std::getenv("AURORA_XR_FADE_NONE") != nullptr;
+  const bool blendFade = fadeBlend && !(fadeNone && layout.xrSoftClip == 2) && layout.xrSoftClip != 0 &&
+                         layout.xrMotion == 0;
+  const bool writesDepth = config.depthCompare && config.depthUpdate && !blendFade;
   const wgpu::DepthStencilState depthStencil{
       .format = layout.depthStencilFormat,
       .depthWriteEnabled = writesDepth,
@@ -479,7 +485,15 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
                          : wgpu::ColorWriteMask::None,
     };
   }
-  colorTargets[gfx::SceneColorAttachmentIndex].blend = &blendState;
+  static constexpr wgpu::BlendState premultiplied{
+      .color = {.operation = wgpu::BlendOperation::Add,
+                .srcFactor = wgpu::BlendFactor::One,
+                .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+      .alpha = {.operation = wgpu::BlendOperation::Add,
+                .srcFactor = wgpu::BlendFactor::One,
+                .dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha},
+  };
+  colorTargets[gfx::SceneColorAttachmentIndex].blend = blendFade ? &premultiplied : &blendState;
   colorTargets[gfx::SceneColorAttachmentIndex].writeMask = to_write_mask(config.colorUpdate, config.alphaUpdate);
   if (layout.xrMotion != 0) {
     // Motion vectors: written whole, never blended.

@@ -74,6 +74,8 @@ void pc_xr_particle_end(bool hidden);
  * and the off-screen damage are the game's own (MELEE_XR_OFFSCREEN=0: the
  * game's way). */
 bool pc_xr_fighter_offscreen_begin(void);
+/* MELEE_XR_OFFSCREEN=2: every fighter drawn as if off the flat camera (a measurement). */
+bool pc_xr_fighter_offscreen_forced(void);
 void pc_xr_fighter_offscreen_end(void);
 /* Around the magnifier bubble's draw (if/ifmagnify.c): true when it is kept
  * to the flat frame, off the XR HUD; then call pc_xr_magnify_end. */
@@ -118,6 +120,7 @@ static inline bool pc_xr_particle_begin(int bank, int id, const float pos[3]) {
 }
 static inline void pc_xr_particle_end(bool hidden) { (void)hidden; }
 static inline bool pc_xr_fighter_offscreen_begin(void) { return false; }
+static inline bool pc_xr_fighter_offscreen_forced(void) { return false; }
 static inline void pc_xr_fighter_offscreen_end(void) {}
 static inline bool pc_xr_magnify_begin(void) { return false; }
 static inline void pc_xr_magnify_end(void) {}
