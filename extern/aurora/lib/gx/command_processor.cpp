@@ -1246,7 +1246,8 @@ static const gfx::RenderTargetLayout& xr_batch_layout(const gfx::RenderTargetLay
   if (batchedFor[i] != of.key) {
     batchedFor[i] = of.key;
     batched[i] = of;
-    batched[i].xrBatch = 1;
+    // Eye batches sample through the resource table when bindless.
+    batched[i].xrBatch = i == 0 && gfx::xr_bindless() ? 2 : 1;
     gfx::detail::finalize_render_target_layout(batched[i]);
   }
   return batched[i];

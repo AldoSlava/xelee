@@ -15,7 +15,9 @@
 #include <absl/container/flat_hash_map.h>
 #include <mutex>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "tracy/Tracy.hpp"
 
@@ -871,10 +873,312 @@ auto lighting_func(const ShaderConfig& config, const ColorChannelConfig& cc, u8 
 }
 
 absl::flat_hash_set<gfx::ShaderRef> s_seenShaders;
+
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+// Bindless eye batches (RenderTargetLayout::xrBatch == 2): a batched draw's
+// draws differ in textures and uniform, not only in matrices. Every read of
+// the uniform goes to the draw's own uniform in the pool (bound as storage),
+// at offsets laid out here by WGSL's uniform-space rules from the generated
+// `Uniform` struct (fill_uniform packs it in the same order), and textures
+// and samplers come from Dawn's resource table, by the slots in the draw's
+// batch record (pipeline.cpp, words 17-24 and 25-32).
+struct WgslField {
+  std::string name, type;
+};
+struct WgslLayout {
+  uint32_t align = 0, size = 0;
+};
+using WgslStructs = std::unordered_map<std::string, std::vector<WgslField>>;
+
+std::string_view wgsl_trim(std::string_view v) {
+  while (!v.empty() && std::isspace(static_cast<unsigned char>(v.front())))
+    v.remove_prefix(1);
+  while (!v.empty() && std::isspace(static_cast<unsigned char>(v.back())))
+    v.remove_suffix(1);
+  return v;
+}
+
+// "a: T, b: array<U, 3>," -> fields (commas inside <> belong to the type).
+std::vector<WgslField> wgsl_fields(std::string_view body) {
+  std::vector<WgslField> out;
+  int depth = 0;
+  size_t start = 0;
+  for (size_t i = 0; i <= body.size(); ++i) {
+    const char c = i < body.size() ? body[i] : ',';
+    depth += c == '<' ? 1 : c == '>' ? -1 : 0;
+    if (c != ',' || depth != 0)
+      continue;
+    const auto item = wgsl_trim(body.substr(start, i - start));
+    start = i + 1;
+    const auto colon = item.find(':');
+    if (item.empty() || colon == std::string_view::npos)
+      continue;
+    out.push_back({std::string(wgsl_trim(item.substr(0, colon))), std::string(wgsl_trim(item.substr(colon + 1)))});
+  }
+  return out;
+}
+
+// Every `struct Name { ... }` in the source.
+WgslStructs wgsl_structs(const std::string& src) {
+  WgslStructs out;
+  for (size_t at = src.find("struct "); at != std::string::npos; at = src.find("struct ", at + 1)) {
+    if (at > 0 && (std::isalnum(static_cast<unsigned char>(src[at - 1])) || src[at - 1] == '_'))
+      continue;
+    const size_t nameStart = at + 7;
+    const size_t open = src.find('{', nameStart);
+    const size_t close = open == std::string::npos ? open : src.find('}', open);
+    if (close == std::string::npos)
+      break;
+    out[std::string(wgsl_trim(std::string_view(src).substr(nameStart, open - nameStart)))] =
+        wgsl_fields(std::string_view(src).substr(open + 1, close - open - 1));
+  }
+  return out;
+}
+
+uint32_t round_up(uint32_t v, uint32_t a) { return (v + a - 1) / a * a; }
+
+// array<T, N> -> T, N
+bool wgsl_array(std::string_view type, std::string& elem, uint32_t& count) {
+  if (!type.starts_with("array<") || !type.ends_with(">"))
+    return false;
+  const auto inner = type.substr(6, type.size() - 7);
+  const auto comma = inner.rfind(',');
+  if (comma == std::string_view::npos)
+    return false;
+  elem = std::string(wgsl_trim(inner.substr(0, comma)));
+  count = static_cast<uint32_t>(std::stoul(std::string(wgsl_trim(inner.substr(comma + 1)))));
+  return true;
+}
+
+WgslLayout wgsl_layout(const std::string& type, const WgslStructs& structs);
+
+// Field offsets of a struct in the uniform address space, and its layout.
+WgslLayout wgsl_struct_layout(const std::vector<WgslField>& fields, const WgslStructs& structs,
+                              std::vector<uint32_t>* offsets = nullptr) {
+  uint32_t off = 0, align = 16;
+  for (const auto& f : fields) {
+    const auto l = wgsl_layout(f.type, structs);
+    off = round_up(off, l.align);
+    if (offsets != nullptr)
+      offsets->push_back(off);
+    off += l.size;
+    align = std::max(align, l.align);
+  }
+  return {align, round_up(off, align)};
+}
+
+WgslLayout wgsl_layout(const std::string& type, const WgslStructs& structs) {
+  if (type == "f32" || type == "u32" || type == "i32")
+    return {4, 4};
+  if (type == "vec2f" || type == "vec2u" || type == "vec2i")
+    return {8, 8};
+  if (type == "vec3f" || type == "vec3u" || type == "vec3i")
+    return {16, 12};
+  if (type == "vec4f" || type == "vec4u" || type == "vec4i")
+    return {16, 16};
+  if (type.size() == 7 && type.starts_with("mat") && type[4] == 'x' && type[6] == 'f') {
+    const uint32_t cols = type[3] - '0', rows = type[5] - '0';
+    const auto col = wgsl_layout(fmt::format("vec{}f", rows), structs);
+    return {col.align, cols * round_up(col.size, col.align)};
+  }
+  std::string elem;
+  uint32_t count = 0;
+  if (wgsl_array(type, elem, count)) {
+    const auto e = wgsl_layout(elem, structs);
+    const uint32_t align = std::max(e.align, 16u);
+    return {align, round_up(e.size, align) * count};
+  }
+  if (const auto it = structs.find(type); it != structs.end())
+    return wgsl_struct_layout(it->second, structs);
+  Log.warn("Bindless batch shader: unknown uniform type {}", type);
+  return {16, 16};
+}
+
+std::string wgsl_mangle(std::string_view type) {
+  std::string out;
+  for (const char c : type)
+    out += std::isalnum(static_cast<unsigned char>(c)) ? c : '_';
+  return out;
+}
+
+// The loader `xr_ld_<type>(word) -> type` (and those it needs) into `fns`.
+std::string wgsl_loader(const std::string& type, const WgslStructs& structs,
+                        std::unordered_map<std::string, std::string>& fns) {
+  const std::string name = "xr_ld_" + wgsl_mangle(type);
+  if (fns.contains(name))
+    return name;
+  fns[name] = {}; // reserve against recursion
+  std::string body;
+  const auto words = [](uint32_t n, std::string_view base) {
+    std::string w;
+    for (uint32_t i = 0; i < n; ++i)
+      w += fmt::format("{}xr_ubufs[{} + {}u]", i ? ", " : "", base, i);
+    return w;
+  };
+  if (type == "u32")
+    body = "return xr_ubufs[w];";
+  else if (type == "f32" || type == "i32")
+    body = fmt::format("return bitcast<{}>(xr_ubufs[w]);", type);
+  else if (type.size() == 5 && type.starts_with("vec")) {
+    const uint32_t n = type[3] - '0';
+    const char k = type[4];
+    body = k == 'u' ? fmt::format("return vec{}u({});", n, words(n, "w"))
+                    : fmt::format("return bitcast<{}>(vec{}u({}));", type, n, words(n, "w"));
+  } else if (type.size() == 7 && type.starts_with("mat")) {
+    const uint32_t cols = type[3] - '0', rows = type[5] - '0';
+    const std::string colType = fmt::format("vec{}f", rows);
+    const auto col = wgsl_layout(colType, structs);
+    const uint32_t stride = round_up(col.size, col.align) / 4;
+    const auto colFn = wgsl_loader(colType, structs, fns);
+    std::string args;
+    for (uint32_t c = 0; c < cols; ++c)
+      args += fmt::format("{}{}(w + {}u)", c ? ", " : "", colFn, c * stride);
+    body = fmt::format("return {}({});", type, args);
+  } else {
+    std::string elem;
+    uint32_t count = 0;
+    if (wgsl_array(type, elem, count)) {
+      const auto e = wgsl_layout(elem, structs);
+      const uint32_t stride = round_up(e.size, std::max(e.align, 16u)) / 4;
+      const auto elemFn = wgsl_loader(elem, structs, fns);
+      std::string args;
+      for (uint32_t i = 0; i < count; ++i)
+        args += fmt::format("{}{}(w + {}u)", i ? ", " : "", elemFn, i * stride);
+      body = fmt::format("return {}({});", type, args);
+    } else if (const auto it = structs.find(type); it != structs.end()) {
+      std::vector<uint32_t> offsets;
+      wgsl_struct_layout(it->second, structs, &offsets);
+      std::string args;
+      for (size_t i = 0; i < it->second.size(); ++i)
+        args += fmt::format("{}{}(w + {}u)", i ? ", " : "", wgsl_loader(it->second[i].type, structs, fns),
+                            offsets[i] / 4);
+      body = fmt::format("return {}({});", type, args);
+    } else {
+      body = fmt::format("return {}();", type);
+    }
+  }
+  fns[name] = fmt::format("\nfn {}(w: u32) -> {} {{ {} }}", name, type, body);
+  return name;
+}
+
+bool ident_char(char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }
+
+void bindless_batch_rewrite(std::string& src) {
+  const auto structs = wgsl_structs(src);
+  const auto uniformIt = structs.find("Uniform");
+  if (uniformIt == structs.end()) {
+    Log.warn("Bindless batch shader: no Uniform struct");
+    return;
+  }
+  const auto& fields = uniformIt->second;
+  std::vector<uint32_t> offsets;
+  wgsl_struct_layout(fields, structs, &offsets);
+  std::unordered_map<std::string, std::string> fns;
+
+  // 1. Every ubuf.field (and ubuf.array[index]) from the draw's own uniform.
+  for (size_t at = src.find("ubuf."); at != std::string::npos; at = src.find("ubuf.", at)) {
+    if (at > 0 && ident_char(src[at - 1])) {
+      at += 5;
+      continue;
+    }
+    size_t end = at + 5;
+    while (end < src.size() && ident_char(src[end]))
+      ++end;
+    const std::string name = src.substr(at + 5, end - at - 5);
+    size_t f = 0;
+    while (f < fields.size() && fields[f].name != name)
+      ++f;
+    if (f == fields.size()) {
+      Log.warn("Bindless batch shader: ubuf.{} not in Uniform", name);
+      at = end;
+      continue;
+    }
+    std::string elem;
+    uint32_t count = 0;
+    std::string to;
+    if (end < src.size() && src[end] == '[' && wgsl_array(fields[f].type, elem, count)) {
+      size_t depth = 1, close = end + 1;
+      for (; close < src.size() && depth > 0; ++close)
+        depth += src[close] == '[' ? 1 : src[close] == ']' ? -1 : 0;
+      const std::string index = src.substr(end + 1, close - 1 - (end + 1));
+      const auto e = wgsl_layout(elem, structs);
+      const uint32_t stride = round_up(e.size, std::max(e.align, 16u)) / 4;
+      to = fmt::format("{}(xr_uword + {}u + u32({}) * {}u)", wgsl_loader(elem, structs, fns), offsets[f] / 4, index,
+                       stride);
+      end = close;
+    } else {
+      to = fmt::format("{}(xr_uword + {}u)", wgsl_loader(fields[f].type, structs, fns), offsets[f] / 4);
+    }
+    src.replace(at, end - at, to);
+    at += to.size();
+  }
+
+  // 2. The draw's record and uniform for the fragment stage (flat).
+  {
+    const std::string head = "struct VertexOutput {";
+    const auto v0 = src.find(head);
+    const auto v1 = v0 == std::string::npos ? v0 : src.find("};", v0);
+    const auto vsAt = src.find("fn vs_main(");
+    const auto retAt = vsAt == std::string::npos ? vsAt : src.find("return out;", vsAt);
+    const auto fsAt = src.find("fn fs_main(");
+    const auto fogAt = src.find("\n    imm.fog_range_base = xr_bimm.fog_range_base;");
+    const auto uwordDecl = src.find("\nvar<private> xr_uword: u32;");
+    if (v1 == std::string::npos || retAt == std::string::npos || fsAt == std::string::npos ||
+        fogAt == std::string::npos || uwordDecl == std::string::npos) {
+      Log.warn("Bindless batch shader: anchors missing");
+      return;
+    }
+    // Edits from the end back, so earlier anchors stay put.
+    src.replace(fogAt, std::string_view("\n    imm.fog_range_base = xr_bimm.fog_range_base;").size(),
+                "\n    xr_rec = in.xr_ids.x;\n    xr_uword = in.xr_ids.y;\n    imm.fog_range_base = xr_batch[xr_rec + 2u];");
+    src.insert(retAt, "out.xr_ids = vec2u(xr_r, xr_uword);\n    ");
+    int next = 0;
+    for (size_t a = src.find("@location(", v0); a != std::string::npos && a < v1; a = src.find("@location(", a + 1))
+      next = std::max(next, std::atoi(src.c_str() + a + 10) + 1);
+    src.insert(v1, fmt::format("    @location({}) @interpolate(flat) xr_ids: vec2u,\n", next));
+    src.insert(uwordDecl + std::string_view("\nvar<private> xr_uword: u32;").size(), "\nvar<private> xr_rec: u32;");
+  }
+
+  // 3. Textures and samplers from the resource table, by the record's slots.
+  for (int i = 0; i < 8; ++i) {
+    const std::string decl = fmt::format("\n@group(2) @binding({1})\nvar tex{0}: texture_2d<f32>;\n"
+                                         "@group(2) @binding({2})\nvar tex{0}_samp: sampler;",
+                                         i, i * 2, i * 2 + 1);
+    if (const auto d = src.find(decl); d != std::string::npos)
+      src.erase(d, decl.size());
+  }
+  for (size_t at = src.find("tex"); at != std::string::npos; at = src.find("tex", at)) {
+    if ((at > 0 && ident_char(src[at - 1])) || at + 3 >= src.size() || !std::isdigit(static_cast<unsigned char>(src[at + 3]))) {
+      at += 3;
+      continue;
+    }
+    const int i = src[at + 3] - '0';
+    size_t end = at + 4;
+    std::string to;
+    if (src.compare(end, 5, "_samp") == 0 && (end + 5 >= src.size() || !ident_char(src[end + 5]))) {
+      to = fmt::format("getResource<sampler>(xr_batch[xr_rec + {}u])", 25 + i);
+      end += 5;
+    } else if (end >= src.size() || !ident_char(src[end])) {
+      to = fmt::format("getResource<texture_2d<f32>>(xr_batch[xr_rec + {}u])", 17 + i);
+    } else {
+      at = end;
+      continue;
+    }
+    src.replace(at, end - at, to);
+    at += to.size();
+  }
+
+  std::string loaders;
+  for (const auto& [name, fn] : fns)
+    loaders += fn;
+  src += loaders;
+  src.insert(0, "enable chromium_experimental_resource_table;\n");
+}
+#endif
 } // namespace
 
 std::string build_shader_source(const ShaderConfig& config, uint32_t normalAttachment, uint32_t viewCount,
-                                bool softClip, uint32_t motion, bool batch) noexcept {
+                                bool softClip, uint32_t motion, uint32_t batch) noexcept {
   ZoneScoped;
   const auto hash = xxh3_hash(normalAttachment, xxh3_hash(config));
   const auto info = build_shader_info(config);
@@ -2448,6 +2752,20 @@ fn fs_main(in: VertexOutput) -> {10} {{{6}{5}{11}
         at += to.size();
       }
     }
+    if (multiview && batch == 2 && motion == 0 && config.lineMode == 0) {
+      bindless_batch_rewrite(shaderSource);
+      // AURORA_XR_DUMP_BINDLESS_WGSL=<dir>: the first 20 of these shaders,
+      // to read what a failed pipeline was given.
+      static const char* dumpDir = std::getenv("AURORA_XR_DUMP_BINDLESS_WGSL");
+      static std::atomic<int> dumped{0};
+      if (dumpDir != nullptr && dumped.fetch_add(1) < 20) {
+        const std::string path = fmt::format("{}/bindless_{:x}.wgsl", dumpDir, hash);
+        if (FILE* f = std::fopen(path.c_str(), "w")) {
+          std::fwrite(shaderSource.data(), 1, shaderSource.size(), f);
+          std::fclose(f);
+        }
+      }
+    }
   }
 #endif
 #ifdef __EMSCRIPTEN__
@@ -2479,7 +2797,7 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
   if (auto it = modules.find(hash); it != modules.end()) return it->second;
 #endif
   const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip != 0,
-                                                 layout.xrMotion, layout.xrBatch != 0);
+                                                 layout.xrMotion, layout.xrBatch);
   wgpu::ShaderSourceWGSL wgslDescriptor{};
   wgslDescriptor.code = shaderSource.c_str();
   const auto label = fmt::format("GX Shader {:x}", hash);

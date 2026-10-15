@@ -17,6 +17,7 @@
 
 #include "../internal.hpp"
 
+#include <absl/container/flat_hash_map.h>
 #include <tracy/Tracy.hpp>
 
 namespace aurora::gx {
@@ -296,9 +297,84 @@ struct XrBatcher {
   // buckets too, emitted when anything else comes (blended, depth-test-off,
   // alpha-tested, decal) or at a flush; everything else keeps its order.
   bool eyeSorting = false;
+  // Bindless eye batches (gfx::xr_bindless): draws join across textures and
+  // uniforms; each record carries its draw's texture and sampler slots in
+  // the resource table (sBindless), bound once per pass.
+  bool bindless = false;
+  bool tableBound = false;
   std::vector<Bucket> buckets;
   size_t bucketsUsed = 0;
 } sXrBatch;
+
+// The resource table bindless eye batches sample through (render worker).
+// A texture view or sampler gets a slot when a batched draw first uses it and
+// keeps it while used; one unused for a few seconds is removed (Dawn reuses
+// the slot only once the GPU is done with it). The table holds a reference
+// to each, so a handle in `slots` can't be a dead object's reused address.
+struct BindlessTable {
+  static constexpr uint32_t kSize = 8192;
+  static constexpr uint64_t kKeepFrames = 240, kSweepEvery = 120;
+  wgpu::ResourceTable table;
+  struct Entry {
+    uint32_t slot;
+    uint64_t lastFrame;
+  };
+  absl::flat_hash_map<const void*, Entry> slots;
+  uint64_t frame = 0, lastSweep = 0;
+
+  void begin_frame(uint64_t frameId) {
+    if (!table) {
+      const wgpu::ResourceTableDescriptor desc{.label = "XR bindless eye batches", .size = kSize};
+      table = webgpu::g_device.CreateResourceTable(&desc);
+    }
+    frame = frameId;
+    if (frame - lastSweep < kSweepEvery)
+      return;
+    lastSweep = frame;
+    for (auto it = slots.begin(); it != slots.end();) {
+      if (frame - it->second.lastFrame > kKeepFrames) {
+        table.Remove(it->second.slot);
+        slots.erase(it++);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  // The slot of a view or sampler (UINT32_MAX: the table is full).
+  uint32_t slot(const void* handle, bool sampler) {
+    if (const auto it = slots.find(handle); it != slots.end()) {
+      it->second.lastFrame = frame;
+      return it->second.slot;
+    }
+    wgpu::BindingResource res{};
+    if (sampler)
+      res.sampler = wgpu::Sampler(static_cast<WGPUSampler>(const_cast<void*>(handle)));
+    else
+      res.textureView = wgpu::TextureView(static_cast<WGPUTextureView>(const_cast<void*>(handle)));
+    const uint32_t s = table.Insert(&res);
+    if (s == wgpu::kInvalidBinding)
+      return UINT32_MAX;
+    slots.emplace(handle, Entry{s, frame});
+    return s;
+  }
+} sBindless;
+
+// A draw's 8 texture and 8 sampler slots (false: the table is full).
+bool bindless_slots(const DrawData& d, uint32_t* out) {
+  gfx::BindGroupResources res;
+  if (!d.bindGroups.textureBindGroup || !gfx::bind_group_resources(d.bindGroups.textureBindGroup, res))
+    res = {};
+  for (uint32_t i = 0; i < 8; ++i) {
+    const WGPUTextureView view = res.views[i * 2] != nullptr ? res.views[i * 2] : empty_texture_view();
+    const WGPUSampler sampler = res.samplers[i * 2 + 1] != nullptr ? res.samplers[i * 2 + 1] : empty_sampler();
+    out[i] = sBindless.slot(view, false);
+    out[8 + i] = sBindless.slot(sampler, true);
+    if (out[i] == UINT32_MAX || out[8 + i] == UINT32_MAX)
+      return false;
+  }
+  return true;
+}
 
 gfx::PipelineRef batch_pipeline(const DrawData& d) {
   return sXrBatch.motion ? d.xrMotionBatchPipeline : d.xrBatchPipeline;
@@ -323,6 +399,9 @@ bool compatible(const DrawData& first, const DrawData& d) {
     return false;
   if (sXrBatch.motion && !d.xrMotionMaterial)
     return true;
+  // Bindless: textures, uniform and fog are the draw's own (its record).
+  if (!sXrBatch.motion && sXrBatch.bindless)
+    return d.dstAlpha == first.dstAlpha;
   // AURORA_XR_BATCH_IGNORE_TEXTURES=1 (a measurement: wrong textures and
   // texture sizes): eye draws join regardless of their textures and uniform,
   // the GPU time bindless batching could save at most.
@@ -355,7 +434,20 @@ void emit_batch(const wgpu::RenderPassEncoder& pass) {
   auto& b = sXrBatch;
   const auto& first = *b.members.front();
   const auto n = static_cast<uint32_t>(b.members.size());
-  constexpr uint32_t kRecordWords = 17;
+  // Bindless records add the draw's texture slots (17-24) and sampler slots
+  // (25-32).
+  const uint32_t kRecordWords = b.bindless ? 33 : 17;
+  static std::vector<uint32_t> slots;
+  if (b.bindless) {
+    slots.resize(size_t{n} * 16);
+    for (uint32_t i = 0; i < n; ++i) {
+      if (!bindless_slots(*b.members[i], slots.data() + size_t{i} * 16)) {
+        for (const DrawData* d : b.members)
+          render_direct(*d, pass);
+        return;
+      }
+    }
+  }
   uint64_t idxOffset = 0, tableOffset = 0;
   auto* idx = reinterpret_cast<uint32_t*>(slot_alloc(uint64_t{b.memberIndices} * 4, idxOffset));
   auto* table = idx != nullptr ? reinterpret_cast<uint32_t*>(slot_alloc(uint64_t{n} * (2 + kRecordWords) * 4, tableOffset))
@@ -378,6 +470,8 @@ void emit_batch(const wgpu::RenderPassEncoder& pass) {
     if (b.motion && gfx::xr_motion_zero_prev())
       rec[3] = 0; // xrPrevMtx
     rec[16] = d.uniformRange.offset / 4;
+    if (b.bindless)
+      std::memcpy(rec + 17, slots.data() + size_t{i} * 16, 16 * sizeof(uint32_t));
     table[i * 2] = vbase;
     table[i * 2 + 1] = tableWord + n * 2 + i * kRecordWords;
     if (d.indexCount == 0) {
@@ -411,6 +505,10 @@ void emit_batch(const wgpu::RenderPassEncoder& pass) {
     uint32_t table, count, fogRangeBase, pad;
   } bimm{tableWord, n, first.immediateData.fogRangeBase, 0};
   pass.SetImmediates(0, &bimm, sizeof(bimm));
+  if (b.bindless && !b.tableBound) {
+    pass.SetResourceTable(sBindless.table);
+    b.tableBound = true;
+  }
   const std::array offsets{first.uniformRange.offset};
   pass.SetBindGroup(1, resources.uniformBindGroup, offsets.size(), offsets.data());
   if (first.bindGroups.textureBindGroup)
@@ -444,6 +542,10 @@ void xr_batch_begin(const gfx::detail::FramePacket& frame, bool multiview, bool 
   }();
   b.sorting = b.active && motion && sort;
   b.eyeSorting = b.active && !motion && gfx::xr_eye_sort();
+  b.bindless = b.active && !motion && gfx::xr_bindless();
+  b.tableBound = false;
+  if (b.bindless)
+    sBindless.begin_frame(frame.frameId);
   b.bucketsUsed = 0;
 }
 

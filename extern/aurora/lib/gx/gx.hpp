@@ -603,9 +603,13 @@ bool take_browser_pipeline(gfx::PipelineRef ref, wgpu::RenderPipeline& pipeline)
 #endif
 std::string build_shader_source(const ShaderConfig& config, uint32_t normalAttachment = UINT32_MAX,
                                 uint32_t viewCount = 1, bool softClip = false,
-                                uint32_t motion = 0, bool batch = false) noexcept;
+                                uint32_t motion = 0, uint32_t batch = 0) noexcept;
 wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTargetLayout& layout) noexcept;
 GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept;
+// What a texture bind group binds where a texture map is unused (bindless
+// batching fills a draw's empty slots with them).
+WGPUTextureView empty_texture_view() noexcept;
+WGPUSampler empty_sampler() noexcept;
 
 u8 comp_type_size(GXAttr attr, GXCompType type) noexcept;
 u8 comp_cnt_count(GXAttr attr, GXCompCnt cnt) noexcept;

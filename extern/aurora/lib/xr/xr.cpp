@@ -6118,6 +6118,12 @@ void add_required_features(const wgpu::Adapter& adapter, std::vector<wgpu::Featu
   // different textures could join if they named them in Dawn's resource table.
   Log.info("Dawn resource table (bindless textures): {}",
            adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) ? "offered" : "not offered");
+  // AURORA_XR_BINDLESS=1: eye batches sample through it (gx pipeline.cpp).
+  if (env_flag("AURORA_XR_BINDLESS", false) &&
+      adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) &&
+      std::find(features.begin(), features.end(), wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) ==
+          features.end())
+    features.push_back(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable);
   // Both eyes in one pass (Dawn fork multiview).
   if (adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalMultiview) &&
       std::find(features.begin(), features.end(), wgpu::FeatureName::ChromiumExperimentalMultiview) == features.end())
@@ -6171,6 +6177,9 @@ wgpu::Texture begin_frame(uint32_t width, uint32_t height) noexcept {
     B.queueFamily = h.queueFamilyIndex;
     B.queueIndex = 1;
     B.queue = dawn::native::vulkan::GetExtraQueue(webgpu::g_device.Get(), 0);
+    gfx::set_xr_bindless(env_flag("AURORA_XR_BINDLESS", false) &&
+                         webgpu::g_device.HasFeature(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable));
+    Log.info("Bindless eye batching: {}", gfx::xr_bindless() ? "on" : "off");
     {
       // What the device's descriptor indexing allows, for bindless batching
       // (Dawn's resource table asks 65536 + 1000 update-after-bind images

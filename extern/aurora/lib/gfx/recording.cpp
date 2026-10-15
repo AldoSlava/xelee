@@ -1465,6 +1465,13 @@ std::atomic<bool> g_xrEyeSort{false};
 } // namespace
 
 void set_xr_eye_sort(bool on) noexcept { g_xrEyeSort.store(on, std::memory_order_relaxed); }
+
+namespace {
+std::atomic<bool> g_xrBindless{false};
+} // namespace
+
+void set_xr_bindless(bool on) noexcept { g_xrBindless.store(on, std::memory_order_relaxed); }
+bool xr_bindless() noexcept { return g_xrBindless.load(std::memory_order_relaxed); }
 bool xr_eye_sort() noexcept { return g_xrEyeSort.load(std::memory_order_relaxed); }
 uint32_t xr_motion_classes() noexcept { return g_xrMotionClasses.load(std::memory_order_relaxed); }
 

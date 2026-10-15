@@ -170,6 +170,11 @@ bool xr_motion_zero_prev() noexcept;
 // AURORA_XR_EYE_SORT; settable live from lib/xr's tweak file).
 void set_xr_eye_sort(bool on) noexcept;
 bool xr_eye_sort() noexcept;
+// Bindless eye batching (AURORA_XR_BINDLESS): the device has Dawn's resource
+// table and the eye replay's batched draws sample through it, so draws with
+// different textures and uniforms batch. Set once at XR setup.
+void set_xr_bindless(bool on) noexcept;
+bool xr_bindless() noexcept;
 // Render worker: encode_xr_replay is replaying with a view mask.
 bool xr_multiview_replay() noexcept;
 // Render worker: ... and into the motion vectors (gx::DrawData::xrMotionPipeline).

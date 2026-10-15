@@ -562,14 +562,16 @@ void initialize() {
         },
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
         // XR batching: the batch buffer, and the uniform pool as storage
+        // (the fragment stage reads its draw's record and uniform when
+        // batching is bindless)
         wgpu::BindGroupLayoutEntry{
             .binding = 2,
-            .visibility = wgpu::ShaderStage::Vertex,
+            .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
             .buffer = wgpu::BufferBindingLayout{.type = wgpu::BufferBindingType::ReadOnlyStorage},
         },
         wgpu::BindGroupLayoutEntry{
             .binding = 3,
-            .visibility = wgpu::ShaderStage::Vertex,
+            .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
             .buffer = wgpu::BufferBindingLayout{.type = wgpu::BufferBindingType::ReadOnlyStorage},
         },
 #endif

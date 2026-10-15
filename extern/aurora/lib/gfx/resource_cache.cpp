@@ -37,6 +37,7 @@ constexpr Module Log{"aurora::gfx"};
 struct CachedBindGroup {
   wgpu::BindGroup bindGroup;
   uint32_t lastUsedFrame = 0;
+  BindGroupResources resources;
 };
 
 constexpr uint32_t BindGroupCacheRetainFrames = 32;
@@ -87,10 +88,18 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
   const auto it = g_cachedBindGroups.find(id);
   if (it == g_cachedBindGroups.end()) {
     auto bindGroup = wgpu::BindGroup::Acquire(wgpuDeviceCreateBindGroup(webgpu::g_device.Get(), &descriptor));
-    g_cachedBindGroups.emplace(id, CachedBindGroup{
-                                       .bindGroup = std::move(bindGroup),
-                                       .lastUsedFrame = current_frame(),
-                                   });
+    CachedBindGroup entry{
+        .bindGroup = std::move(bindGroup),
+        .lastUsedFrame = current_frame(),
+    };
+    for (size_t i = 0; i < descriptor.entryCount; ++i) {
+      const auto& e = descriptor.entries[i];
+      if (e.binding < MaxBindGroupResources) {
+        entry.resources.views[e.binding] = e.textureView;
+        entry.resources.samplers[e.binding] = e.sampler;
+      }
+    }
+    g_cachedBindGroups.emplace(id, std::move(entry));
   } else {
     it->second.lastUsedFrame = current_frame();
   }
@@ -102,6 +111,15 @@ wgpu::BindGroup find_bind_group(BindGroupRef id) {
   const auto it = g_cachedBindGroups.find(id);
   CHECK(it != g_cachedBindGroups.end(), "get_bind_group: failed to locate {:x}", id);
   return it->second.bindGroup;
+}
+
+bool bind_group_resources(BindGroupRef id, BindGroupResources& out) {
+  std::lock_guard lock{g_bindGroupCacheMutex};
+  const auto it = g_cachedBindGroups.find(id);
+  if (it == g_cachedBindGroups.end())
+    return false;
+  out = it->second.resources;
+  return true;
 }
 
 wgpu::Sampler sampler_ref(const wgpu::SamplerDescriptor& descriptor) {

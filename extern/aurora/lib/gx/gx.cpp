@@ -51,6 +51,35 @@ absl::flat_hash_map<u32, std::pair<wgpu::BindGroupLayout, wgpu::BindGroupLayout>
 wgpu::BindGroupLayout sTextureBindGroupLayout;
 wgpu::BindGroupLayout sSamplerBindGroupLayout;
 wgpu::PipelineLayout sPipelineLayout;
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+// The GX layout with Dawn's resource table, for bindless eye batches
+// (RenderTargetLayout::xrBatch == 2); made on first use.
+wgpu::PipelineLayout sBindlessPipelineLayout;
+std::mutex sBindlessPipelineLayoutMutex;
+
+const wgpu::PipelineLayout& bindless_pipeline_layout() {
+  std::lock_guard lock{sBindlessPipelineLayoutMutex};
+  if (!sBindlessPipelineLayout) {
+    const std::array layouts{
+        gfx::detail::resources().staticBindGroupLayout,
+        gfx::detail::resources().uniformBindGroupLayout,
+        sTextureBindGroupLayout,
+        g_xrEyeBindGroupLayout,
+    };
+    wgpu::PipelineLayoutResourceTable table{};
+    table.usesResourceTable = true;
+    const wgpu::PipelineLayoutDescriptor desc{
+        .nextInChain = &table,
+        .label = "GX Bindless Pipeline Layout",
+        .bindGroupLayoutCount = layouts.size(),
+        .bindGroupLayouts = layouts.data(),
+        .immediateSize = sizeof(DrawImmediateData),
+    };
+    sBindlessPipelineLayout = g_device.CreatePipelineLayout(&desc);
+  }
+  return sBindlessPipelineLayout;
+}
+#endif
 #ifdef __EMSCRIPTEN__
 // Browser rendering and these callbacks share one realm. Keep pending results
 // separate until the pipeline cache can bind a fully compiled pipeline.
@@ -468,7 +497,11 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
       .nextInChain = layout.viewCount > 1 ? &multiview : nullptr,
 #endif
       .label = label,
+#if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+      .layout = layout.xrBatch == 2 ? bindless_pipeline_layout() : sPipelineLayout,
+#else
       .layout = sPipelineLayout,
+#endif
       .vertex =
           {
               .module = shader,
@@ -630,6 +663,9 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
   };
 }
 
+WGPUTextureView empty_texture_view() noexcept { return sEmptyTextureView.Get(); }
+WGPUSampler empty_sampler() noexcept { return sEmptySampler.Get(); }
+
 GXBindGroups build_bind_groups(const ShaderInfo& info) noexcept {
   ZoneScoped;
 
@@ -783,6 +819,7 @@ void initialize() noexcept {
 
 void shutdown() noexcept {
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
+  sBindlessPipelineLayout = {};
   g_xrDisabledBindGroup = {};
   g_xrEyeBindGroupLayout = {};
 #endif
