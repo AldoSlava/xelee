@@ -6134,6 +6134,17 @@ void add_required_features(const wgpu::Adapter& adapter, std::vector<wgpu::Featu
       std::find(features.begin(), features.end(), wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) ==
           features.end())
     features.push_back(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable);
+  // Dawn's API is only safe from several threads with implicit device
+  // synchronization, and XR uses it from the render, XR and pipeline-compile
+  // threads. Without it a compile on the worker raced the render thread:
+  // Tint emitted invalid SPIR-V, Adreno's compiler crashed, a shader module's
+  // Tint program was freed under it (2026-10-15, cold caches, bindless on).
+  // gx build_pipeline then compiles asynchronously so the device lock isn't
+  // held through a 30-700 ms compile. AURORA_XR_DEVICE_SYNC=0 turns it off.
+  if (env_flag("AURORA_XR_DEVICE_SYNC", true) &&
+      adapter.HasFeature(wgpu::FeatureName::ImplicitDeviceSynchronization) &&
+      std::find(features.begin(), features.end(), wgpu::FeatureName::ImplicitDeviceSynchronization) == features.end())
+    features.push_back(wgpu::FeatureName::ImplicitDeviceSynchronization);
   // Both eyes in one pass (Dawn fork multiview).
   if (adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalMultiview) &&
       std::find(features.begin(), features.end(), wgpu::FeatureName::ChromiumExperimentalMultiview) == features.end())

@@ -530,6 +530,25 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
       });
   return {};
 #else
+  // With implicit device synchronization (XR, xr.cpp) a synchronous create
+  // holds the device lock through the whole compile and every other thread's
+  // Dawn call waits on it; the async one compiles on Dawn's worker without it.
+  // This thread still waits for the result.
+  static const bool deviceSync = g_device.HasFeature(wgpu::FeatureName::ImplicitDeviceSynchronization);
+  if (deviceSync) {
+    wgpu::RenderPipeline result;
+    const wgpu::Future future = g_device.CreateRenderPipelineAsync(
+        &descriptor, wgpu::CallbackMode::WaitAnyOnly,
+        [&result](wgpu::CreatePipelineAsyncStatus status, wgpu::RenderPipeline pipeline, wgpu::StringView message) {
+          if (status == wgpu::CreatePipelineAsyncStatus::Success) {
+            result = std::move(pipeline);
+          } else {
+            Log.fatal("Pipeline creation failed: {}", std::string_view{message});
+          }
+        });
+    webgpu::g_instance.WaitAny(future, UINT64_MAX);
+    return result;
+  }
   return g_device.CreateRenderPipeline(&descriptor);
 #endif
 }
