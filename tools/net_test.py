@@ -256,17 +256,50 @@ WORKOUT = [("Right", 240), ("X", 100), ("Left", 240), ("C", 100), ("Right+X", 17
            ("Z", 100), ("Up", 140), ("Down", 140)]
 
 
+# --combat: the fighters close in and trade hits all match, so hurtboxes and
+# hitboxes are exercised every few frames (WORKOUT mirrors both players, who
+# then rarely meet). A starts on the left and walks right; B gets the mirror
+# image. Holds differ a little per side so the two inputs do not stay in step.
+COMBAT = [("Right", 160), ("X", 60), ("Right+X", 110), ("Up+X", 90), ("Down+X", 90),
+          ("X", 60), ("Z", 90), ("Left", 70), ("Right+Z", 120), ("C", 80), ("Up", 90)]
+
+
+def mirror(key):
+    return key.replace("Right", "\0").replace("Left", "Right").replace("\0", "Left")
+
+
 class Workout:
     """Cycles WORKOUT through both key fifos until done(). Holds are wall-clock
     (the exact frame count does not matter here, only that the input keeps
     changing) so the thread never has to read the logs."""
 
-    def __init__(self, insts):
+    def __init__(self, insts, combat=False):
         self.insts = insts
         self.n = 0
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        if combat:
+            self._threads = [threading.Thread(target=self._combat, args=(inst, side), daemon=True)
+                             for side, inst in enumerate(insts)]
+        else:
+            self._threads = [threading.Thread(target=self._run, daemon=True)]
+        self._thread = self._threads[0]
+        for t in self._threads:
+            t.start()
+
+    def _combat(self, inst, side):
+        i = 0
+        while not self._stop.is_set():
+            key, ms = COMBAT[i % len(COMBAT)]
+            i += 1
+            key = mirror(key) if side else key
+            ms += 13 * side + (i % 3) * 7
+            if inst.proc.poll() is None:
+                try:
+                    inst.key(f"{key} {ms}")
+                except Exception:
+                    return
+            self.n += 1
+            self._stop.wait(ms / 1000 + 0.15)
 
     def _run(self):
         i = 0
@@ -286,7 +319,8 @@ class Workout:
         """Stop and wait for the last line to be written, so a drive step that
         follows has the fifo to itself."""
         self._stop.set()
-        self._thread.join(10)
+        for t in self._threads:
+            t.join(10)
         return self.n
 
 
@@ -1217,6 +1251,8 @@ def parse_args(argv=None):
     ap.add_argument("--stall", type=float, default=0, metavar="SECONDS",
                     help="SIGSTOP B mid-match for SECONDS, then SIGCONT: inside the reconnect "
                          "window the session must survive, past it it must expire with status 2")
+    ap.add_argument("--combat", action="store_true",
+                    help="fighters close in and trade hits (mirrored inputs per side)")
     ap.add_argument("--state-log", action="store_true",
                     help="write per-frame state dumps to <work>/a.state and b.state")
     ap.add_argument("--cold-cache", action="store_true",
@@ -1230,6 +1266,8 @@ def parse_args(argv=None):
     ap.add_argument("--hitch", default=None, metavar="MS:EVERY",
                     help="MELEE_NET_HITCH_TEST on B: park its game thread for MS every EVERY "
                          "frames of the fight (a phone's frame freezes); A must ride them out")
+    ap.add_argument("--cpu", type=int, default=0, metavar="LEVEL",
+                    help="the direct match is two CPUs at LEVEL (1-9) fighting")
     ap.add_argument("--stage", type=int, default=None, metavar="STKIND",
                     help="MELEE_DEBUG_VS_STAGE for the direct match (3: Pokemon Stadium, "
                          "whose transformations load mid-match)")
@@ -1302,6 +1340,11 @@ def run(args):
         sim["MELEE_NET_STALL_TEST"] = f"{LOAD_STALL_FRAME}:{int(args.load_stall * 1000)}"
     if args.hitch:
         sim["MELEE_NET_HITCH_TEST"] = args.hitch  # B only: sim_a was copied above
+    if args.cpu:
+        # Two CPUs at this level fight while the workout keeps the pads (and
+        # so the predictions and rollbacks) moving underneath them.
+        sim_a["MELEE_DEBUG_VS"] = sim["MELEE_DEBUG_VS"] = "cpu2"
+        sim_a["MELEE_DEBUG_VS_CPU_LEVEL"] = sim["MELEE_DEBUG_VS_CPU_LEVEL"] = str(args.cpu)
     if args.stage is not None:
         sim_a["MELEE_DEBUG_VS_STAGE"] = sim["MELEE_DEBUG_VS_STAGE"] = str(args.stage)
         # A frozen Stadium (the launcher default on many machines) never
@@ -1383,7 +1426,7 @@ def run(args):
         if ok and not args.scenes:
             ok = wait_match((a, b))
         if ok:
-            work = Workout((a, b))  # keep both players moving for the rest of the run
+            work = Workout((a, b), args.combat)  # keep both players moving for the rest of the run
         if ok and args.fuzz:
             sys.path.insert(0, here)
             import net_fuzz
