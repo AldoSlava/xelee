@@ -182,13 +182,13 @@ button {
 #home { flex: 1; min-height: 0; display: flex; align-items: center; }
 #plates { width: 54%; max-width: 660dp; flex-shrink: 0; }
 /* Melee stacks its plates touching, staggered into a wedge that points left
- * at the middle one: these are its offsets, as shares of the column. */
+ * at the middle one; the lower half mirrors the upper. */
 #plates .plate { width: 76%; margin-bottom: -10dp; }
 #play { margin-left: 23.7%; }
 #choose { margin-left: 10.9%; }
 #verify { margin-left: 0; }
-#settings { margin-left: 8.1%; }
-#quit { margin-left: 2.8%; }
+#settings { margin-left: 10.9%; }
+#quit { margin-left: 23.7%; }
 
 #side {
     flex: 1;
@@ -297,8 +297,8 @@ button.mini.primary { border-color: #e0b030; }
 #tab-graphics { margin-left: 20%; }
 #tab-audio { margin-left: 9%; }
 #tab-cheats { margin-left: 0; }
-#tab-controls { margin-left: 7%; }
-#tab-online { margin-left: 2.4%; }
+#tab-controls { margin-left: 9%; }
+#tab-online { margin-left: 18%; }
 #back { margin-top: 22dp; margin-left: 12%; }
 
 #settings-content {
