@@ -1,5 +1,35 @@
 #include "mncharsel.h"
 
+#ifdef TARGET_PC
+#include "pc/net.h"
+#include "pc/pc.h"
+#include <stdlib.h>
+#include <string.h>
+extern bool pc_net_slippi_active(void);
+#include <melee/gm/gmonlinemode.h>
+
+/* The online CSS: Slippi's order puts it before any connection (the local
+ * player is port 1), and a session left over from the old order has one too. */
+/* The CSS's own text canvas: the online overlay's text lives in it, in the CSS
+ * world and its gx link, so the hand (a later link) draws over the text. */
+static int css_text_ctx;
+/* Slippi's "Press START to ..." prompt is up: a valid pick is made. */
+bool mnCharSel_SlippiStartReady(void);
+
+static bool cssOnline(int* local)
+{
+    if (gmOnline_SlippiFlow()) {
+        *local = 0;
+        return true;
+    }
+    if (pc_net_active() && pc_net_slippi_active()) {
+        *local = pc_net_local_player();
+        return true;
+    }
+    return false;
+}
+#endif
+
 #include <melee/ft/forward.h>
 #include <sysdolphin/baselib/forward.h>
 
@@ -419,6 +449,14 @@ void mnCharSel_8025BD30(void)
     TextKerning* kerning;
     u32 match_type;
 
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        /* The rules banner stays empty: the match's rules are fixed. The text
+         * is built in string 0x4A, so leave that one empty. */
+        css_pal_string(0x4A)[0] = 0;
+        return;
+    }
+#endif
     kerning = DP(TextKerning, HSD_SisLib_804D1124[0][37].kerning);
 
     match_type = mnCharSel_804D6CB0->match_type;
@@ -1664,6 +1702,46 @@ void mnCharSel_8025DB34(u8 arg0)
     }
 }
 
+#ifdef TARGET_PC
+/* Slippi's CSS is the one-player layout (here Event Match's, wide card and "1-P"
+ * badge) titled "MELEE": that title is the VS layout's, so the layout's own is
+ * hidden and the VS model is loaded with only its title joint showing. */
+static void cssSlippiTitle(void)
+{
+    HSD_JObj* j = NULL;
+    HSD_JObj* vs;
+    HSD_GObj* gobj;
+    int id;
+    lb_80011E24(mnCharSel_804D6CC0, &j, 0x24, -1);
+    if (j != NULL) {
+        HSD_JObjSetFlags(j, JOBJ_HIDDEN);
+    }
+    gobj = GObj_Create(4, 5, 0x80);
+    vs = HSD_JObjLoadJoint(DP(HSD_Joint, css_models->menu.joint));
+    HSD_JObjAddAnimAll(vs, DP(HSD_AnimJoint, css_models->menu.animjoint),
+                       DP(HSD_MatAnimJoint, css_models->menu.matanim_joint),
+                       DP(HSD_ShapeAnimJoint, css_models->menu.shapeanim_joint));
+    HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, vs);
+    GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 1, 0x80);
+    HSD_JObjReqAnimAll(vs, 0.0f);
+    HSD_JObjAnimAll(vs);
+    for (id = 0; id < 400; id++) {
+        j = NULL;
+        lb_80011E24(vs, &j, id, -1);
+        if (j != NULL && id != 0x24 && !(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL)) &&
+            j->u.dobj != NULL) {
+            HSD_JObjSetFlags(j, JOBJ_HIDDEN);
+        }
+    }
+    lb_80011E24(vs, &j, 0x24, -1);
+    if (j != NULL) { /* frame 0 of the title: "MELEE" */
+        HSD_ForeachAnim(j, JOBJ_TYPE, TOBJ_MASK, HSD_AObjReqAnim, AOBJ_ARG_AF, 0.0f);
+        HSD_JObjAnimAll(j);
+        HSD_ForeachAnim(j, JOBJ_TYPE, TOBJ_MASK, HSD_AObjStopAnim, AOBJ_ARG_AOV, NULL);
+    }
+}
+#endif
+
 void mnCharSel_8025EE8C(u8 idx)
 {
     float mode_frame;
@@ -2471,6 +2549,9 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
     f32 dx;
     f32 dy;
     int door;
+#ifdef TARGET_PC
+    int unused_local;
+#endif
 
     if (mnCharSel_804D6CB0->match_type == TRAINING_MODE) {
         n_doors = 2;
@@ -2972,7 +3053,13 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                     goto update_display;
                 }
 
-                if (mnCharSel_804D6CB0->match_type != 2) {
+                if (mnCharSel_804D6CB0->match_type != 2
+#ifdef TARGET_PC
+                    /* The rules bar opens the rules menu, which an online match
+                     * (fixed rules) has no use for. */
+                    && !cssOnline(&unused_local)
+#endif
+                    ) {
                     f32 cx3 = cursor->xC;
                     if (cx3 > -17.0f && cx3 < 15.0f && cursor->x10 > 22.0f) {
                         cursor->x8 = 1;
@@ -3077,6 +3164,16 @@ void mnCharSel_CursorThink(HSD_GObj* gobj)
                                 {
                                     continue;
                                 }
+#ifdef TARGET_PC
+                                /* A Slippi match is 1v1 between two humans:
+                                 * no CPU fighters, no closing a slot. */
+                                {
+                                    int unused;
+                                    if (cssOnline(&unused)) {
+                                        continue;
+                                    }
+                                }
+#endif
                                 if ((mnCharSel_803F0DFC.doors[door]
                                          .is_hold_cpu_slider |
                                      mnCharSel_803F0DFC.doors[door]
@@ -3759,6 +3856,14 @@ void fn_80262F44(HSD_GObj* gobj)
             }
         }
 
+        {
+            /* The online CSS has one human door until a match is found. */
+            int unused;
+            if (valid_count == 1 && cssOnline(&unused)) {
+                valid_count = 2;
+            }
+        }
+
         if (valid_count >= 2) {
             if (mnCharSel_804D6CB0->vs.start.rules.is_teams == 1) {
                 for (i = 0; i < (s32) (mnCharSel_804D6CF5 - 1); i++) {
@@ -3806,6 +3911,12 @@ void fn_80262F44(HSD_GObj* gobj)
         }
     }
 
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        /* Slippi replaces the READY TO FIGHT banner with its own prompt. */
+        HSD_JObjSetFlagsAll(jobj, JOBJ_HIDDEN);
+    }
+#endif
     {
         u32 p;
         u32 trigger;
@@ -4386,6 +4497,9 @@ s32 mnCharSel_802640A0(void)
     gobj->gxlink_prios = 0x1F;
     HSD_GObj_SetupProc(gobj, mn_8022BA1C, 5);
     ctx = HSD_SisLib_803A611C(0, gobj, 7, 8, 0x80, 1, 0x80, 0);
+#ifdef TARGET_PC
+    css_text_ctx = ctx;
+#endif
 
     gobj = GObj_Create(3, 4, 0x80);
     {
@@ -4447,6 +4561,11 @@ s32 mnCharSel_802640A0(void)
     HSD_JObjAnimAll(mnCharSel_804D6CC0);
     HSD_ForeachAnim(mnCharSel_804D6CC0, JOBJ_TYPE, ALL_TYPE_MASK,
                     HSD_AObjStopAnim, AOBJ_ARG_AOV, NULL);
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        cssSlippiTitle();
+    }
+#endif
 
     if (gm_IsCKindUnlocked(CKind_Luigi) == 0) {
         row_a = 2;
@@ -5488,7 +5607,201 @@ void mnCharSel_Scene_OnEnter(void* arg0)
     }
     mnCharSel_804D6CF4 = 0;
     mnCharSel_802640A0();
+#ifdef TARGET_PC
+    if (gmOnline_SlippiFlow()) {
+        mnOnlineCss_Create(css_text_ctx);
+    }
+#endif
 }
+
+#ifdef TARGET_PC
+
+/* HIDDEN does not cascade to a joint's children, so hide the whole tree. */
+static void cssHideTree(HSD_JObj* jobj)
+{
+    HSD_JObj* child;
+    if (jobj == NULL) {
+        return;
+    }
+    HSD_JObjSetFlags(jobj, JOBJ_HIDDEN);
+    for (child = jobj->child; child != NULL; child = child->next) {
+        cssHideTree(child);
+    }
+}
+
+static void cssNoRender(HSD_GObj* gobj, int pass)
+{
+}
+
+/* The hand and token procs reset their own hidden flags every frame, so stop
+ * the gobj from drawing at all. */
+static void cssHideGObj(HSD_GObj* gobj)
+{
+    if (gobj != NULL) {
+        gobj->render_cb = (GObj_RenderFunc) cssNoRender;
+    }
+}
+
+static void cssHideJoint(int id)
+{
+    HSD_JObj* jobj = NULL;
+    lb_80011E24(mnCharSel_804D6CC0, &jobj, id, -1);
+    cssHideTree(jobj);
+}
+
+/* The door's panel, nameplate and HMN/CPU labels are separate joint trees laid
+ * out at fixed strides (measured with MELEE_CSS_DUMP=1). */
+static void cssHideDoor(int door)
+{
+    CSSDoor* d = &mnCharSel_803F0DFC.doors[door];
+    u8 joints[] = { d->emblem_joint, d->costume_joint, d->team_joint,
+                    d->door_joint, d->bg_joint, d->player_indicator_joint,
+                    d->slidername_joint, d->cpuslider_joint,
+                    d->cpuslider2_joint };
+    int i;
+    for (i = 0; i < (int) ARRAY_SIZE(joints); i++) {
+        if (joints[i] != 0) {
+            cssHideJoint(joints[i]);
+        }
+    }
+    {
+        CSSTag* tag = &mnCharSel_803F0E8C[door];
+        if (tag->list_joint != 0) {
+            cssHideJoint(tag->list_joint);
+        }
+        if (tag->name_jointl != 0) {
+            cssHideJoint(tag->name_jointl);
+        }
+        if (tag->kostar_text_joint != 0) {
+            cssHideJoint(tag->kostar_text_joint);
+        }
+    }
+    cssHideJoint(132 + 8 * door);
+    cssHideJoint(61 + 6 * door);
+    cssHideJoint(87 + 6 * door);
+    cssHideJoint(112 + 5 * door);
+    cssHideJoint(41 + door);
+    cssHideJoint(46 + door);
+    cssHideJoint(51 + door);
+    cssHideJoint(56 + door);
+}
+
+/* Slippi's online CSS shows only your own player: the opponent's hand, token,
+ * character preview and door stay hidden, as do the unused ports. The picks
+ * still sync through the pads, so the match is unchanged. */
+/* Depth-first walk of a joint tree: the n-th joint, or (visit != NULL) every
+ * joint in order. For the CSS models that lb_80011E24 cannot index. */
+static HSD_JObj* cssDfs(HSD_JObj* j, int* n, int target, int depth, bool log)
+{
+    HSD_JObj* hit;
+    for (; j != NULL; j = j->next) {
+        if (log) {
+            Vec3 t;
+            HSD_JObjGetTranslation(j, &t);
+            pc_log_line("cssdfs %3d depth %d x=%7.2f y=%7.2f z=%7.2f flags=%08x dobj=%d", *n, depth,
+                        t.x, t.y, t.z, (unsigned) j->flags, !(j->flags & JOBJ_INSTANCE) && j->u.dobj != NULL);
+        }
+        if (!log && *n == target) {
+            return j;
+        }
+        (*n)++;
+        hit = cssDfs(j->child, n, target, depth + 1, log);
+        if (hit != NULL) {
+            return hit;
+        }
+    }
+    return NULL;
+}
+
+static void mnCharSel_HideOnlineRemote(void)
+{
+    int remote;
+    int local;
+    {
+        /* MELEE_CSS_HIDE=36,37,40-59: joint trees to hide, for finding which
+         * part of the CSS model is which (pair with MELEE_CSS_DUMP). */
+        const char* list = getenv("MELEE_CSS_HIDE");
+        while (list != NULL && *list) {
+            char* end;
+            long a = strtol(list, &end, 10);
+            long b = a;
+            if (end == list) {
+                break;
+            }
+            if (*end == '-') {
+                b = strtol(end + 1, &end, 10);
+            }
+            for (; a <= b; a++) {
+                int which = (int) (a / 1000); /* 1xxx: model CC4, 2xxx: CC8, 3xxx: CCC (DFS index) */
+                HSD_JObj* model = which == 1 ? mnCharSel_804D6CC4 : which == 2 ? mnCharSel_804D6CC8 :
+                                  which == 3 ? mnCharSel_804D6CCC : NULL;
+                if (which == 0) {
+                    cssHideJoint((int) a);
+                } else if (model != NULL) {
+                    int n = 0;
+                    cssHideTree(cssDfs(model, &n, (int) (a % 1000), 0, false));
+                }
+            }
+            list = *end == ',' ? end + 1 : end;
+        }
+    }
+    if (!cssOnline(&local) || mnCharSel_804D6CF5 == 1 ||
+        getenv("MELEE_CSS_SHOW_ALL"))
+    {
+        return;
+    }
+    remote = local ? 0 : 1;
+    /* Every hand and token but ours: the unused ports' hands show up at the
+     * bottom edge otherwise. */
+    {
+        int port;
+        for (port = 0; port < 4; port++) {
+            if (port == local) {
+                continue;
+            }
+            if (mnCharSel_804A0BC0[port] != NULL) {
+                cssHideGObj(mnCharSel_804A0BC0[port]->gobj);
+            }
+            if (mnCharSel_804A0BD0[port] != NULL) {
+                cssHideGObj(mnCharSel_804A0BD0[port]->gobj);
+            }
+        }
+    }
+    /* Joint 85 holds the four door bars, one mesh object each; the player's
+     * own stays, under their name, and the empty three go. */
+    {
+        HSD_JObj* bars = NULL;
+        HSD_DObj* d;
+        int n = 0;
+        lb_80011E24(mnCharSel_804D6CC0, &bars, 85, -1);
+        if (bars != NULL) {
+            for (d = HSD_JObjGetDObj(bars); d != NULL; d = d->next, n++) {
+                if (n == local) {
+                    HSD_DObjClearFlags(d, DOBJ_HIDDEN);
+                } else {
+                    HSD_DObjSetFlags(d, DOBJ_HIDDEN);
+                }
+            }
+        }
+    }
+    {
+        /* ...and no HMN/CPU tag (the player indicator): nothing to toggle. */
+        CSSDoor* d = &mnCharSel_803F0DFC.doors[local];
+        if (d->player_indicator_joint != 0) {
+            cssHideJoint(d->player_indicator_joint);
+        }
+        if (d->cpuslider_joint != 0) {
+            cssHideJoint(d->cpuslider_joint);
+        }
+        if (d->cpuslider2_joint != 0) {
+            cssHideJoint(d->cpuslider2_joint);
+        }
+    }
+    cssHideDoor(remote);
+    cssHideDoor(2);
+    cssHideDoor(3);
+}
+#endif
 
 void mnCharSel_Scene_OnFrame(void)
 {
@@ -5498,6 +5811,73 @@ void mnCharSel_Scene_OnFrame(void)
     int i;
 
     PAD_STACK(8);
+
+#ifdef TARGET_PC
+    if (mnNameNew_PcActive()) {
+        /* The keyboard is up: the CSS under it is freed and idle. */
+        mnCharSel_804D6CEC += 1;
+        return;
+    }
+    mnCharSel_HideOnlineRemote();
+    if (gmOnline_SlippiFlow()) {
+        bool leave = gmOnline_SlippiCssFrame();
+        if (gmOnline_SlippiCssLocked()) {
+            /* A search is running: the pick is locked in. */
+            memset(HSD_PadCopyStatus, 0, sizeof HSD_PadCopyStatus);
+        }
+        if (leave) {
+            mnCharSel_804D6CF6 = 1;
+            gm_801A4B60();
+            return;
+        }
+    }
+    {
+        static bool dumped;
+        if (!dumped && mnCharSel_804D6CEC == 90 && getenv("MELEE_CSS_DUMP")) {
+            int id;
+            dumped = true;
+            {
+                int dd;
+                for (dd = 0; dd < 2; dd++) {
+                    CSSDoor* dr = &mnCharSel_803F0DFC.doors[dd];
+                    pc_log_line("css door %d joints: emblem %d costume %d team %d door %d bg %d indicator %d "
+                                "slidername %d cpuslider %d cpuslider2 %d", dd, dr->emblem_joint,
+                                dr->costume_joint, dr->team_joint, dr->door_joint, dr->bg_joint,
+                                dr->player_indicator_joint, dr->slidername_joint, dr->cpuslider_joint,
+                                dr->cpuslider2_joint);
+                }
+            }
+            pc_log_line("css doors: p_kind %d %d %d %d, slot_type %d %d %d %d, x5 %d %d",
+                        mnCharSel_803F0DFC.doors[0].p_kind, mnCharSel_803F0DFC.doors[1].p_kind,
+                        mnCharSel_803F0DFC.doors[2].p_kind, mnCharSel_803F0DFC.doors[3].p_kind,
+                        mnCharSel_804D6CB0->vs.start.players[0].slot_type,
+                        mnCharSel_804D6CB0->vs.start.players[1].slot_type,
+                        mnCharSel_804D6CB0->vs.start.players[2].slot_type,
+                        mnCharSel_804D6CB0->vs.start.players[3].slot_type,
+                        mnCharSel_804A0BC0[0]->x5, mnCharSel_804A0BD0[0]->x5);
+            HSD_JObj* models[3] = { mnCharSel_804D6CC4, mnCharSel_804D6CC8, mnCharSel_804D6CCC };
+            int m;
+            for (id = 0; id < 400; id++) {
+                HSD_JObj* j = NULL;
+                lb_80011E24(mnCharSel_804D6CC0, &j, id, -1);
+                if (j != NULL) {
+                    Vec3 t;
+                    HSD_JObjGetTranslation(j, &t);
+                    pc_log_line("cssjoint %3d x=%7.2f y=%7.2f z=%7.2f flags=%08x child=%d next=%d dobj=%d",
+                                id, t.x, t.y, t.z, (unsigned) j->flags,
+                                j->child != NULL, j->next != NULL,
+                                !(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL)) &&
+                                    j->u.dobj != NULL);
+                }
+            }
+            for (m = 0; m < 3; m++) {
+                int n = 0;
+                pc_log_line("cssdfs model %d", m + 1);
+                cssDfs(models[m], &n, 0, 0, true);
+            }
+        }
+    }
+#endif
 
     mnCharSel_804D6CEC += 1;
     if (mnCharSel_804D6CF6 <= 1) {
@@ -5579,6 +5959,22 @@ void mnCharSel_Scene_OnFrame(void)
                 mnCharSel_804D6CF6 = 0;
             }
         }
+#ifdef TARGET_PC
+        if (mnCharSel_804D6CF6 == 1 && gmOnline_SlippiFlow() &&
+            gmOnline_SlippiCssStart(
+                mnCharSel_804D6CB0->vs.start.players[0].ckind,
+                mnCharSel_804D6CB0->vs.start.players[0].color))
+        {
+            /* Slippi's flow keeps the CSS up: it searches from it, or (Direct)
+             * has opened the keyboard, which holds the CSS idle (CF6 = 5). */
+            if (mnCharSel_804D6CF6 == 1) {
+                mnCharSel_804D6CF6 = 0;
+            }
+            mnCharSel_804D6CF2 = 0;
+            sfxForward();
+            break;
+        }
+#endif
         if (mnCharSel_804D6CF6 != 0) {
             gm_801A4B60();
             if (mnCharSel_804D6CF5 == 4) {
@@ -5608,6 +6004,35 @@ void mnCharSel_Scene_OnFrame(void)
     }
 }
 
+#ifdef TARGET_PC
+bool mnCharSel_SlippiStartReady(void)
+{
+    return mnCharSel_804D6CF7 != 0;
+}
+
+/* Slippi's Direct: the connect code is typed on the Name Entry screen, opened
+ * from the CSS the way it is for a nametag, and the CSS is built again when it
+ * ends (mnnamenew.c). */
+void mnCharSel_SlippiKeyboard(const char* initial, int max_len, const char* description,
+                              MnNameNewDoneFn done, MnNameNewFillFn fill, void* user)
+{
+    mnOnlineCss_Destroy();
+    mn_8022F138(1, 8);
+    HSD_SisLib_803A5E70();
+    mnNameNew_PcOpen(mnCharSel_804D6CD4, initial, max_len, false, false, description, done, fill,
+                     true, user);
+    mnCharSel_804D6CF6 = 5;
+}
+
+/* The CSS is up again after the keyboard: put the Slippi text back. */
+void mnCharSel_SlippiAfterKeyboard(void)
+{
+    if (gmOnline_SlippiFlow()) {
+        mnOnlineCss_Create(css_text_ctx);
+    }
+}
+#endif
+
 void mnCharSel_Scene_OnExit(void* unused)
 {
     int num_slots;
@@ -5615,6 +6040,9 @@ void mnCharSel_Scene_OnExit(void* unused)
     int i;
     u8 type;
 
+#ifdef TARGET_PC
+    mnOnlineCss_Destroy();
+#endif
     HSD_SisLib_803A5FBC();
     if (mnCharSel_804D6CD0 != NULL) {
         lbArchive_80016EFC(mnCharSel_804D6CD0);

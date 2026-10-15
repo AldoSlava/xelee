@@ -1,3 +1,4 @@
+#include "pc/pc.h"
 #include "lbaudio_ax.h"
 
 #include <Runtime/platform.h>
@@ -554,8 +555,19 @@ bool lbAudioAx_80023730(void)
     return AXDriverCheck();
 }
 
+#ifdef TARGET_PC
+/* The Slippi stage-placement scene (gmvs.c): a fight's scene that stays quiet,
+ * so the menu music goes on and nothing announces "Ready". */
+extern bool gm_vs_place_dummy;
+#endif
+
 static int fn_80023750(int id, int vol, int pan, int track, int channel)
 {
+#ifdef TARGET_PC
+    if (gm_vs_place_dummy) {
+        return -1;
+    }
+#endif
     vol *= 2;
     if (vol < 0) {
         vol = 0;
@@ -776,6 +788,11 @@ int lbAudioAx_80023F28(int arg0)
     if (arg0 < 0 || arg0 >= 0x62 || pc_net_resim()) {
         return true;
     }
+#ifdef TARGET_PC
+    if (gm_vs_place_dummy) {
+        return true; /* no fight music over the menu's */
+    }
+#endif
     if (!(filename = getHPSFile(arg0))) {
         return true;
     }

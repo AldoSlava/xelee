@@ -2,6 +2,9 @@
 
 #include <math.h>
 
+#include <melee/ft/ftucf.h>
+#include <pc/pc.h>
+
 #include "ftCo_0C35.h"
 #include "ftCo_Attack1.h"
 #include "ftCo_Attack100.h"
@@ -721,7 +724,11 @@ void ftCo_80093240(Fighter_GObj* gobj)
         if ((fp->input.lstick[0].x < 0 ? -fp->input.lstick[0].x
                                        : fp->input.lstick[0].x) >=
                 p_ftCommonData->sdi_min_stick_mag &&
-            fp->active_timer.lstick.x < p_ftCommonData->sdi_stick_window)
+            (fp->active_timer.lstick.x < p_ftCommonData->sdi_stick_window
+#ifdef TARGET_PC
+             || (pc_is_ucf_enabled() && ftUcf_ShieldSdiAllowed(fp))
+#endif
+                 ))
         {
             float scl = p_ftCommonData->x4C0 * (fp->input.lstick[0].x *
                                                 p_ftCommonData->sdi_pos_scale);

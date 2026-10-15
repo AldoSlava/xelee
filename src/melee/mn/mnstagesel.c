@@ -124,9 +124,11 @@ struct StageSelUserData {
 #include "pc/net.h"
 #include "pc/xr_pointer.h"
 #include "pc/net_lan.h"
+#include "pc/net_match.h"
 #include "pc/net_rank_session.h"
 #include <sysdolphin/baselib/sislib.h>
 #include "pc/pc.h"
+#include "mnstagesel_slippi.h"
 
 /* A compact ranked list uses synchronized pads and makes both bans visible.
  * It does not depend on the archive's cursor geometry. */
@@ -196,6 +198,7 @@ static void rankStageFrame(void)
 #define NET_MSG_STAGE_PICK 0x20
 static int net_local_pick = -1;
 static int net_remote_pick = -1;
+static bool net_slippi_fixed; /* the ticket chose the stage; skip the pick exchange */
 
 static bool netStageSel_Active(void)
 {
@@ -205,6 +208,37 @@ static bool netStageSel_Active(void)
 static void netStageSel_Reset(void)
 {
     net_local_pick = net_remote_pick = -1;
+    net_slippi_fixed = false;
+}
+
+/* Slippi Unranked: the server's ticket names the legal stages and the game
+ * picks one at random, so there is nothing for the players to choose. Both
+ * peers hash the shared seed with the number of games played so far, giving
+ * the same cell without a message. Returns the table cell, or -1 when this
+ * match lets the players pick. The table's stkind is the external stage id
+ * the ticket uses. */
+static int netStageSel_SlippiCell(void)
+{
+    static u32 games;
+    uint16_t ids[16];
+    int n = pc_net_match_slippi_stages(ids, 16);
+    u32 r;
+    int id;
+    int i;
+    if (n <= 0) {
+        return -1;
+    }
+    r = (pc_net_seed() + games++ * 0x9E3779B9u) * 2654435761u;
+    r ^= r >> 15;
+    r *= 2246822519u;
+    id = ids[(r >> 8) % (u32) n];
+    for (i = 0; i < NUM_STAGES; i++) {
+        if (mnStageSel_803F06D0[i].stkind == id) {
+            pc_log_line("sss: Slippi ticket stage %d (cell %d of %d allowed)", id, i, n);
+            return i;
+        }
+    }
+    return -1;
 }
 
 static void netStageSel_Poll(void)
@@ -248,6 +282,45 @@ static int netStageSel_Resolve(void)
     int pick = (netStageSel_Mix() >> 16) & 1 ? p1 : p0;
     pc_log_line("sss: picks P1=%d P2=%d -> %d", p0, p1, pick);
     return pick;
+}
+
+/* Slippi Direct's Frozen Pokemon Stadium toggle (FrozenStadiumToggle/*.asm):
+ * Z on any port flips it while the stage select is up for Direct's stage
+ * pick. Like Slippi's static byte it stays as set for later picks. */
+static bool sss_frozen_enabled;
+static bool sss_frozen;
+static bool sss_name_refresh; /* the toggle flipped: remake the hovered name */
+#define SSS_ICON_STADIUM 18   /* Slippi's ID_GRPS */
+
+void mnStageSel_SetFrozenToggle(bool enabled)
+{
+    sss_frozen_enabled = enabled;
+}
+
+bool mnStageSel_FrozenToggled(void)
+{
+    return sss_frozen;
+}
+
+static void frozenToggleFrame(void)
+{
+    int i;
+    if (!sss_frozen_enabled) {
+        return;
+    }
+    if (mnStageSel_804D6CAF != 0) {
+        mnStageSel_SlippiBannerFrame(false);
+        return;
+    }
+    for (i = 0; i < 4; i++) {
+        if (HSD_PadCopyStatus[i].trigger & HSD_PAD_Z) {
+            sss_frozen = !sss_frozen;
+            sss_name_refresh = mnStageSel_804D6CAE == SSS_ICON_STADIUM;
+            pc_log_line("sss: Frozen Stadium %s", sss_frozen ? "on" : "off");
+            break;
+        }
+    }
+    mnStageSel_SlippiBannerFrame(mnStageSel_804D6CAE == SSS_ICON_STADIUM);
 }
 
 /* "Random" online: the offline roll uses the live RNG and a per-machine
@@ -434,7 +507,16 @@ void fn_80259D84(HSD_GObj* gobj)
         if (mnStageSel_804D6CAF == 0) {
             mnStageSel_80259C28();
         }
+#ifdef TARGET_PC
+        /* The Frozen toggle flipped: out with this name, in with the other
+         * caption (Slippi does the same with a fake icon id). */
+        if (temp_r31->x0 != mnStageSel_804D6CAE ||
+            (sss_name_refresh && mnStageSel_804D6CAE == SSS_ICON_STADIUM))
+        {
+            sss_name_refresh = false;
+#else
         if (temp_r31->x0 != mnStageSel_804D6CAE) {
+#endif
             if (temp_r31->x0 < 0x1E &&
                 mnStageSel_803F06D0[temp_r31->x0].x8 >= 2)
             {
@@ -492,6 +574,11 @@ void mnStageSel_80259ED8(int id)
     if (id < 0x1E && mnStageSel_803F06D0[id].x8 >= 2) {
         do_anim(jobj, 20.0F * mnStageSel_803F06D0[id].x9);
     }
+#ifdef TARGET_PC
+    if (id == SSS_ICON_STADIUM && sss_frozen_enabled && sss_frozen) {
+        mnStageSel_SlippiFrozenName(jobj);
+    }
+#endif
 }
 
 void fn_8025A090(HSD_GObj* gobj)
@@ -715,6 +802,11 @@ static inline void make_bg_model(HSD_JObj** out)
                           sss_models->menu_border.matanim_joint),
                        DP(HSD_ShapeAnimJoint,
                           sss_models->menu_border.shapeanim_joint));
+#ifdef TARGET_PC
+    if (sss_frozen_enabled) {
+        mnStageSel_SlippiBannerCreate(jobj, DP(HSD_Joint, sss_models->menu_border.joint));
+    }
+#endif
     *out = gobj->hsd_obj;
 }
 
@@ -778,6 +870,14 @@ void mnStageSel_Scene_OnEnter(void* arg0)
             if (!pc_rank_session_active()) {
                 mnStageSel_804D50A0 = pc_net_local_player();
                 netStageSel_Reset();
+                {
+                    int cell = netStageSel_SlippiCell();
+                    if (cell >= 0) {
+                        mnStageSel_804D6CAE = (u8) cell;
+                        mnStageSel_804D6CAF = 2; /* chosen; resolve below */
+                        net_slippi_fixed = true;
+                    }
+                }
             } else {
                 mnStageSel_804D50A0 = -1;
             }
@@ -1122,6 +1222,9 @@ void mnStageSel_Scene_OnFrame(void)
         return;
     }
 #endif
+#ifdef TARGET_PC
+    frozenToggleFrame();
+#endif
     if (sss_data->force_stage_id >= 0) {
         mnStageSel_804D6CAF = 2;
         sss_data->vs.start.rules.stkind = sss_data->force_stage_id;
@@ -1202,12 +1305,14 @@ void mnStageSel_Scene_OnFrame(void)
                 gm_801A4B60();
                 return;
             }
-            if (net_remote_pick < 0) {
-                return; /* opponent still choosing; keep showing our pick */
-            }
-            mnStageSel_804D6CAE = netStageSel_Resolve();
-            if (mnStageSel_804D6CAE >= NUM_STAGES) {
-                mnStageSel_804D6CAE = netStageSel_Random();
+            if (!net_slippi_fixed) {
+                if (net_remote_pick < 0) {
+                    return; /* opponent still choosing; keep showing our pick */
+                }
+                mnStageSel_804D6CAE = netStageSel_Resolve();
+                if (mnStageSel_804D6CAE >= NUM_STAGES) {
+                    mnStageSel_804D6CAE = netStageSel_Random();
+                }
             }
         }
 #endif

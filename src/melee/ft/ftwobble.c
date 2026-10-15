@@ -1,3 +1,4 @@
+#include <pc/pc.h>
 #include "ftwobble.h"
 
 #ifdef TARGET_PC
@@ -44,7 +45,7 @@ enum {
 /// (0x800DB880) and fn_800DBAE4 (0x800DBBD4): entering CaptureWaitHi/Lw.
 void ftWobble_Reset(Fighter* fp)
 {
-    if (!pc_net_deterministic()) {
+    if (!pc_is_slippi_fixes_enabled()) {
         return;
     }
     fp->mv.co.wobble.count = 0;
@@ -65,7 +66,7 @@ bool ftWobble_Check(Fighter_GObj* gobj)
     u16 move_id;
     u16 prev_move_id;
 
-    if (!pc_net_deterministic()) {
+    if (!pc_is_slippi_fixes_enabled()) {
         return false;
     }
     if (fp->motion_id < ftCo_MS_CapturePulledHi ||

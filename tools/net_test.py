@@ -33,6 +33,7 @@ and run() to sweep the link-simulator matrix.
 """
 import argparse
 import errno
+import json
 import os
 import re
 import shutil
@@ -48,7 +49,8 @@ import time
 # boot). The exit frame is fixed at launch, so the budget covers the worst
 # boot seen and check_match() fails a row whose match did not get its minutes.
 BOOT_FRAMES = 9000
-CACHE_ROOT = "/tmp/melee_net_cache"  # kept between runs; keyed by port, never shared
+MM_RUN = False  # set by run() for --mm: frames count from the match, not from boot
+CACHE_ROOT = os.path.expanduser("~/.cache/melee_net_cache")  # kept between runs; keyed by port, never shared
 LOAD_STALL_FRAME = 900  # --load-stall: session up, menus lockstep, every frame waits
 # A direct session derives a datagram key from its handshake nonces like any
 # other (src/pc/net_handshake.c), but only once that handshake completes a few
@@ -120,7 +122,7 @@ def wait_port_free(port, timeout=30):
 
 
 class Instance:
-    def __init__(self, name, exe, disc, work, port, peer_port, env, lan):
+    def __init__(self, name, exe, disc, work, port, peer_port, env, lan, slippi=False):
         self.name = name
         self.port = port
         self.log_path = os.path.join(work, f"{name}.log")
@@ -141,7 +143,7 @@ class Instance:
             "MELEE_CACHE_DIR": cache,
             "MELEE_WINDOW_TITLE": f"melee-net-{name}",
             "MELEE_KEY_FIFO": self.fifo,
-            "MELEE_SEED": "7",
+            "MELEE_SEED": os.environ.get("MELEE_SEED_" + name.upper(), "7"),  # _A/_B: per-instance
             "MELEE_FPS": "1",  # one line per second: the rate the drive scales its holds by
             "MELEE_NET_RECORD": self.rec_path,  # per-frame pads + checksum, for check_match()
         })
@@ -150,6 +152,13 @@ class Instance:
             e["MELEE_NET_PLAYER"] = "0" if name == "a" else "1"
             e["MELEE_DEBUG_VS"] = "1"
             e["MELEE_NET_KEY"] = NET_KEY
+            if slippi:
+                # The Slippi ENet transport (docs/slippi-migration-plan.md).
+                # No MELEE_NET_KEY: ENet carries its own reliability, and the
+                # Slippi transport handshakes with PC_SLIPPI_MSG_SETUP instead
+                # of the custom RULES/READY the key authenticates.
+                e.pop("MELEE_NET_KEY", None)
+                e["MELEE_NET_STACK"] = "slippi"
         e.update(env)
         e.pop("MELEE_LOG_FILE", None)  # stderr is captured below; avoid double lines
         self.log = open(self.log_path, "wb")
@@ -247,17 +256,50 @@ WORKOUT = [("Right", 240), ("X", 100), ("Left", 240), ("C", 100), ("Right+X", 17
            ("Z", 100), ("Up", 140), ("Down", 140)]
 
 
+# --combat: the fighters close in and trade hits all match, so hurtboxes and
+# hitboxes are exercised every few frames (WORKOUT mirrors both players, who
+# then rarely meet). A starts on the left and walks right; B gets the mirror
+# image. Holds differ a little per side so the two inputs do not stay in step.
+COMBAT = [("Right", 160), ("X", 60), ("Right+X", 110), ("Up+X", 90), ("Down+X", 90),
+          ("X", 60), ("Z", 90), ("Left", 70), ("Right+Z", 120), ("C", 80), ("Up", 90)]
+
+
+def mirror(key):
+    return key.replace("Right", "\0").replace("Left", "Right").replace("\0", "Left")
+
+
 class Workout:
     """Cycles WORKOUT through both key fifos until done(). Holds are wall-clock
     (the exact frame count does not matter here, only that the input keeps
     changing) so the thread never has to read the logs."""
 
-    def __init__(self, insts):
+    def __init__(self, insts, combat=False):
         self.insts = insts
         self.n = 0
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        if combat:
+            self._threads = [threading.Thread(target=self._combat, args=(inst, side), daemon=True)
+                             for side, inst in enumerate(insts)]
+        else:
+            self._threads = [threading.Thread(target=self._run, daemon=True)]
+        self._thread = self._threads[0]
+        for t in self._threads:
+            t.start()
+
+    def _combat(self, inst, side):
+        i = 0
+        while not self._stop.is_set():
+            key, ms = COMBAT[i % len(COMBAT)]
+            i += 1
+            key = mirror(key) if side else key
+            ms += 13 * side + (i % 3) * 7
+            if inst.proc.poll() is None:
+                try:
+                    inst.key(f"{key} {ms}")
+                except Exception:
+                    return
+            self.n += 1
+            self._stop.wait(ms / 1000 + 0.15)
 
     def _run(self):
         i = 0
@@ -277,7 +319,8 @@ class Workout:
         """Stop and wait for the last line to be written, so a drive step that
         follows has the fifo to itself."""
         self._stop.set()
-        self._thread.join(10)
+        for t in self._threads:
+            t.join(10)
         return self.n
 
 
@@ -316,11 +359,12 @@ def settle(insts, frames):
 # the VS submenu, Up wraps to SEL_VS_ONLINE, A enters the ONLINE menu with
 # SEL_ONLINE_LAN already selected, A takes it into the lobby. Every submenu
 # entry resets the cursor to index 0 (mn_804A04F0.hovered_selection = 0,
-# mnmain.c:2385) and the VS table has 6 entries on TARGET_PC (mn_803EB6B0,
-# mnmain.c:420-424) with SEL_VS_ONLINE last (forward.h:166-171), so the walk
+# mnmain.c:2385) and the main table has 6 entries on TARGET_PC (mn_803EB6B0)
+# with SEL_MAIN_ONLINE third (forward.h), so the walk
 # is stateless: a retry starts from the same place. X = A button in the
 # keyboard map, Z = B.
-LAN_SUBMENU = [("Down", 7), ("X", 7), ("Up", 7), ("X", 7), ("X", 7)]
+# Main Menu -> Online Play (third, under VS. Mode) -> (Slippi is first; Down to) LAN
+LAN_SUBMENU = [("Down", 7), ("Down", 7), ("X", 7), ("Down", 7), ("X", 7)]
 MENU_SETTLE = 90  # frames of animation a menu hop can eat a press during
 CSS_BACK = 40     # frames of held B that leave a character-select screen (>30)
 
@@ -396,6 +440,31 @@ def to_lobby(inst, tries=4):
     return False
 
 
+def drive_mm(a, b):
+    """Slippi's order: both instances boot into the Unranked flow, which opens on
+    the CSS with a pick already placed (MELEE_CSS_PICK, different per seat);
+    START on each starts the search, the synthesized ticket pairs them, and the
+    selections that cross the link must give both the same match."""
+    if not (a.wait_log(r"online: enter CSS", 180) and b.wait_log(r"online: enter CSS", 60)):
+        print("net_test: the online CSS never opened", flush=True)
+        return False
+    settle((a, b), MENU_SETTLE)
+    if not press_until((a, b), "Return", 9, r"match: Slippi ticket", tries=6, each=8.0,
+                       on=(a, b)):
+        print("net_test: START on the CSS never started a search", flush=True)
+        return False
+    rx = r"match: Slippi match P\d: chars (\d+)/(\d+) colors (\d+)/(\d+) stage (\d+) alt (\d+) rng (\d+)"
+    if not (a.wait_log(rx, 60) and b.wait_log(rx, 60)):
+        print("net_test: the selections never produced a match", flush=True)
+        return False
+    ma, mb = re.findall(rx, a.text()), re.findall(rx, b.text())
+    if ma != mb or int(ma[-1][4]) not in (2, 3, 8, 28, 31, 32):
+        print(f"net_test: the peers disagree on the match: a={ma} b={mb}", flush=True)
+        return False
+    print(f"net_test: agreed Slippi match {ma[-1]}", flush=True)
+    return True
+
+
 def drive_lan(a, b):
     """Both instances walk the real menus into the LAN lobby, Start on A elects
     a host, then the CSS and SSS. Every step waits for the scene's own archive
@@ -460,7 +529,7 @@ CSS_STEP = 6      # frames of Right: 7.4 units, one column
 CSS_COLS = 7      # columns 1..7 of the row
 
 
-def drive_css(a, b, want=1):
+def drive_css(a, b, want=1, done=None):
     """CSS: pin both hands on the top-left clamp, drop into a row of
     portraits and press A once per column until a pick sticks on both ports,
     then Start -> SSS. Both peers press: each instance drives its own port's
@@ -483,9 +552,12 @@ def drive_css(a, b, want=1):
         for col in range(CSS_COLS):
             press((a, b), "X", 7, 0.5)  # A: pick whatever the token is over
             press((a, b), "Right", CSS_STEP, 0.4)
-        if press_until((a, b), "Return", 9, SCENE_FILE["sss"], want=want, tries=2, each=8.0,
-                       on=(a,)):
-            print(f"net_test: CSS picked on row {row} (Down {down}), SSS loaded", flush=True)
+        # With `done` the CSS is each instance's own (Slippi's order: nothing is
+        # connected yet), so both are pressed; otherwise one press carries both.
+        if press_until((a, b), "Return", 9, done or SCENE_FILE["sss"], want=want, tries=2,
+                       each=8.0, on=(a, b) if done else (a,)):
+            print(f"net_test: CSS picked on row {row} (Down {down}), "
+                  f"{'search started' if done else 'SSS loaded'}", flush=True)
             return True
         print(f"net_test: no pick on CSS row {row} (Down {down}), trying the next row",
               flush=True)
@@ -614,7 +686,11 @@ def in_match_scene(inst):
     in_fight() (net.c:1345-1362, in_fight() = scene_kind() is GS_VS or
     GS_SUDDEN_DEATH at :173), so `n` above zero IS "the sim is in a match"."""
     snaps = [int(n) for n in SNAP_RX.findall(inst.text())]
-    return count(inst, SCENE_FILE["match"]) + sum(1 for n in snaps if n > 0)
+    # The scene hand-off line is the third witness: a matchmaking run picks its
+    # stage through the SSS and may load an archive STAGE_RX does not name.
+    vs = len(re.findall(r"net: scene \d+ -> 2 at frame", inst.text()))
+    vs += count(inst, r"online: enter VS at frame")  # the matchmaking flow has no scene hand-offs
+    return count(inst, SCENE_FILE["match"]) + sum(1 for n in snaps if n > 0) + vs
 
 
 def wait_match(insts, timeout=240):
@@ -699,7 +775,14 @@ def check_entry(a, b):
     e = [match_entry(record_cks(i.rec_path)) for i in (a, b)]
     if None in e:
         return []  # check_match reports that with its own detail
-    return [] if e[0] == e[1] else [f"match entered on different frames: a {e[0]} b {e[1]}"]
+    # A matchmaking session starts its frame count at the match, not at a lobby
+    # both peers leave on one frame, so the recorded entry can sit a frame
+    # apart; the per-frame checksum compare is what proves the sims agree.
+    # (the peers enter the match when their own scenes finish, so Stage 2's
+    # start sync, not this check, is what will tighten it)
+    slack = 600 if MM_RUN else 0
+    return [] if abs(e[0] - e[1]) <= slack else \
+        [f"match entered on different frames: a {e[0]} b {e[1]}"]
 
 
 # "net: frame N, rollbacks N (max depth N, lost N), stalls N (worst X ms), skips N,
@@ -865,7 +948,8 @@ def summarize(inst, need_match=True):
     says what the checksum stream saw, it just is not a failure."""
     text = inst.text()
     fails = []
-    if not re.search(r"net: test done at frame (\d+)", text):
+    if not re.search(r"net: test done at frame (\d+)", text) and \
+            not (MM_RUN and "online: set over" in text):
         fails.append("no 'net: test done'")
     # A session that never came up makes every other number in this row
     # meaningless: the instance plays a normal offline game, its checksum
@@ -875,9 +959,9 @@ def summarize(inst, need_match=True):
     # peers that went out of sync.
     if re.search(r"net: bind\(\d+\) failed", text):
         fails.append("netplay never started: bind failed (port still in use?)")
-    elif not re.search(r"net: rollback with ", text):
+    elif not re.search(r"net: (rollback with |Slippi transport: peer |Slippi match: P)", text):
         fails.append("netplay never started: no session line")
-    if inst.proc.returncode != 0:
+    if inst.proc.returncode != 0 and not (MM_RUN and "online: set over" in text):
         fails.append(f"exit code {inst.proc.returncode}")
     # "peer silent" has to be the whole leaving-netplay line, not a substring:
     # the benign `net: interrupted at frame N (peer silent 3000 ms),
@@ -1167,6 +1251,8 @@ def parse_args(argv=None):
     ap.add_argument("--stall", type=float, default=0, metavar="SECONDS",
                     help="SIGSTOP B mid-match for SECONDS, then SIGCONT: inside the reconnect "
                          "window the session must survive, past it it must expire with status 2")
+    ap.add_argument("--combat", action="store_true",
+                    help="fighters close in and trade hits (mirrored inputs per side)")
     ap.add_argument("--state-log", action="store_true",
                     help="write per-frame state dumps to <work>/a.state and b.state")
     ap.add_argument("--cold-cache", action="store_true",
@@ -1180,6 +1266,8 @@ def parse_args(argv=None):
     ap.add_argument("--hitch", default=None, metavar="MS:EVERY",
                     help="MELEE_NET_HITCH_TEST on B: park its game thread for MS every EVERY "
                          "frames of the fight (a phone's frame freezes); A must ride them out")
+    ap.add_argument("--cpu", type=int, default=0, metavar="LEVEL",
+                    help="the direct match is two CPUs at LEVEL (1-9) fighting")
     ap.add_argument("--stage", type=int, default=None, metavar="STKIND",
                     help="MELEE_DEBUG_VS_STAGE for the direct match (3: Pokemon Stadium, "
                          "whose transformations load mid-match)")
@@ -1187,6 +1275,17 @@ def parse_args(argv=None):
                     help="MELEE_NET_RECONNECT_MS for --stall (net.c's own default is 3000)")
     ap.add_argument("--fuzz", action="store_true", help="run tools/net_fuzz.py against A")
     ap.add_argument("--fuzz-seconds", type=int, default=30)
+    ap.add_argument("--slippi", action="store_true",
+                    help="use the Slippi ENet transport (MELEE_NET_STACK=slippi) instead of the "
+                         "custom UDP path; direct mode only")
+    ap.add_argument("--mm", action="store_true",
+                    help="Slippi matchmaking path: boot into the Unranked lobby with a synthesized "
+                         "local-peer ticket (MELEE_SLIPPI_LOCAL_PEER) and a fake account, then CSS/SSS")
+    ap.add_argument("--mm-server", action="store_true",
+                    help="with --mm: queue both instances on a real local matchmaking server "
+                         "(build-container/slippi_mm_server) instead of the synthesized ticket")
+    ap.add_argument("--mm-decider", choices=("a", "b"), default="a",
+                    help="with --mm: which instance the ticket names the decider (a is P1, b is P2)")
     ap.add_argument("--exe", default=os.path.join(here, "..", "build", "melee"))
     ap.add_argument("--disc", default=os.path.join(here, "..", "..", "melee.ciso"))
     ap.add_argument("--port", type=int, default=42050, help="A's UDP port; B uses +1")
@@ -1201,9 +1300,18 @@ def run(args):
         return run_disconnect(args)
     if args.stall:
         return run_stall(args)
+    if args.mm:
+        args.lan = True  # boots a lobby, not a MELEE_NET direct session
     if args.scenes:
         args.lan = True  # the set flow is the online one: lobby, CSS, SSS, VS, results
-    frames = int(args.minutes * 3600) + BOOT_FRAMES
+    global MM_RUN
+    if args.mm_server:
+        args.mm = True
+    MM_RUN = bool(args.mm)
+    # A matchmaking session counts frames from the match start, so there is no
+    # boot to budget for; and under Slippi's rules (4 stocks) a match can end
+    # in about 4000 frames.
+    frames = int(args.minutes * 3600) + (0 if args.mm else BOOT_FRAMES)
     sim = {"MELEE_NET_EXIT_AFTER_FRAMES": str(frames)}
     if args.loss:
         sim["MELEE_NET_SIM_LOSS"] = str(args.loss)
@@ -1232,6 +1340,11 @@ def run(args):
         sim["MELEE_NET_STALL_TEST"] = f"{LOAD_STALL_FRAME}:{int(args.load_stall * 1000)}"
     if args.hitch:
         sim["MELEE_NET_HITCH_TEST"] = args.hitch  # B only: sim_a was copied above
+    if args.cpu:
+        # Two CPUs at this level fight while the workout keeps the pads (and
+        # so the predictions and rollbacks) moving underneath them.
+        sim_a["MELEE_DEBUG_VS"] = sim["MELEE_DEBUG_VS"] = "cpu2"
+        sim_a["MELEE_DEBUG_VS_CPU_LEVEL"] = sim["MELEE_DEBUG_VS_CPU_LEVEL"] = str(args.cpu)
     if args.stage is not None:
         sim_a["MELEE_DEBUG_VS_STAGE"] = sim["MELEE_DEBUG_VS_STAGE"] = str(args.stage)
         # A frozen Stadium (the launcher default on many machines) never
@@ -1239,6 +1352,40 @@ def run(args):
         sim_a["MELEE_FROZEN_STADIUM"] = sim["MELEE_FROZEN_STADIUM"] = "0"
     shutil.rmtree(args.work, ignore_errors=True)
     os.makedirs(args.work)
+    mm_server = None
+    if args.mm_server:
+        args.mm = True
+        exe = os.path.join(os.path.dirname(os.path.abspath(args.exe)), "slippi_mm_server")
+        mm_port = args.port + 100
+        mm_server = subprocess.Popen([exe, "-p", str(mm_port), "-v"],
+                                     stdout=open(os.path.join(args.work, "mm_server.log"), "w"),
+                                     stderr=subprocess.STDOUT)
+        time.sleep(0.5)
+    if args.mm:
+        for name, env, port, peer in (("a", sim_a, args.port, args.port + 1),
+                                      ("b", sim, args.port + 1, args.port)):
+            slp_dir = os.path.join(args.work, f"slippi-{name}")
+            os.makedirs(slp_dir)
+            with open(os.path.join(slp_dir, "slippi-account.json"), "w") as f:
+                json.dump({"uid": f"test{name}", "playKey": "k", "displayName": f"Test {name}",
+                           "connectCode": f"TST#{1 if name == 'a' else 2}"}, f)
+            env.update({
+                "MELEE_NET_STACK": "slippi",
+                "MELEE_BOOT_SCENE": "unranked",
+                "MELEE_SLIPPI_DIR": slp_dir,
+                "MELEE_SLIPPI_LOCAL_PORT": str(port),
+                "MELEE_CSS_PICK": "2,0" if name == "a" else "9,1",  # Fox vs Marth
+            })
+            if mm_server is not None:
+                env.update({"MELEE_SLIPPI_MM_HOST": "127.0.0.1",
+                            "MELEE_SLIPPI_MM_PORT": str(mm_port)})
+            else:
+                env.update({
+                    "MELEE_SLIPPI_LOCAL_PEER": "1",
+                    "MELEE_SLIPPI_PEER_PORT": str(peer),
+                    "MELEE_SLIPPI_LOCAL_INDEX": "0" if name == "a" else "1",
+                    "MELEE_SLIPPI_LOCAL_HOST": "1" if name == args.mm_decider else "0",
+                })
     if args.state_log:
         # Per-frame state dumps beside the logs, so a DESYNC can be diffed
         # field by field (src/pc/net_snapshot.c).
@@ -1246,8 +1393,10 @@ def run(args):
         sim["MELEE_NET_STATE_LOG"] = os.path.join(args.work, "b.state")
     wait_port_free(args.port)
     wait_port_free(args.port + 1)
-    a = Instance("a", args.exe, args.disc, args.work, args.port, args.port + 1, sim_a, args.lan)
-    b = Instance("b", args.exe, args.disc, args.work, args.port + 1, args.port, sim, args.lan)
+    a = Instance("a", args.exe, args.disc, args.work, args.port, args.port + 1, sim_a, args.lan,
+                 args.slippi)
+    b = Instance("b", args.exe, args.disc, args.work, args.port + 1, args.port, sim, args.lan,
+                 args.slippi)
     print(f"net_test: {'lan' if args.lan else 'direct'} loss={args.loss}% delay={args.delay}ms "
           f"rxdelay={args.rxdelay}ms {' '.join(k for k in SIM_ENV if getattr(args, k))} "
           f"minutes={args.minutes} frames={frames} pids={a.proc.pid},{b.proc.pid} "
@@ -1259,6 +1408,10 @@ def run(args):
             ok = drive_scenes(a, b)
             if not ok:
                 print("net_test: scene drive failed (see logs)", flush=True)
+        elif args.mm:
+            ok = drive_mm(a, b)
+            if not ok:
+                print("net_test: matchmaking drive failed (see logs)", flush=True)
         elif args.lan:
             ok = drive_lan(a, b)
             if not ok:
@@ -1273,7 +1426,7 @@ def run(args):
         if ok and not args.scenes:
             ok = wait_match((a, b))
         if ok:
-            work = Workout((a, b))  # keep both players moving for the rest of the run
+            work = Workout((a, b), args.combat)  # keep both players moving for the rest of the run
         if ok and args.fuzz:
             sys.path.insert(0, here)
             import net_fuzz
@@ -1303,6 +1456,9 @@ def run(args):
             texts = a.text() + b.text()
             if any(re.search(t, texts) for t in term):
                 break  # let summarize() report it; do not burn the whole budget
+            if MM_RUN and "online: set over" in a.text() and \
+                    "online: set over" in b.text():
+                break  # the match ended on its own, which is a complete run
             fr = max([int(x) for x in re.findall(r"net: frame (\d+)", texts)] or [-1])
             if fr > last_frame:
                 last_frame, last_progress = fr, time.time()
@@ -1318,6 +1474,8 @@ def run(args):
         # SIGKILL only what is still running after that.
         a.kill(20)
         b.kill(20)
+        if mm_server is not None:
+            mm_server.terminate()
         if a.proc.returncode == -9 or b.proc.returncode == -9:
             print("net_test: killed a run that would not exit (per-instance FAIL below)",
                   flush=True)

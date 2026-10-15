@@ -1,4 +1,6 @@
 #include "grlast.h"
+#include <pc/pc.h>
+#include <sysdolphin/baselib/random.h>
 
 #include <math.h>
 
@@ -367,7 +369,19 @@ static void grLast_8021AAB0(Ground_GObj* gobj)
 {
     Ground* gp = GET_GROUND(gobj);
     if (!gp->u.map.xC4_b1 && !gp->u.map.xC4_b0) {
-        grLast_8021B2E8(gobj);
+#ifdef TARGET_PC
+        if (pc_is_slippi_fixes_enabled()) {
+            /* Slippi's DesyncProofBGTransformations (hook 0x8021AAE4): the
+             * background transformation picks its look from the shared RNG,
+             * so its draws are put back. */
+            u32 seed = *HSD_RandSeedPtr;
+            grLast_8021B2E8(gobj);
+            *HSD_RandSeedPtr = seed;
+        } else
+#endif
+        {
+            grLast_8021B2E8(gobj);
+        }
         if (gp->u.map.xC4_b26) {
             int tmp = grLast_8021B5C4(gobj);
             if (tmp != 0) {

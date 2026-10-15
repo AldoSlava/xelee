@@ -39,8 +39,10 @@ is GPL-3.0-or-later. Details under [License](#license).
 - Dolphin-compatible `.gci` memory cards and Dolphin-format HD texture packs.
 - Cheats: Unlock Everything, hazardless (Frozen) Pokémon Stadium, free pause
   camera, Wide 16:9 HUD.
-- UCF 0.8x dashback and shield drop, and a raw 1000 Hz read path for the
-  official GameCube controller adapter.
+- UCF 0.84 as Slippi plays it (dashback, shield drop, SDI, shield SDI, tumble,
+  DBOOC fix, 1.0 cardinals), Slippi's no-wobbling, neutral spawn and
+  freeze-glitch rules, on by default offline (two toggles on the Gameplay page),
+  and a raw 1000 Hz read path for the official GameCube controller adapter.
 
 What each of those actually covers, including the parts that are unfinished, is
 in the [status table](#status) below.
@@ -90,7 +92,8 @@ table is right and the other one is stale.
 | In-app update check | done | Polls GitHub releases, downloads with progress. |
 | Controller rumble | done | SDL gamepads through the game's own `PADControlMotor` calls, and the Android device vibrator when the pad has no rumble. Controller LED / port-colour sync is not implemented. |
 | 1000 Hz GameCube adapter (WUP-028) | partial | Implemented and wired, not yet confirmed against a physical adapter. Raw 0x21 reports are read through SDL's hidapi on the 1000 Hz input thread, so the game would see the controller's real 8-bit values instead of SDL's rescaled ones; adapter slot N is PAD port N, and the slot motors are driven from the game's rumble state. `MELEE_GC_ADAPTER=0` hands the device back to SDL's driver. Linux needs a udev rule; the log prints it. |
-| UCF (dashback, shield drop) | done | UCF 0.8x rules; launcher Gameplay page / F1 port menu, default off, `MELEE_UCF=1`. Reads the octagon-clamped stick rather than UCF's pre-clamp raw queue, which only differs past the 80-unit rim. |
+| UCF (all of 0.84) | done | Dashback, shield drop (+extended), SDI, shield SDI, tumble, the DBOOC fix, the pad buffer and 1.0 cardinals; launcher Gameplay page / F1 port menu, default on, `MELEE_UCF=0\|1`. Online and replay runs always play it. The pad-buffer rules read the raw stick queue and were checked against Slippi's asm and the disc's vanilla code; dashback and shield drop come from the UCF source and are not yet compared with Slippi's asm (the output of tools/gecko_catalog.py). |
+| Slippi gameplay fixes | done | No wobbling, Slippi's neutral spawn positions and the Ice Climbers freeze-glitch fix; launcher Gameplay page / F1 port menu, default on, `MELEE_SLIPPI_FIXES=0|1`. Online and replay runs always play them. |
 | Discord Rich Presence | planned | Deferred until API credentials are available. |
 | Extended hazardless stages | planned | Whispy, Randall, FoD platforms. Only Pokémon Stadium is implemented. |
 | 2-player keyboard remapping | planned | The keyboard is port 1 on a fixed layout. |
@@ -213,7 +216,8 @@ per-device `.controller` files; everything else shares `launcher.cfg`.
 | `MELEE_PREWARM=0` | Skip the background asset pre-warm after boot. |
 | `MELEE_FAST_FADES=1` | Clamp scene fade delays. |
 | `MELEE_PIPELINE_JOBS=<n>` | Background shader-pipeline compile threads (default half the hardware threads, 1..8). |
-| `MELEE_UCF=1` | Universal Controller Fix (UCF 0.8x dashback and shield-drop rules); overrides the `ucf` launcher.cfg pref. |
+| `MELEE_UCF=0\|1` | Universal Controller Fix (UCF 0.84 rules); overrides the `ucf` launcher.cfg pref (default on). |
+| `MELEE_SLIPPI_FIXES=0\|1` | Slippi's no-wobbling, neutral spawn and freeze-glitch rules offline; overrides the `slippi_fixes` pref (default on). |
 | `MELEE_GC_ADAPTER=0` | Hand the GameCube adapter (WUP-028) back to SDL's gamepad driver instead of reading it raw. |
 | `MELEE_SLP_DIR=<dir>` | Record every VS match, offline or netplay, as a Slippi replay `<dir>/Game_YYYYMMDDTHHMMSS.slp` (replay format 3.18.0) that Slippi Launcher, slippi-js stats, Clippi and overlays read. Only frames no rollback can change are written, so both netplay peers' files hold the same frames. Off by default. |
 | `--no-card` | Boot without a memory card. |

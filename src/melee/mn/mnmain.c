@@ -3,6 +3,9 @@
 #include <melee/gm/forward.h>
 
 #include <math.h>
+#ifdef TARGET_PC
+#include "pc/pc.h"
+#endif
 
 #include "forward.h"
 #include "inlines.h"
@@ -93,6 +96,11 @@ static void sdata2_order(void)
 }
 #endif
 
+#ifdef TARGET_PC
+static int mn_PcSelectionFrames(MenuKind kind, int selection);
+#else
+#define mn_PcSelectionFrames(kind, selection) (2 * (selection))
+#endif
 static u16 mn_803EAE68[] = {
     0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD,
 };
@@ -100,7 +108,7 @@ static u16 mn_803EAE7C[] = {
     0x2, 0x3, 0x4, 0x9, 0xB, 0xC, 0xD, 0x0,
 };
 #ifdef TARGET_PC
-#define MENU_KIND_TABLE_LEN (MENU_KIND_ONLINE + 1)
+#define MENU_KIND_TABLE_LEN (MENU_KIND_ONLINE_SLIPPI + 1)
 #else
 #define MENU_KIND_TABLE_LEN 0x22
 #endif
@@ -282,6 +290,11 @@ static AnimLoopSettings mn_803EAE8C[MENU_KIND_TABLE_LEN][3] = {
         { 450, 499, 450 },
         { 500, 599, 500 },
     },
+    { /* MENU_KIND_ONLINE_SLIPPI: same */
+        { 400, 449, 400 },
+        { 450, 499, 450 },
+        { 500, 599, 500 },
+    },
 #endif
 };
 
@@ -306,6 +319,9 @@ static float mn_803EB3CC[] = {
 
 static AnimLoopSettings mn_803EB3FC[] = { { 0, 49, 20 },
                                           { 50, 99, 70 },
+#ifdef TARGET_PC
+                                          { 700, 749, 720 }, /* Online Play: the Melee preview */
+#endif
                                           { 100, 149, 120 },
                                           { 150, 199, 170 },
                                           { 200, 249, 220 } };
@@ -322,16 +338,15 @@ static AnimLoopSettings mn_803EB480 = { 3500, 3549, 3520 };
 static AnimLoopSettings mn_803EB48C[] = {
     { 700, 749, 720 }, { 750, 799, 770 }, { 800, 849, 820 },
     { 850, 899, 870 }, { 900, 949, 920 },
-#ifdef TARGET_PC
-    { 700, 749, 720 }, /* SEL_VS_ONLINE: reuse the Melee preview */
-#endif
 };
 
 #ifdef TARGET_PC
 /* MENU_KIND_ONLINE preview pane: the Melee (CSS) preview for every item */
-static AnimLoopSettings mn_OnlinePreview[5] = {
-    { 700, 749, 720 }, { 700, 749, 720 }, { 700, 749, 720 },
+static AnimLoopSettings mn_OnlinePreview[2] = {
     { 700, 749, 720 }, { 700, 749, 720 },
+};
+static AnimLoopSettings mn_OnlineSlippiPreview[3] = {
+    { 700, 749, 720 }, { 700, 749, 720 }, { 700, 749, 720 },
 };
 #endif
 
@@ -377,7 +392,12 @@ static AnimLoopSettings mn_803EB5E8[] = {
     { 2900, 2949, 2920 },
 };
 
+#ifdef TARGET_PC
+/* the Online Play row (index 2) has literal text, so its id is never read */
+static u16 mn_803EB660[] = { 0x81, 0x82, 0x82, 0x83, 0x84, 0x85, 0x00 };
+#else
 static u16 mn_803EB660[] = { 0x81, 0x82, 0x83, 0x84, 0x85, 0x00 };
+#endif
 static u16 mn_803EB66C[] = { 0x86, 0x87, 0x88, 0x89, 0x8A, 0x00 };
 static u16 mn_803EB678[] = { 0x8E, 0x8F, 0x90, 0x91, 0x92, 0x00 };
 static u16 mn_803EB684[] = { 0x9A, 0x9B, 0x9C, 0x9D, 0x9D, 0x9E };
@@ -405,7 +425,11 @@ MenuKindData mn_803EB6B0[MENU_KIND_TABLE_LEN] = {
         mn_803EB3FC,
         0,
         mn_803EB660,
+#ifdef TARGET_PC
+        0x06, /* + SEL_MAIN_ONLINE */
+#else
         0x05,
+#endif
         mn_8022DB10,
     },
     {
@@ -419,11 +443,7 @@ MenuKindData mn_803EB6B0[MENU_KIND_TABLE_LEN] = {
         mn_803EB48C,
         40,
         mn_803EB678,
-#ifdef TARGET_PC
-        0x06, /* + SEL_VS_ONLINE */
-#else
         0x05,
-#endif
         mn_8022D594,
     },
     {
@@ -650,6 +670,13 @@ MenuKindData mn_803EB6B0[MENU_KIND_TABLE_LEN] = {
         NULL,
         ARRAY_SIZE(mn_OnlinePreview),
         mnOnline_Think,
+    },
+    { /* MENU_KIND_ONLINE_SLIPPI */
+        mn_OnlineSlippiPreview,
+        40,
+        NULL,
+        ARRAY_SIZE(mn_OnlineSlippiPreview),
+        mnOnline_SlippiThink,
     },
 #endif
 };
@@ -921,14 +948,84 @@ static inline void mn_80229A7C_dontinline(void* arg0, int arg1, int arg2)
 }
 
 #ifdef TARGET_PC
+/* The stock labels are textures on the entry's own model, so they lean with
+ * it (the bars sit at a slight angle in 3D, plainest on Trophies). The drawn
+ * labels take the same lean: before the glyphs go out, the text's position
+ * matrix is turned by the entry joint's world rotation about the label's
+ * centre. */
+static struct {
+    HSD_Text* text;
+    HSD_JObj* jobj;
+} mn_pcLabelFollow[8];
+static HSD_JObj* mn_pcLabelPart[8];
+
+static void mn_PcLabelLean(void* gobj_)
+{
+    HSD_GObj* gobj = gobj_;
+    HSD_Text* text = HSD_GObjGetUserData(gobj);
+    HSD_JObj* jobj = NULL;
+    Mtx view, rot, out;
+    float a[3], len;
+    int c, r, i;
+
+    for (i = 0; i < (int) ARRAY_SIZE(mn_pcLabelFollow); i++) {
+        if (mn_pcLabelFollow[i].text == text) {
+            jobj = mn_pcLabelFollow[i].jobj;
+        }
+    }
+    if (jobj == NULL || mn_804D6BAC == NULL) {
+        return;
+    }
+    a[0] = jobj->mtx[0][3];
+    a[1] = jobj->mtx[1][3];
+    a[2] = jobj->mtx[2][3];
+    for (c = 0; c < 3; c++) {
+        len = sqrtf(jobj->mtx[0][c] * jobj->mtx[0][c] + jobj->mtx[1][c] * jobj->mtx[1][c] +
+                    jobj->mtx[2][c] * jobj->mtx[2][c]);
+        if (len < 1e-4f) {
+            return;
+        }
+        for (r = 0; r < 3; r++) {
+            rot[r][c] = jobj->mtx[r][c] / len;
+        }
+    }
+    {
+        /* The stock label textures lean right a little (about 3 degrees) and sit a hair
+         * off level; the joint's own turn is only the tilt. Shear x by y and
+         * turn about z, in the joint's frame, before the tilt. */
+        const float k = 0.05f, z = -0.01f;
+        const float cz = cosf(z), sz = sinf(z);
+        Mtx lean = { { cz + k * sz, -sz + k * cz, 0.0f, 0.0f },
+                     { sz, cz, 0.0f, 0.0f },
+                     { 0.0f, 0.0f, 1.0f, 0.0f } };
+        Mtx tilt;
+        for (r = 0; r < 3; r++) {
+            for (c = 0; c < 3; c++) {
+                tilt[r][c] = rot[r][0] * lean[0][c] + rot[r][1] * lean[1][c] + rot[r][2] * lean[2][c];
+            }
+        }
+        for (r = 0; r < 3; r++) {
+            for (c = 0; c < 3; c++) {
+                rot[r][c] = tilt[r][c];
+            }
+            rot[r][3] = a[r] - (rot[r][0] * a[0] + rot[r][1] * a[1] + rot[r][2] * a[2]);
+        }
+    }
+    HSD_CObjGetViewingMtx(HSD_CObjGetCurrent(), view);
+    MTXConcat(view, rot, out);
+    GXLoadPosMtxImm(out, 0);
+}
+
 /* ponytail: PC-only entries (mnonline.h) have no label texture. mn_8022B3A0
  * hides their slot's matanim label and this draws SIS text over the slot
  * every frame (the tree animates). Freed with the description on slide-out. */
 static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
 {
-    static const GXColor hovered = { 0x28, 0x28, 0x28, 0xFF };
-    static const GXColor idle = { 0xFF, 0xD2, 0x50, 0xFF };
-    const float label_size = 0.033f;
+    /* Sampled from the stock labels: near-black on the lit bar, and the dark
+     * gold of the others. */
+    static const GXColor hovered = { 0x08, 0x06, 0x00, 0xFF };
+    static const GXColor idle = { 0xCA, 0x97, 0x32, 0xFF };
+    const float label_size = 0.046f;
     int i;
 
     if (alive && data->description != NULL) {
@@ -944,6 +1041,7 @@ static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
 
         if (label == NULL) {
             if (text != NULL) {
+                mn_pcLabelFollow[i].text = NULL;
                 HSD_SisLib_803A5CC4(text);
                 data->pc_label[i] = NULL;
             }
@@ -957,6 +1055,9 @@ static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
             text->font_size.x = label_size;
             text->font_size.y = label_size;
             HSD_SisLib_803A6B98(text, 0.0f, 0.0f, "%s", label);
+            mn_pcLabelFollow[i].text = text;
+            mn_pcLabelFollow[i].jobj = data->tree[mn_803EAE68[i]];
+            text->render_callback = mn_PcLabelLean;
         }
         lb_8000B1CC(data->tree[mn_803EAE68[i]], NULL, &pos);
         text->pos_x = pos.x;
@@ -1129,7 +1230,7 @@ void mn_80229F60(HSD_GObj* gp, HSD_JObj* root, MainMenuSelection selection)
     HSD_JObjReqAnimAll(jobj, 1.0F);
     HSD_JObjAnimAll(jobj);
     HSD_JObjReqAnim(jobj,
-                    mn_803EB6B0[flow->cur_menu].start_frame + selection * 2);
+                    mn_803EB6B0[flow->cur_menu].start_frame + mn_PcSelectionFrames(flow->cur_menu, selection));
     mn_8022F3D8(jobj, 0xC, TOBJ_MASK);
     mn_8022F3D8(jobj, 0xD, TOBJ_MASK);
     mn_8022F3D8(jobj, 0xE, TOBJ_MASK);
@@ -1183,7 +1284,7 @@ void mn_8022A440(HSD_GObj* gp, HSD_JObj* root, MainMenuSelection selection)
     HSD_JObjReqAnimAll(r29, 0.0F);
     HSD_JObjAnimAll(r29);
     HSD_JObjReqAnim(r29,
-                    mn_803EB6B0[flow->cur_menu].start_frame + selection * 2);
+                    mn_803EB6B0[flow->cur_menu].start_frame + mn_PcSelectionFrames(flow->cur_menu, selection));
     mn_8022F3D8(r29, 0xC, TOBJ_MASK);
     mn_8022F3D8(r29, 0xD, TOBJ_MASK);
     mn_8022F3D8(r29, 0xE, TOBJ_MASK);
@@ -1451,7 +1552,11 @@ void fn_8022AFEC(HSD_GObj* gp)
     state = data->state;
     if ((state == MENU_STATE_5 || state <= MENU_STATE_ENTER_TO ||
          state == MENU_STATE_EXIT_TO) &&
-        data->menu_kind != mn_804A04F0.cur_menu)
+        (data->menu_kind != mn_804A04F0.cur_menu
+#ifdef TARGET_PC
+         || data->pad_3 != (u8) mn_803EB6B0[data->menu_kind].selection_count
+#endif
+         ))
     {
         if (mn_804A04F0.entering_menu != 0) {
             data->state = MENU_STATE_ENTER_FROM;
@@ -1529,6 +1634,9 @@ void fn_8022AFEC(HSD_GObj* gp)
         option_count = mn_803EB6B0[data2->menu_kind].selection_count & 0xFF;
         {
             int i;
+            for (i = 0; i < 12; i++) {
+                sp20[i] = NULL;
+            }
             for (i = 0; i < option_count; i++) {
                 temp_jobj = data2->tree[mn_803EAE68[i]];
                 if (temp_jobj == NULL) {
@@ -1541,6 +1649,14 @@ void fn_8022AFEC(HSD_GObj* gp)
         }
         if ((u8) selection_changed != false) {
             /// @todo problem spot
+#ifdef TARGET_PC
+            /* A panel whose rows were rebuilt fewer (Slippi's Logout) is
+             * updated once more with its old hover past the end: no joint. */
+            if (sp20[mn_80229A04_dontinline(mn_804A04F0.cur_menu,
+                                            mn_804A04F0.hovered_selection)] != NULL &&
+                sp20[mn_80229A04_dontinline(mn_804A04F0.cur_menu,
+                                            data2->hovered_selection)] != NULL)
+#endif
             {
                 MenuKind cur_menu = mn_804A04F0.cur_menu;
                 mn_80229F60(gp,
@@ -1548,6 +1664,10 @@ void fn_8022AFEC(HSD_GObj* gp)
                                 cur_menu, mn_804A04F0.hovered_selection)],
                             mn_804A04F0.hovered_selection);
             }
+#ifdef TARGET_PC
+            if (sp20[mn_80229A04_dontinline(mn_804A04F0.cur_menu,
+                                            data2->hovered_selection)] != NULL)
+#endif
             {
                 MenuKind cur_menu = mn_804A04F0.cur_menu;
                 mn_8022A440(gp,
@@ -1606,10 +1726,27 @@ void fn_8022AFEC(HSD_GObj* gp)
     }
 }
 
-/// @brief frame offset of a selection's cursor animation
-static inline int GetSelectionFrameOffset(int selection)
+#ifdef TARGET_PC
+/* Online Play sits third on the main menu and has no label texture; the
+ * rows below it keep the textures of the vanilla rows they came from. */
+static int mn_PcSelectionFrames(MenuKind kind, int selection)
 {
+    if (kind == MENU_KIND_MAIN && selection > SEL_MAIN_ONLINE) {
+        return 2 * (selection - 1);
+    }
     return 2 * selection;
+}
+#endif
+
+/// @brief frame offset of a selection's cursor animation
+static inline int GetSelectionFrameOffset(MenuKind kind, int selection)
+{
+#ifdef TARGET_PC
+    return mn_PcSelectionFrames(kind, selection);
+#else
+    (void) kind;
+    return 2 * selection;
+#endif
 }
 
 /// @brief counts the unlocked selections of a menu
@@ -1652,6 +1789,13 @@ HSD_GObj* mn_8022B3A0(u8 state)
     PAD_STACK(16);
 
     cur_menu = mn_804A04F0.cur_menu;
+#ifdef TARGET_PC
+    if (cur_menu == MENU_KIND_ONLINE_SLIPPI) {
+        /* Login alone signed out; Unranked, Direct and Logout signed in. */
+        mn_803EB6B0[MENU_KIND_ONLINE_SLIPPI].selection_count = (u8) mnOnline_SlippiCount();
+        mnOnline_SlippiBuilt();
+    }
+#endif
     /// @todo Idiomatic spellings put the pointer in a named local, not a temp.
     anim_loop = (AnimLoopSettings*) ((u8*) mn_803EB6B0[cur_menu].anim_loop +
                                      sizeof(AnimLoopSettings)) -
@@ -1677,6 +1821,9 @@ HSD_GObj* mn_8022B3A0(u8 state)
     user_data->state = state;
     user_data->description = NULL;
 #ifdef TARGET_PC
+    /* The rows this panel was built with, so a rebuild of the same menu
+     * (Slippi's Logout) can tell the old panel to leave. */
+    user_data->pad_3 = (u8) mn_803EB6B0[mn_804A04F0.cur_menu].selection_count;
     for (idx = 0; idx < (int) ARRAY_SIZE(user_data->pc_label); idx++) {
         user_data->pc_label[idx] = NULL;
     }
@@ -1724,7 +1871,7 @@ HSD_GObj* mn_8022B3A0(u8 state)
             HSD_JObjAnimAll(jobj.value);
             HSD_JObjReqAnim(jobj.value,
                             mn_803EB6B0[mn_804A04F0.cur_menu].start_frame +
-                                GetSelectionFrameOffset(i));
+                                GetSelectionFrameOffset(mn_804A04F0.cur_menu, i));
             mn_8022F3D8(jobj.value, 0xC, TOBJ_MASK);
             mn_8022F3D8(jobj.value, 0xD, TOBJ_MASK);
             mn_8022F3D8(jobj.value, 0xE, TOBJ_MASK);
@@ -1755,8 +1902,10 @@ HSD_GObj* mn_8022B3A0(u8 state)
             }
 #ifdef TARGET_PC
             if (mnOnline_Label(mn_804A04F0.cur_menu, i) != NULL) {
-                /* no label texture; mn_UpdatePcLabels draws SIS text */
+                /* no label texture; mn_UpdatePcLabels draws SIS text, leaning
+                 * as this (hidden) label joint would */
                 HSD_JObjSetFlagsAll(cursor_parts[1], JOBJ_HIDDEN);
+                mn_pcLabelPart[unlocked_index < 8 ? unlocked_index : 7] = cursor_parts[1];
             }
 #endif
             HSD_JObjAddChild(option_jobjs[unlocked_index], cursor_jobj);
@@ -1964,7 +2113,12 @@ GXColor* mn_8022BFBC(int arg0)
 int mn_8022C010(int menu_kind, int selection)
 {
     if (menu_kind == MENU_KIND_MAIN) {
+#ifdef TARGET_PC
+        /* Online Play shares VS. Mode's colour; the rows below keep theirs. */
+        return selection <= SEL_MAIN_VS ? selection : selection == SEL_MAIN_ONLINE ? 1 : selection - 1;
+#else
         return selection;
+#endif
     }
     switch (menu_kind) {
     case MENU_KIND_1P:
@@ -1986,6 +2140,7 @@ int mn_8022C010(int menu_kind, int selection)
     case MENU_KIND_NAME_ENTRY:
 #ifdef TARGET_PC
     case MENU_KIND_ONLINE:
+    case MENU_KIND_ONLINE_SLIPPI:
 #endif
         return 1;
     case MENU_KIND_TOY:
@@ -2749,12 +2904,6 @@ void mn_8022D594(HSD_GObj* gp)
             data->pending_mode = GM_TOURNAMENT;
             gm_801A4B60();
             break;
-#ifdef TARGET_PC
-        case SEL_VS_ONLINE:
-            sfxForward();
-            mn_80229894(MENU_KIND_ONLINE, SEL_ONLINE_LAN, 1);
-            break;
-#endif
         case SEL_VS_SPECIAL:
             sfxForward();
             mn_804D6BC8.cooldown = 5;
@@ -2949,6 +3098,12 @@ void mn_8022DB10(HSD_GObj* gp)
             menu_kind = MENU_KIND_VS;
             hovered_selection = 0;
             break;
+#ifdef TARGET_PC
+        case SEL_MAIN_ONLINE:
+            menu_kind = MENU_KIND_ONLINE;
+            hovered_selection = 0;
+            break;
+#endif
         case SEL_MAIN_TOY:
             menu_kind = MENU_KIND_TOY;
             hovered_selection = 0;

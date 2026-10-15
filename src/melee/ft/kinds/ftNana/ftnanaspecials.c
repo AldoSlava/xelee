@@ -1,3 +1,4 @@
+#include <pc/pc.h>
 #include <Runtime/platform.h>
 
 #include <melee/ft/forward.h>
@@ -72,7 +73,7 @@ bool ftNn_Init_80123954(Fighter_GObj* nana_gobj, GroundOrAir pp_ga)
              * states is what lets the Ice Climbers freeze glitch lock a
              * victim for good. Online play keeps the link, as Slippi does;
              * offline keeps retail. */
-            if (!pc_net_deterministic())
+            if (!pc_is_slippi_fixes_enabled())
 #endif
                 nana_fp->x1A5C = NULL;
             ret = true;

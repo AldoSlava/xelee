@@ -373,7 +373,7 @@ Preferences load_preferences(const std::filesystem::path& path) {
                 prefs.scale = value;
         } else if (key == "check_updates" || key == "custom_textures" || key == "unlock_all" ||
                    key == "frozen_stadium" || key == "free_camera" || key == "ucf" ||
-                   key == "reverb")
+                   key == "slippi_fixes" || key == "reverb")
         {
             int value;
             if (row >> value && (value == 0 || value == 1)) {
@@ -389,6 +389,8 @@ Preferences load_preferences(const std::filesystem::path& path) {
                     prefs.free_camera = value;
                 else if (key == "ucf")
                     prefs.ucf = value;
+                else if (key == "slippi_fixes")
+                    prefs.slippi_fixes = value;
                 else if (key == "reverb")
                     prefs.reverb = value;
             }
@@ -432,6 +434,7 @@ bool save_preferences(
          << "\nmusic_volume " << prefs.music_volume << "\nsfx_volume " << prefs.sfx_volume
          << "\ninstall_id " << std::hex << prefs.install_id << std::dec << '\n';
     text << "reverb " << prefs.reverb << '\n';
+    text << "slippi_fixes " << prefs.slippi_fixes << '\n';
     auto data = text.str();
     size_t done = 0;
     bool ok = true;

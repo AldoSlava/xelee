@@ -51,3 +51,4 @@ mods/*
 # CTest temporary files
 Testing/
 
+.claude/worktrees/

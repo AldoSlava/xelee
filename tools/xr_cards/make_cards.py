@@ -30,6 +30,8 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 OUT = os.path.join(ROOT, "resources", "xr")
 FONT = os.path.join(ROOT, "resources", "font-bold.ttf")
 
+DONE = False  # the Place Stage menu flow: the cards say "done", not "fight"
+
 SS = 2  # supersampling: drawn at twice the size, then reduced
 
 # Melee's menu palette (VS. Mode, the pause screen).
@@ -400,8 +402,8 @@ def board(hands, firsts=None):
         ("MOVE", still("move", picture_move), [grab, ["and drag, near or far."]]),
         ("TURN", still("turn", picture_turn), [both, ["and twist."]]),
         ("SCALE", still("scale", picture_scale), [both, ["and pull apart or together."]]),
-        ("READY?", picture_start, [
-            [("btn", "A"), "or ", ("btn", "START"), "Fight!"],
+        ("ALL SET?" if DONE else "READY?", picture_start, [
+            [("btn", "A"), "or ", ("btn", "START"), "Done!" if DONE else "Fight!"],
             [("btn", "B"), "Reset the stage"],
             [("btn", "Y"), "Hide these tips"],
         ]),
@@ -416,7 +418,7 @@ def board(hands, firsts=None):
 
 def legend(hands):
     move = ("btn", "PINCH") if hands else ("btn", "GRIP")
-    parts = [("btn", "A"), "Start   ", ("btn", "B"), "Reset   ", ("btn", "Y"), "Tips   ", move, " Move"]
+    parts = [("btn", "A"), "Done   " if DONE else "Start   ", ("btn", "B"), "Reset   ", ("btn", "Y"), "Tips   ", move, " Move"]
     size = 30
     w = rich_width(parts, size) + s(80)
     h = s(84)
@@ -452,6 +454,11 @@ if __name__ == "__main__":
         img, rects = board(hands, firsts)
         save(img, cards)
         save(legend(hands), legend_name)
+        DONE = True  # the same boards for the Place Stage menu flow
+        done_img, _ = board(hands, firsts)
+        save(done_img, cards.replace(".png", "-done.png"))
+        save(legend(hands), legend_name.replace(".png", "-done.png"))
+        DONE = False
         for name, frames, cols in index:
             x, y, w, h = rects[CLIPS.index(name)]
             lines.append(f"{clipset} {name} {frames} {cols} {w1} {h1} {CLIP_FPS} {x // SS} {y // SS} {w // SS} {h // SS}")

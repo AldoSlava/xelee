@@ -1,3 +1,4 @@
+#include "pc/xr_place.h"
 #include "gmvsmode.h"
 
 #include <stdlib.h>
@@ -16,6 +17,7 @@
 #include <melee/mn/types.h>
 
 /* 1B13B8 */ static void onEnterDebugVs(GameModeState*);
+static void fillDebugVs(GameModeState*, bool dummy);
 /* 1B14A0 */ static void onEnterCss(GameModeState*);
 /* 1B14DC */ static void onExitCss(GameModeState*);
 /* 1B1514 */ static void onEnterSss(GameModeState*);
@@ -162,6 +164,23 @@ GameModeState gm_Mode_DebugVs_States[] = {
 
 void onEnterDebugVs(GameModeState* state)
 {
+#ifdef TARGET_PC
+    fillDebugVs(state, getenv("MELEE_PLACE_DUMMY") != NULL);
+#else
+    fillDebugVs(state, false);
+#endif
+}
+
+#ifdef TARGET_PC
+/* The Slippi menu's Place Stage scene (gmonlinemode.c). */
+void gmVsMode_PlaceDummyEnter(GameModeState* state)
+{
+    fillDebugVs(state, true);
+}
+#endif
+
+static void fillDebugVs(GameModeState* state, UNUSED bool dummy)
+{
     StartMeleeData* start = gm_GetGameModeStateEnterData(state);
     ssize_t i;
 
@@ -179,6 +198,20 @@ void onEnterDebugVs(GameModeState* state)
 
     start->players[0].ckind = CKind_Link;
     start->players[1].ckind = CKind_Mario;
+#ifdef TARGET_PC
+    if (dummy) {
+        /* The stage-placement dummy as a debug scene (the online menu's
+         * Place Stage is gmonlinemode.c's own): flat testing, A or B ends it. */
+        extern bool gm_vs_place_dummy;
+        extern int gm_vs_place_dummy_frame;
+        start->players[0].ckind = CKind_Fox;
+        start->players[1].ckind = CKind_Captain;
+        start->rules.stkind = St_Kind_Battle;
+        gm_vs_place_dummy = true;
+        gm_vs_place_dummy_frame = 0;
+        pc_xr_place_dummy_start();
+    }
+#endif
     start->players[2].ckind = CKind_Link;
     start->players[3].ckind = CKind_Link;
 

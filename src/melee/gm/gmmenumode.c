@@ -188,10 +188,29 @@ void onEnter(GameModeState* scene)
         return;
 #ifdef TARGET_PC
     case GM_ONLINE:
-        data->menu_kind = MENU_KIND_ONLINE;
-        data->hovered_selection = gmOnline_GetKind() == ONLINE_KIND_DIRECT
-                                      ? SEL_ONLINE_DIRECT
-                                      : SEL_ONLINE_LAN;
+        /* Back out of a lobby into the menu it was entered from. */
+        switch (gmOnline_GetKind()) {
+        case ONLINE_KIND_UNRANKED:
+            data->menu_kind = MENU_KIND_ONLINE_SLIPPI;
+            data->hovered_selection = SEL_SLIPPI_UNRANKED;
+            break;
+        case ONLINE_KIND_DIRECT:
+            data->menu_kind = MENU_KIND_ONLINE_SLIPPI;
+            data->hovered_selection = SEL_SLIPPI_DIRECT;
+            break;
+        case ONLINE_KIND_LOGIN:
+            data->menu_kind = MENU_KIND_ONLINE_SLIPPI;
+            data->hovered_selection = 0;
+            break;
+        case ONLINE_KIND_PLACE:
+            data->menu_kind = MENU_KIND_ONLINE_SLIPPI;
+            data->hovered_selection = SEL_SLIPPI_PLACE;
+            break;
+        default:
+            data->menu_kind = MENU_KIND_ONLINE;
+            data->hovered_selection = SEL_ONLINE_LAN;
+            break;
+        }
         return;
 #endif
     case GM_CAMERA_MODE:

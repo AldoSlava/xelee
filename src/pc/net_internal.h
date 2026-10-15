@@ -68,6 +68,7 @@
 #include "pc/net.h"
 #include "pc/net_lan.h"
 #include "pc/pc.h"
+#include "pc/slippi/slp_checksum.h"
 
 #include <dolphin/pad.h>
 #pragma GCC diagnostic push
@@ -375,6 +376,9 @@ struct NetSession {
     bool hs_host;
     bool direct;   /* MELEE_NET: no lobby, so the session agrees its own match */
     uint32_t seed; /* agreed RNG seed (0: none) */
+    /* Slippi: the decider's rngOffset. It is the match's first seed and the
+     * constant SyncRNG adds every frame (gmvs.c slippiSyncRng). */
+    uint32_t rng_offset;
     int32_t start_frame;
     int32_t ck_from; /* checksums before this frame are not compared */
 
@@ -394,6 +398,13 @@ struct NetSession {
 
     /* sync test (net_snapshot.c) */
     bool synctest;
+
+    /* Slippi transport (MELEE_NET_STACK=slippi, src/pc/slippi/). When true,
+     * the send/receive/wait paths below go through the Slippi ENet driver and
+     * its adapter instead of the custom UDP socket, while the rollback loop,
+     * snapshot ring, barrier and pad handling stay exactly as they are. `sock`
+     * is SOCK_INVALID under Slippi (there is no custom socket). */
+    bool slippi;
 };
 extern struct NetSession net;
 
@@ -480,12 +491,18 @@ void sim_reset(void);
 void rel_service(void); /* caller holds tx_lock */
 void on_rel(const Rel* r, int n);
 void on_rel_ack(const RelAck* k);
+/* Deliver one lane-1 reliable message to its consumer (REL_RESUME, REL_DELAY,
+ * REL_SCENE, REL_CHAT, or a caller-queued type). Shared by the custom
+ * transport's on_rel and the Slippi receive path. False when a caller-queued
+ * message had no room. */
+bool rel_dispatch(uint8_t type, const void* payload, int len);
 void rel_reset(void);
 
 /* ---- net_handshake.c -------------------------------------------------- */
 
 void handshake_msg(uint8_t type, const uint8_t* payload, int len);
 void rules_restore(void);
+int32_t pc_net_slippi_time_offset_us(void);
 void handshake_direct(void);
 
 /* ---- net_sync.c ------------------------------------------------------- */
@@ -528,6 +545,22 @@ void snaps_reserve(void);
 void snaps_free(void);
 void snap_stats_report(void);
 uint32_t frame_checksum(const PADStatus* head);
+/* Slippi's exact wire desync checksum over the live game (net_snapshot.c),
+ * used only on the Slippi transport. Distinct from frame_checksum. */
+uint32_t pc_slippi_wire_checksum(void);
+
+/* True when the Slippi transport is the active session's transport. */
+bool pc_net_slippi_active(void);
+/* Host: send the Slippi direct-session setup (seed + start frame) on ENet's
+ * reliable channel; false until the peer is connected. Guest: false always.
+ * Interim until M4's selections flow (net.c). */
+bool pc_net_slippi_send_setup(uint32_t seed, int32_t start_frame);
+/* Send a tunnelled engine reliable message (lane 1) on ENet's reliable channel
+ * (net.c). */
+bool pc_net_slippi_send_rel(uint8_t type, const void* payload, int len);
+/* The peer connection state for the Slippi setup wait: 0 connecting, 1 up,
+ * 2 gone. */
+int pc_net_slippi_conn_state(void);
 void record_state(const PADStatus* head, int32_t frame);
 void dump_states_around(int32_t frame);
 const char* state_line(int32_t frame); /* one frame's recorded state line, "" if gone */

@@ -135,6 +135,17 @@ bool pc_net_send_reliable(uint8_t type, const void* payload, int len) {
     if (!net.active || len < 0 || len > REL_MAX || (len > 0 && payload == NULL)) {
         return false;
     }
+    /* The Slippi transport has no custom reliable channel: lane-1 traffic
+     * (scene hand-off, delay, chat) is tunnelled on ENet's reliable channel
+     * instead, so it never touches the (absent) custom socket. Lane 0 is the
+     * RULES/READY handshake, which the Slippi path replaces with
+     * PC_SLIPPI_MSG_SETUP; refuse it rather than send it into the void. */
+    if (pc_net_slippi_active()) {
+        if (type < 0x10) {
+            return false; /* lane 0: the custom RULES/READY handshake only */
+        }
+        return pc_net_slippi_send_rel(type, payload, len);
+    }
     RelTx* t = &s_rel_tx[lane_of(type)];
     SDL_LockMutex(net.tx_lock);
     bool ok = t->n < REL_QUEUE && (!rel_low_priority(type) || low_queued(t) < REL_LOW_QUEUE);
@@ -173,23 +184,17 @@ void on_rel(const Rel* r, int n) {
     if (d == 0) {
         if (lane == 0) {
             handshake_msg(r->type, r->payload, r->len);
-        } else if (r->type == REL_RESUME) {
-            net_resume_rel(r->payload, r->len);
-        } else if (r->type == REL_DELAY) {
-            net_delay_rel(r->payload, r->len);
-        } else if (r->type == REL_SCENE) {
-            net_scene_rel(r->payload, r->len);
-        } else if (r->type == REL_CHAT) {
-            pc_net_chat_receive(r->payload, r->len);
-        } else if (s_rel_rx_n < REL_QUEUE) {
-            RelMsg* m = &s_rel_rx[(s_rel_rx_head + s_rel_rx_n++) % REL_QUEUE];
-            m->type = r->type;
-            m->len = r->len;
-            memcpy(m->payload, r->payload, r->len);
+            s_rel_expect[lane] = (s_rel_expect[lane] + 1) & REL_SEQ_MASK;
         } else {
-            return; /* caller is not draining: no ack, the peer resends later */
+            /* Lane 1 is the engine's own reliable traffic. The Slippi transport
+             * carries it directly on ENet's reliable channel and calls
+             * rel_dispatch itself, so this path only runs for the custom
+             * transport (which has already done the seq/ack bookkeeping). */
+            if (!rel_dispatch(r->type, r->payload, r->len)) {
+                return; /* caller not draining: no ack, the peer resends later */
+            }
+            s_rel_expect[lane] = (s_rel_expect[lane] + 1) & REL_SEQ_MASK;
         }
-        s_rel_expect[lane] = (s_rel_expect[lane] + 1) & REL_SEQ_MASK;
     } else if (d < -REL_REACK || d > 0) {
         if (!s_rel_unexpected_logged) {
             s_rel_unexpected_logged = true;
@@ -202,6 +207,34 @@ void on_rel(const Rel* r, int n) {
     SDL_LockMutex(net.tx_lock);
     tx(&k, sizeof k);
     SDL_UnlockMutex(net.tx_lock);
+}
+
+/* Deliver one lane-1 reliable message to whatever consumes it. Shared by
+ * on_rel (custom transport) and the Slippi receive path (net.c). Returns
+ * false when a caller-queued message had no room (the custom path then
+ * withholds the ack so the peer resends; Slippi has already delivered it, so
+ * the message is simply dropped there). */
+bool rel_dispatch(uint8_t type, const void* payload, int len) {
+    if (type == REL_RESUME) {
+        net_resume_rel(payload, len);
+    } else if (type == REL_DELAY) {
+        net_delay_rel(payload, len);
+    } else if (type == REL_SCENE) {
+        net_scene_rel(payload, len);
+    } else if (type == REL_CHAT) {
+        pc_net_chat_receive(payload, len);
+    } else {
+        if (s_rel_rx_n >= REL_QUEUE) {
+            return false;
+        }
+        RelMsg* m = &s_rel_rx[(s_rel_rx_head + s_rel_rx_n++) % REL_QUEUE];
+        m->type = type;
+        m->len = (uint16_t)len;
+        if (len > 0) {
+            memcpy(m->payload, payload, (size_t)len);
+        }
+    }
+    return true;
 }
 
 void on_rel_ack(const RelAck* k) {
