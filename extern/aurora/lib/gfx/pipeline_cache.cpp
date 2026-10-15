@@ -73,6 +73,11 @@ struct PipelineCacheWrite {
   ByteBuffer config;
   uint32_t firstFrameUsed = UINT32_MAX;
   bool deviceBuilt = false; // only marks (type, hash) in pipeline_device
+  // A (config, layout) pair a draw asked for (pipeline_pair), with its layout
+  // (pipeline_layout): what precompile_recorded_pipelines builds.
+  bool pair = false;
+  uint64_t layoutKey = 0;
+  ByteBuffer layout;
 };
 
 using SavedPipelineConfig = std::variant<gx::PipelineConfig, clear::PipelineConfig
@@ -162,6 +167,19 @@ static sqlite3* g_pipelineCacheDb = nullptr;
 static sqlite3_stmt* g_pipelineCacheLoadStmt = nullptr;
 static sqlite3_stmt* g_pipelineCacheUpsertStmt = nullptr;
 static sqlite3_stmt* g_pipelineDeviceStmt = nullptr;
+static sqlite3_stmt* g_pipelinePairStmt = nullptr;
+static sqlite3_stmt* g_pipelineLayoutStmt = nullptr;
+// Pairs recorded (or loaded as recorded) this session, by runtime key.
+static std::mutex g_recordedPairsMutex;
+static absl::flat_hash_set<PipelineRef> g_recordedPairs;
+// AURORA_PRECOMPILE: building every recorded pair in the background.
+static std::thread g_precompileThread;
+static std::atomic_bool g_precompileStop{false};
+static std::atomic_size_t g_precompileTotal{0}, g_precompileDone{0};
+static bool g_precompiling = false;
+// Recorded pairs queued this process (rebuild_pipeline_cache), and how many.
+static bool g_pairsQueued = false;
+static size_t g_recordedPairCount = 0;
 static bool g_pipelineCacheBroken = false;
 static std::thread g_pipelineCacheWriterThread;
 static std::condition_variable g_pipelineCacheWriterCv;
@@ -434,13 +452,21 @@ static absl::flat_hash_set<PipelineRef> g_drawnPipelines; // guarded by g_pipeli
 static wgpu::RenderPipeline create_timed(const NewPipelineCallback& create) {
 #if defined(__ANDROID__)
   // SEARCH prewarm and GX FIFO draws may compile on different threads.
+  // AURORA_PIPELINE_SERIAL=0: they may compile at once (with MELEE_PIPELINE_JOBS).
   static std::mutex createMutex;
-  std::unique_lock lock{createMutex};
+  static const bool serial = [] {
+    const char* v = std::getenv("AURORA_PIPELINE_SERIAL");
+    return v == nullptr || *v != '0';
+  }();
+  std::unique_lock lock{createMutex, std::defer_lock};
+  if (serial)
+    lock.lock();
 #endif
   const auto start = std::chrono::steady_clock::now();
   auto pipeline = create();
 #if defined(__ANDROID__)
-  lock.unlock();
+  if (serial)
+    lock.unlock();
 #endif
   const uint64_t ns = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
@@ -515,6 +541,22 @@ static void mark_device_built(ShaderType type, HashType cacheKey) {
     }
   }
   enqueue_pipeline_cache_write(PipelineCacheWrite{.type = type, .hash = cacheKey, .deviceBuilt = true});
+}
+
+/* A draw asked for config `cacheKey` in `layout`: kept, once, so another
+ * process (the Quest launcher) can build exactly the pipelines the game uses,
+ * eye, batch and motion layouts included, which the known-config queue never
+ * builds (it builds every config for the scene layout only). */
+static void record_pipeline_pair(ShaderType type, HashType cacheKey, const RenderTargetLayout& layout) {
+  {
+    std::lock_guard lock{g_recordedPairsMutex};
+    if (!g_recordedPairs.insert(xxh3_hash(layout.key, cacheKey)).second)
+      return;
+  }
+  PipelineCacheWrite write{.type = type, .hash = cacheKey, .firstFrameUsed = current_frame(), .pair = true,
+                           .layoutKey = layout.key, .layout = ByteBuffer(sizeof(layout))};
+  std::memcpy(write.layout.data(), &layout, sizeof(layout));
+  enqueue_pipeline_cache_write(std::move(write));
 }
 
 template <typename Queue>
@@ -667,10 +709,27 @@ static PipelineRef find_pipeline_impl(PipelineRef runtimeKey, NewPipelineCallbac
 static PipelineRef resolve_pipeline(ShaderType type, const gx::PipelineConfig& config, const RenderTargetLayout& layout,
                                     PipelinePriority priority) {
   const auto cacheKey = xxh3_hash(config, static_cast<HashType>(type));
+  if (priority != PipelinePriority::Background)
+    record_pipeline_pair(type, cacheKey, layout);
   return find_pipeline_impl(
       xxh3_hash(layout.key, cacheKey),
       [type, cacheKey, config, layout] {
+        // AURORA_LOG_SLOW_PIPELINES=<ms>: builds slower than that (Dawn or
+        // driver cache misses), by layout. A diagnostic.
+        static const int slowMs = [] {
+          const char* v = std::getenv("AURORA_LOG_SLOW_PIPELINES");
+          return v != nullptr ? std::atoi(v) : 0;
+        }();
+        const auto start = std::chrono::steady_clock::now();
         auto pipeline = create_pipeline(config, layout);
+        if (slowMs > 0) {
+          const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+          if (ms >= slowMs)
+            Log.info("slow pipeline {:.0f} ms: config {:016x} layout {:016x} views {} samples {} batch {} motion {} "
+                     "softclip {} colors {}",
+                     ms, cacheKey, layout.key, layout.viewCount, layout.sampleCount, layout.xrBatch, layout.xrMotion,
+                     layout.xrSoftClip, layout.colorAttachmentCount);
+        }
         mark_device_built(type, cacheKey);
         return pipeline;
       },
@@ -680,6 +739,8 @@ static PipelineRef resolve_pipeline(ShaderType type, const gx::PipelineConfig& c
 static PipelineRef resolve_pipeline(ShaderType type, const clear::PipelineConfig& config,
                                     const RenderTargetLayout& layout, PipelinePriority priority) {
   const auto cacheKey = xxh3_hash(config, static_cast<HashType>(type));
+  if (priority != PipelinePriority::Background)
+    record_pipeline_pair(type, cacheKey, layout);
   return find_pipeline_impl(
       xxh3_hash(layout.key, cacheKey),
       [type, cacheKey, config, layout] {
@@ -718,6 +779,12 @@ static void pipeline_cache_abort() {
   if (g_pipelineDeviceStmt != nullptr) {
     sqlite3_finalize(g_pipelineDeviceStmt);
     g_pipelineDeviceStmt = nullptr;
+  }
+  for (auto* stmt : {&g_pipelinePairStmt, &g_pipelineLayoutStmt}) {
+    if (*stmt != nullptr) {
+      sqlite3_finalize(*stmt);
+      *stmt = nullptr;
+    }
   }
   if (g_pipelineCacheDb != nullptr) {
     sqlite3_close(g_pipelineCacheDb);
@@ -1036,6 +1103,28 @@ INSERT INTO aurora_schema VALUES ({});)",
     }
   }
 
+  ret = sqlite::exec(g_pipelineCacheDb,
+                     "CREATE TABLE IF NOT EXISTS pipeline_layout ("
+                     "key INTEGER PRIMARY KEY, layout BLOB NOT NULL);"
+                     "CREATE TABLE IF NOT EXISTS pipeline_pair ("
+                     "type INTEGER NOT NULL, hash INTEGER NOT NULL, layout_key INTEGER NOT NULL, "
+                     "first_frame_used INTEGER NOT NULL, PRIMARY KEY (type, hash, layout_key)) WITHOUT ROWID;");
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_prepare_v3(g_pipelineCacheDb, "INSERT OR IGNORE INTO pipeline_layout (key, layout) VALUES (?, ?)",
+                             -1, SQLITE_PREPARE_PERSISTENT, &g_pipelineLayoutStmt, nullptr);
+  }
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_prepare_v3(g_pipelineCacheDb,
+                             "INSERT OR IGNORE INTO pipeline_pair (type, hash, layout_key, first_frame_used) "
+                             "VALUES (?, ?, ?, ?)",
+                             -1, SQLITE_PREPARE_PERSISTENT, &g_pipelinePairStmt, nullptr);
+  }
+  if (ret != SQLITE_OK) {
+    Log.error("Failed to prepare pipeline_pair tables: {}", sqlite3_errmsg(g_pipelineCacheDb));
+    pipeline_cache_abort();
+    return false;
+  }
+
   seed_pipeline_cache();
   if (g_pipelineCacheBroken) {
     return false;
@@ -1162,6 +1251,40 @@ static bool write_device_built_record(const PipelineCacheWrite& write) {
   return ret == SQLITE_OK;
 }
 
+static bool write_pair_record(const PipelineCacheWrite& write) {
+  int ret = sqlite3_bind_int64(g_pipelineLayoutStmt, 1, static_cast<sqlite3_int64>(write.layoutKey));
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_bind_blob(g_pipelineLayoutStmt, 2, write.layout.data(), static_cast<int>(write.layout.size()),
+                            SQLITE_TRANSIENT);
+  }
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_step(g_pipelineLayoutStmt) == SQLITE_DONE ? SQLITE_OK : SQLITE_ERROR;
+  }
+  sqlite3_reset(g_pipelineLayoutStmt);
+  sqlite3_clear_bindings(g_pipelineLayoutStmt);
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_bind_int(g_pipelinePairStmt, 1, underlying(write.type));
+  }
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_bind_int64(g_pipelinePairStmt, 2, static_cast<sqlite3_int64>(write.hash));
+  }
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_bind_int64(g_pipelinePairStmt, 3, static_cast<sqlite3_int64>(write.layoutKey));
+  }
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_bind_int64(g_pipelinePairStmt, 4, write.firstFrameUsed);
+  }
+  if (ret == SQLITE_OK) {
+    ret = sqlite3_step(g_pipelinePairStmt) == SQLITE_DONE ? SQLITE_OK : SQLITE_ERROR;
+  }
+  if (ret != SQLITE_OK) {
+    Log.error("Failed to record a pipeline's layout: {}", sqlite3_errmsg(g_pipelineCacheDb));
+  }
+  sqlite3_reset(g_pipelinePairStmt);
+  sqlite3_clear_bindings(g_pipelinePairStmt);
+  return ret == SQLITE_OK;
+}
+
 static void pipeline_cache_writer() {
 #ifdef TRACY_ENABLE
   tracy::SetThreadName("Pipeline cache writer thread");
@@ -1187,7 +1310,10 @@ static void pipeline_cache_writer() {
         writeFailed = true;
       } else {
         for (const auto& write : batch) {
-          if (!(write.deviceBuilt ? write_device_built_record(write) : write_pipeline_cache_record(write))) {
+          const bool ok = write.pair          ? write_pair_record(write)
+                          : write.deviceBuilt ? write_device_built_record(write)
+                                              : write_pipeline_cache_record(write);
+          if (!ok) {
             writeFailed = true;
             break;
           }
@@ -1400,6 +1526,62 @@ PipelineRef find_pipeline(const rmlui::PipelineConfig& config) {
 }
 #endif
 
+// A (config, layout) pair a draw asked for in an earlier session (pipeline_pair).
+struct RecordedPair {
+  ShaderType type;
+  std::variant<gx::PipelineConfig, clear::PipelineConfig> config;
+  RenderTargetLayout layout;
+};
+
+// Every recorded pair this build can still use, in the order draws first asked
+// for them.
+static std::vector<RecordedPair> load_recorded_pairs() {
+  std::vector<RecordedPair> jobs;
+  {
+    absl::flat_hash_map<uint64_t, RenderTargetLayout> layouts;
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(g_pipelineCacheDb, "SELECT key, layout FROM pipeline_layout", -1, &stmt, nullptr) ==
+        SQLITE_OK) {
+      while (sqlite3_step(stmt) == SQLITE_ROW) {
+        if (sqlite3_column_bytes(stmt, 1) != static_cast<int>(sizeof(RenderTargetLayout)))
+          continue;
+        RenderTargetLayout layout;
+        std::memcpy(&layout, sqlite3_column_blob(stmt, 1), sizeof(layout));
+        layouts.emplace(static_cast<uint64_t>(sqlite3_column_int64(stmt, 0)), layout);
+      }
+    }
+    sqlite3_finalize(stmt);
+    stmt = nullptr;
+    if (sqlite3_prepare_v2(g_pipelineCacheDb,
+                           "SELECT p.type, p.layout_key, c.config FROM pipeline_pair p "
+                           "JOIN pipeline_cache c ON c.type = p.type AND c.hash = p.hash "
+                           "ORDER BY p.first_frame_used",
+                           -1, &stmt, nullptr) == SQLITE_OK) {
+      while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const auto type = static_cast<ShaderType>(sqlite3_column_int(stmt, 0));
+        const auto layoutIt = layouts.find(static_cast<uint64_t>(sqlite3_column_int64(stmt, 1)));
+        const auto* blob = sqlite3_column_blob(stmt, 2);
+        const int size = sqlite3_column_bytes(stmt, 2);
+        if (layoutIt == layouts.end() || blob == nullptr)
+          continue;
+        if (type == ShaderType::GX && size == static_cast<int>(sizeof(gx::PipelineConfig))) {
+          gx::PipelineConfig config;
+          std::memcpy(&config, blob, sizeof(config));
+          if (config.version == gx::GXPipelineConfigVersion)
+            jobs.push_back({type, config, layoutIt->second});
+        } else if (type == ShaderType::Clear && size == static_cast<int>(sizeof(clear::PipelineConfig))) {
+          clear::PipelineConfig config;
+          std::memcpy(&config, blob, sizeof(config));
+          if (config.version == clear::ClearPipelineConfigVersion)
+            jobs.push_back({type, config, layoutIt->second});
+        }
+      }
+    }
+    sqlite3_finalize(stmt);
+  }
+  return jobs;
+}
+
 void rebuild_pipeline_cache() {
   ZoneScoped;
   const auto scene = scene_render_target_layout();
@@ -1408,6 +1590,37 @@ void rebuild_pipeline_cache() {
   offscreen.sampleCount = 1;
   detail::finalize_render_target_layout(offscreen);
   g_pipelineLayoutKey = scene.key;
+
+  /* First, once a process: every pair draws asked for before, in first-use
+   * order, the XR eye, batch and motion layouts included (the sweep below
+   * only knows the scene layouts, so a fight's eye pipelines were all built
+   * on demand: 977 of the 1164 a warm 4P Brinstar fight drew weren't ready
+   * when first drawn). */
+  if (!g_pairsQueued && !g_pipelineCacheBroken && g_pipelineCacheDb != nullptr) {
+    g_pairsQueued = true;
+    const auto pairs = load_recorded_pairs();
+    g_recordedPairCount = pairs.size();
+    Log.info("Queueing {} recorded pipelines (config and layout)", pairs.size());
+    for (const auto& pair : pairs) {
+      std::visit(
+          [&](const auto& config) {
+            {
+              std::lock_guard lock{g_recordedPairsMutex};
+              g_recordedPairs.insert(xxh3_hash(pair.layout.key, xxh3_hash(config, static_cast<HashType>(pair.type))));
+            }
+            resolve_pipeline(pair.type, config, pair.layout, PipelinePriority::Background);
+          },
+          pair.config);
+    }
+  }
+#if defined(__ANDROID__)
+  /* With recorded pairs, Android skips every known config for the scene
+   * layouts: on the Quest that was ~2000 pipelines a fight never drew (it drew
+   * 330 of them), 58 ms each on a cold cache, all competing with the game for
+   * the CPU. A config a draw asks for again is built then, and recorded. */
+  if (g_recordedPairCount > 0)
+    return;
+#endif
 
   std::vector<KnownPipeline> known;
   {
@@ -1431,6 +1644,50 @@ void rebuild_pipeline_cache() {
         },
         pipeline.config);
   }
+}
+
+/* AURORA_PRECOMPILE=<threads>: build every recorded (config, layout) pair, as
+ * fast as `threads` allow, so the pipelines land in Dawn's blob cache for the
+ * next process on this device. The Quest launcher panel shares the game
+ * process's cache key (xr::add_required_features), so pipelines it builds are
+ * the game's cache hits. The pipelines themselves are dropped. */
+static void precompile_recorded_pipelines(unsigned threads) {
+  const auto jobs = load_recorded_pairs();
+  g_precompileTotal = jobs.size();
+  Log.info("Precompiling {} recorded pipelines on {} thread(s)", jobs.size(), threads);
+  {
+    absl::flat_hash_map<uint64_t, std::pair<const RenderTargetLayout*, size_t>> perLayout;
+    for (const auto& job : jobs) {
+      auto& [layout, count] = perLayout[job.layout.key];
+      layout = &job.layout;
+      ++count;
+    }
+    for (const auto& [key, entry] : perLayout)
+      Log.info("  layout {:016x}: {} pipelines (views {} samples {} batch {} motion {} softclip {} colors {})", key,
+               entry.second, entry.first->viewCount, entry.first->sampleCount, entry.first->xrBatch,
+               entry.first->xrMotion, entry.first->xrSoftClip, entry.first->colorAttachmentCount);
+  }
+  const auto start = std::chrono::steady_clock::now();
+  std::atomic_size_t next{0}, done{0};
+  const auto work = [&] {
+    for (size_t i = next++; i < jobs.size() && !g_precompileStop; i = next++) {
+      std::visit([&](const auto& config) { (void)create_pipeline(config, jobs[i].layout); }, jobs[i].config);
+      ++g_precompileDone;
+      if (const size_t n = ++done; n % 250 == 0)
+        Log.info("Precompiled {} of {} pipelines ({:.1f} s)", n, jobs.size(),
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+    }
+  };
+  std::vector<std::thread> workers;
+  for (unsigned t = 1; t < threads; ++t)
+    workers.emplace_back(work);
+  work();
+  for (auto& w : workers)
+    w.join();
+  Log.info("Precompiled {} of {} pipelines in {:.1f} s", done.load(), jobs.size(),
+           std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+  if (const auto line = webgpu::compile_stats_line(); !line.empty())
+    Log.info("pipeline compile time: {}", line);
 }
 
 void initialize_pipeline_cache() {
@@ -1472,16 +1729,65 @@ void initialize_pipeline_cache() {
 
   const size_t loadedCount = load_pipeline_cache();
   rebuild_pipeline_cache();
-  if (!g_pipelineCacheBroken && loadedCount > 0) {
+  /* The Quest launcher panel precompiles by default (4 threads: a cold fight's
+   * ~1200 pipelines in ~23 s; the panel is idle, the game process isn't
+   * running), so the immersive game finds them in Dawn's cache. */
+#if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
+  const unsigned defaultPrecompile = xr::wanted() ? 0u : 4u;
+#else
+  const unsigned defaultPrecompile = 0u;
+#endif
+  const unsigned precompileThreads = [defaultPrecompile] {
+    const char* v = std::getenv("AURORA_PRECOMPILE");
+    return v != nullptr ? std::clamp(static_cast<unsigned>(std::atoi(v)), 0u, 16u) : defaultPrecompile;
+  }();
+  g_precompiling = precompileThreads > 0 && !g_pipelineCacheBroken;
+  // A precompiling process doesn't prune Dawn's cache: its own keys are not
+  // the only ones other processes need.
+  if (!g_pipelineCacheBroken && loadedCount > 0 && !g_precompiling) {
     g_gpuCachePrunePending = true;
   }
 
   if (!g_pipelineCacheBroken) {
     start_pipeline_cache_writer();
   }
+  if (g_precompiling) {
+    g_precompileStop = false;
+    g_precompileTotal = 0;
+    g_precompileDone = 0;
+    g_precompileThread = std::thread([precompileThreads] { precompile_recorded_pipelines(precompileThreads); });
+  }
+}
+
+uint32_t precompile_pending() {
+  if (!g_precompiling || !g_precompileThread.joinable())
+    return 0;
+  const size_t total = g_precompileTotal.load(), done = g_precompileDone.load();
+  // Still loading the pairs: say there is work without knowing how much.
+  if (total == 0)
+    return g_precompileStop ? 0 : 1;
+  return done >= total || g_precompileStop ? 0 : static_cast<uint32_t>(total - done);
+}
+
+void precompile_stop() {
+  if (g_precompileThread.joinable()) {
+    g_precompileStop = true;
+    g_precompileThread.join();
+  }
 }
 
 void shutdown_pipeline_cache() {
+  if (g_precompileThread.joinable()) {
+    g_precompileStop = true;
+    g_precompileThread.join();
+  }
+  g_precompiling = false;
+  g_pairsQueued = false;
+  g_recordedPairCount = 0;
+  {
+    std::lock_guard lock{g_recordedPairsMutex};
+    g_recordedPairs.clear();
+  }
   if (g_hasPipelineThread) {
     g_pipelineThreadEnd = true;
     g_pipelineQueueCv.notify_all();
@@ -1606,3 +1912,7 @@ uint32_t wait_pipelines(uint32_t maxWaitMs) {
 } // namespace aurora::gfx
 
 uint32_t aurora_wait_pipelines(uint32_t max_wait_ms) { return aurora::gfx::wait_pipelines(max_wait_ms); }
+
+uint32_t aurora_precompile_pending(void) { return aurora::gfx::precompile_pending(); }
+
+void aurora_precompile_stop(void) { aurora::gfx::precompile_stop(); }

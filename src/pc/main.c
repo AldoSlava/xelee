@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include <aurora/aurora.h>
 #include <aurora/dvd.h>
+#include <aurora/gfx.h>
 #include <aurora/main.h>
 #include <dolphin/ar.h>
 #include <dolphin/ax.h>
@@ -696,6 +697,8 @@ MELEE_EXPORT int main(int argc, char* argv[]) {
     /* The panel's work ends at Play: hand the disc to the immersive activity,
      * which boots straight into the game in its own process. */
     if (!xr_activity) {
+        /* Pressed Play before the precompile finished: the game needs the CPU. */
+        aurora_precompile_stop();
         if (pc_android_launch_xr(pc_launcher_selected_disc())) {
             pc_log_line("xr: launching the immersive game with %s", pc_launcher_selected_disc());
             return 0;

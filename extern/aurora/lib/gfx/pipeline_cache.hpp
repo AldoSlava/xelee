@@ -36,6 +36,10 @@ bool get_pipeline(PipelineRef ref, wgpu::RenderPipeline& pipeline);
 /* Blocks up to maxWaitMs while queued pipelines compile; returns how many are
  * still pending (queued or mid-compile). */
 uint32_t wait_pipelines(uint32_t maxWaitMs);
+// AURORA_PRECOMPILE (on by default in the Quest launcher): pipelines left to
+// build for the game process (0: done, or not precompiling), and stopping.
+uint32_t precompile_pending();
+void precompile_stop();
 // Pipelines created so far; any thread. A count still climbing means shaders
 // are compiling, which stalls the frame on the CPU (XR dynamic resolution
 // leaves such frames out of its costs).

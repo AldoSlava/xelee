@@ -311,10 +311,12 @@ void dialog_done(void* userdata, const char* const* files, int) {
  * where the player is already waiting; spend it there. */
 static uint32_t pending_pipelines() {
 #if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
-    /* Quest: the game runs in its own process (MeleeXrActivity), which warms
-     * its pipelines on a compile thread; pipelines built here die with this
-     * panel. Neither wait for nor build them. */
-    return 0;
+    /* Quest: the game runs in its own process (MeleeXrActivity). This panel
+     * precompiles every pipeline the game has drawn on this device into the
+     * Dawn cache the two share (aurora_precompile_pending), on all its
+     * threads while nothing else runs: after an update or a cleared cache
+     * that's ~23 s here against fights full of ~60 ms compiles. */
+    return aurora_precompile_pending();
 #else
     return aurora_wait_pipelines(0);
 #endif

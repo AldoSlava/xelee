@@ -41,6 +41,13 @@ bool aurora_vsync_enabled(void);
  * not during. */
 uint32_t aurora_wait_pipelines(uint32_t max_wait_ms);
 
+/* The Quest launcher builds every pipeline the game has drawn on this device
+ * (AURORA_PRECOMPILE, on by default there) so the immersive game process finds
+ * them in Dawn's cache. How many are left (0: done, or not precompiling), and
+ * stopping it (the game is starting and needs the CPU). */
+uint32_t aurora_precompile_pending(void);
+void aurora_precompile_stop(void);
+
 #ifdef __cplusplus
 }
 #endif
