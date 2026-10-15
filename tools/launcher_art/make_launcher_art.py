@@ -156,10 +156,12 @@ def draw_plate(h, selected):
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).polygon(casing, fill=255)
     if selected:
-        halo = mask.filter(ImageFilter.GaussianBlur(g * 0.45)).point(lambda v: int(v * 0.75))
+        halo = mask.filter(ImageFilter.GaussianBlur(g * 0.6)).point(lambda v: int(v * 0.85))
         img.paste((255, 214, 40, 255), (0, 0), halo)
         body = vgradient(W, H, [(0, (255, 226, 70)), (0.2, YELLOW), (0.85, YELLOW), (1, (240, 178, 0))])
-        img.paste(body, (0, 0), mask.filter(ImageFilter.GaussianBlur(SS)))
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        layer.paste(body, (0, 0), mask.filter(ImageFilter.GaussianBlur(SS * 3)))
+        img.alpha_composite(layer)
         return img.resize((w, h), Image.LANCZOS)
     wy0, wy1, wh = p["wy0"], p["wy1"], p["wh"]
     cx, cy, (rox, roy), (rix, riy) = p["cx"], p["cy"], p["ring_out"], p["ring_in"]
@@ -180,17 +182,17 @@ def draw_plate(h, selected):
     # The casing's glowing gold, everywhere the black is not.
     gold = vgradient(W, H, [(0, (236, 190, 84)), (0.35, (218, 166, 58)), (1, (184, 132, 40))])
     band = ImageChops.subtract(mask, black)
-    glow = band.filter(ImageFilter.GaussianBlur(g * 0.4)).point(lambda v: int(v * 0.6))
+    glow = band.filter(ImageFilter.GaussianBlur(g * 0.6)).point(lambda v: int(v * 0.75))
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     layer.paste(gold, (0, 0), glow)
     img.alpha_composite(layer)
     # The black, see-through, so the grid shows in it (clipped to the casing:
     # the ring's foot stops at its bottom edge).
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    layer.paste((6, 6, 10, 205), (0, 0), ImageChops.multiply(black, mask))
+    layer.paste((6, 6, 10, 205), (0, 0), ImageChops.multiply(black, mask).filter(ImageFilter.GaussianBlur(SS * 2)))
     img.alpha_composite(layer)
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    layer.paste(gold, (0, 0), band.filter(ImageFilter.GaussianBlur(SS * 3)))
+    layer.paste(gold, (0, 0), band.filter(ImageFilter.GaussianBlur(SS * 5)))
     img.alpha_composite(layer)
     return img.resize((w, h), Image.LANCZOS)
 

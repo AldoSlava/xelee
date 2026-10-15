@@ -146,10 +146,8 @@ button {
     decorator: image(disc-plate none scale-none right center) border-box,
                ninepatch(plate-on, plate-on-inner, 20dp 55.5dp 16dp 39dp);
 }
-.plate span { display: inline-block; }
-/* The selected plate's name leans, as Melee's does. */
-.plate:focus span, .plate.small.selected span { transform: skewX(-10deg); }
-.on-back .plate.small.selected span { transform: none; }
+/* Every plate's name leans a little, selected or not, as Melee's do. */
+.plate span { display: inline-block; transform: skewX(-6deg); }
 .plate:disabled { color: #6c604a; cursor: default; }
 .plate:disabled:focus { color: #4c4434; }
 
