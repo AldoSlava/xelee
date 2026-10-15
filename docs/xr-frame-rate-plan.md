@@ -90,6 +90,48 @@ Open: the motion vectors' vertical sign needs a check in the headset
 (moving objects jitter the wrong way if it's flipped); the first launch
 after these shader changes recompiles pipelines for about two minutes.
 
+## What changed (2026-10-14): presentation, and the budget at the real clocks
+
+**The 60s above were measured at clock levels the runtime doesn't promise.**
+Unpinned, it granted GPU levels 5-7 (~680 MHz) at random. Meta documents
+CPU 3 and GPU 2 (456 MHz) as the caps for an app showing passthrough; at
+those, four CPUs on Brinstar ran about 40 3D frames a second with 4x MSAA.
+Benchmarks now pin the clocks and replay a recorded match (quest-xr.md,
+"Benchmarking at the passthrough clock caps").
+
+What a dropped or late frame looked like, fixed (e26c1ce, a2d9721):
+
+- The 3D, motion, depth and HUD images were handed over independently; when
+  one stream lacked a swapchain image, the compositor got another tick's
+  vectors and depth with the picture (a quarter of a bad window's loops).
+  A tick's 3D, motion and depth now go out together or not at all; orphans
+  (a tick one stream never had) are retired, or the rings fill and the 3D
+  view freezes.
+- Eye poses were predicted for the display time of the loop that started
+  the frame, not the one that shows it (17-50 ms later under fixed latency).
+- The previous poses the vectors pair with advanced on dropped frames; now
+  only when a frame's eyes go out, and after a gap no draw pairs with its
+  recorded previous matrices.
+- Late-submit (a late frame drawn and submitted, the next skipped if late
+  too) is built but off: it made swapchain starvation worse.
+
+None of these removes the twitch on its own: what the user sees on a repeat
+is the runtime's rotational-only reprojection of an old frame, and repeats
+come from GPU overload. Re-submitting the old frame without SpaceWarp info
+looked worse; zero vectors on a repeat blacked the screen out.
+
+The eye pass at GPU level 2, four CPUs on Brinstar, scale 0.8 (~11 ms at 4x):
+4x -> 2x MSAA 1.3 ms (2x is the default now, via the Dawn fork's sample count
+2), 2x -> 1x a further 1.8; GX lighting 1.55 ms at 2x (it runs per eye and per
+bin); an eye draw ~14 us of GPU, a motion draw ~6 us. Batching the motion pass
+by bucket instead of by run took it from 2.7 to 1.75 ms; regrouping opaque eye
+draws (`AURORA_XR_EYE_SORT=1`, off until checked by eye) took the eyes from
+9.35 to 8.1 ms: about 52 3D frames a second. Still to try: joining eye draws
+across textures with Dawn's bindless resource table (offered on the Quest;
+needs per-draw texture slots and sizes in the batch records, and Tint's
+NonUniform decoration, dawn 321ddc2), and lighting each vertex once in a
+pre-pass.
+
 ## The problem
 
 The Quest build shows the game at 120 Hz with lock-step pacing: each game

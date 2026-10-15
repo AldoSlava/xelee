@@ -323,6 +323,12 @@ bool compatible(const DrawData& first, const DrawData& d) {
     return false;
   if (sXrBatch.motion && !d.xrMotionMaterial)
     return true;
+  // AURORA_XR_BATCH_IGNORE_TEXTURES=1 (a measurement: wrong textures and
+  // texture sizes): eye draws join regardless of their textures and uniform,
+  // the GPU time bindless batching could save at most.
+  static const bool ignoreTextures = env_flag("AURORA_XR_BATCH_IGNORE_TEXTURES");
+  if (ignoreTextures && !sXrBatch.motion)
+    return d.dstAlpha == first.dstAlpha && d.immediateData.fogRangeBase == first.immediateData.fogRangeBase;
   return d.bindGroups.textureBindGroup == first.bindGroups.textureBindGroup && d.dstAlpha == first.dstAlpha &&
          d.uniformSharedKey == first.uniformSharedKey &&
          d.immediateData.fogRangeBase == first.immediateData.fogRangeBase;
