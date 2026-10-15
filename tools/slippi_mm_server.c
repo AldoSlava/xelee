@@ -20,19 +20,27 @@
  * mm.slippi.gg to this machine in /etc/hosts (127.0.0.1 for the same machine).
  * Our own builds take MELEE_SLIPPI_MM_HOST / MELEE_SLIPPI_MM_PORT.
  *
- *   slippi_mm_server [-p port] [-v]
+ * -R base routes every match through tools/udp_delay_relay.py (latency, jitter
+ * and loss, so rollback runs on one machine): each player is told the other
+ * lives at 127.0.0.1:base (the decider) or base+1, and the relay hears
+ * "MAP <decider game port> <other game port>" on base+2.
+ *
+ *   slippi_mm_server [-p port] [-v] [-s stage,stage,...] [-R base]
  */
 #include "pc/slippi/slp_json.h"
 
 #include <enet/enet.h>
 
+#include <arpa/inet.h>
 #include <ctype.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
+#include <unistd.h>
 
 #define MAX_TICKETS 64
 #define CODE_MAX 24
@@ -52,6 +60,7 @@ static Ticket tickets[MAX_TICKETS];
 static volatile sig_atomic_t stop_flag;
 static bool verbose;
 static unsigned match_serial;
+static unsigned relay_base; /* -R: 0 = players reach each other directly */
 
 static void on_signal(int sig) {
     (void)sig;
@@ -134,7 +143,8 @@ static void drop_ticket(Ticket* t) {
     t->peer = NULL;
 }
 
-static void player_json(char* out, size_t cap, const Ticket* t, int port, bool local) {
+static void player_json(char* out, size_t cap, const Ticket* t, int port, bool local,
+                        unsigned relay_port) {
     char uid[96], disp[96], code[64];
     json_escape(uid, sizeof uid, t->uid);
     json_escape(disp, sizeof disp, t->display);
@@ -143,6 +153,32 @@ static void player_json(char* out, size_t cap, const Ticket* t, int port, bool l
              "{\"uid\":\"%s\",\"displayName\":\"%s\",\"connectCode\":\"%s\",\"port\":%d,"
              "\"isLocalPlayer\":%s,\"ipAddress\":\"%s:%u\",\"ipAddressLan\":\"%s\"}",
              uid, disp, code, port, local ? "true" : "false", t->ip, t->game_port, t->lan);
+    if (relay_port != 0) {
+        /* The other player reaches this one through the relay, whichever
+         * address it picks. */
+        snprintf(out, cap,
+                 "{\"uid\":\"%s\",\"displayName\":\"%s\",\"connectCode\":\"%s\",\"port\":%d,"
+                 "\"isLocalPlayer\":false,\"ipAddress\":\"127.0.0.1:%u\","
+                 "\"ipAddressLan\":\"127.0.0.1:%u\"}",
+                 uid, disp, code, port, relay_port, relay_port);
+    }
+}
+
+/* Tell the relay which game ports this match's two players listen on. */
+static void relay_map(const Ticket* a, const Ticket* b) {
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return;
+    }
+    struct sockaddr_in to = {0};
+    to.sin_family = AF_INET;
+    to.sin_port = htons((uint16_t)(relay_base + 2));
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    char msg[48];
+    int n = snprintf(msg, sizeof msg, "MAP %u %u", a->game_port, b->game_port);
+    sendto(fd, msg, (size_t)n, 0, (struct sockaddr*)&to, sizeof to);
+    close(fd);
+    logf_("relay: %s via %u, %s via %u", a->code, relay_base, b->code, relay_base + 1);
 }
 
 /* The legal stages each ticket names (-s): Slippi's singles six by default;
@@ -151,11 +187,14 @@ static char stage_list[128] = "3,8,28,31,32,2";
 
 static void pair(Ticket* a, Ticket* b) {
     /* a queued first and is the decider. Both see the same player order. */
+    if (relay_base != 0) {
+        relay_map(a, b);
+    }
     for (int side = 0; side < 2; side++) {
         Ticket* me = side ? b : a;
         char pa[600], pb[600], body[2048];
-        player_json(pa, sizeof pa, a, 1, me == a);
-        player_json(pb, sizeof pb, b, 2, me == b);
+        player_json(pa, sizeof pa, a, 1, me == a, relay_base != 0 && me != a ? relay_base : 0);
+        player_json(pb, sizeof pb, b, 2, me == b, relay_base != 0 && me != b ? relay_base + 1 : 0);
         snprintf(body, sizeof body,
                  "{\"type\":\"get-ticket-resp\",\"matchId\":\"mode.%s.local-%u\","
                  "\"isHost\":%s,\"players\":[%s,%s],\"stages\":[%s],\"items\":0}",
@@ -277,8 +316,11 @@ int main(int argc, char** argv) {
                    strspn(argv[i + 1], "0123456789,") == strlen(argv[i + 1]) &&
                    strlen(argv[i + 1]) < sizeof stage_list) {
             snprintf(stage_list, sizeof stage_list, "%s", argv[++i]);
+        } else if (strcmp(argv[i], "-R") == 0 && i + 1 < argc) {
+            relay_base = (unsigned)atoi(argv[++i]);
         } else {
-            fprintf(stderr, "usage: %s [-p port] [-v] [-s stage,stage,...]\n", argv[0]);
+            fprintf(stderr, "usage: %s [-p port] [-v] [-s stage,stage,...] [-R relay_base]\n",
+                    argv[0]);
             return 2;
         }
     }
