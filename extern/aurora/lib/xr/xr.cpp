@@ -1500,7 +1500,7 @@ std::array<uint32_t, 5> g_missWhy{};
 // image's, per image: [0] motion, [1] depth, [2] HUD (hud is only counted). Logged.
 std::array<uint32_t, 3> g_tickMismatch{};
 // Live presentation modes (XR thread), from the environment and then, if
-// AURORA_XR_TWEAK names a file, its "lead=N set=N cutout=N trans=N epoch=N gap=N late=N" (read twice a
+// AURORA_XR_TWEAK names a file, its "lead=N set=N cutout=N trans=N epoch=N gap=N late=N eyesort=N" (read twice a
 // second), so a build can be compared mid-fight:
 //   lead: 1 poses predicted for the frame's display time (publish_views).
 //   set: 1 a tick's 3D, motion and depth go out together (compute_gate).
@@ -1512,6 +1512,8 @@ std::array<uint32_t, 3> g_tickMismatch{};
 //     with its recorded previous matrices (render_eyes).
 //   late: 1 a frame over AURORA_XR_APPSW_DROP_MS late is drawn and submitted
 //     anyway; the next one, if it is late too, is skipped (render_eyes).
+//   eyesort: 1 the eye replay regroups reorderable opaque draws for batching
+//     (gx pipeline.cpp; AURORA_XR_EYE_SORT).
 struct Tweaks {
   bool lead = true;
   bool set = true;
@@ -1520,6 +1522,7 @@ struct Tweaks {
   bool epoch = true;
   bool gap = true;
   bool late = false;
+  bool eyesort = false;
 } g_tweak;
 bool appsw_on() { return B.appSw; }
 // 3D frames done over 1 ms after the slot they're released in, so far
@@ -3646,6 +3649,8 @@ void poll_tweaks() {
     g_tweak.epoch = env_flag("AURORA_XR_APPSW_EPOCH", true);
     g_tweak.gap = env_flag("AURORA_XR_APPSW_GAP", true);
     g_tweak.late = env_flag("AURORA_XR_APPSW_LATE", false);
+    g_tweak.eyesort = env_flag("AURORA_XR_EYE_SORT", false);
+    gfx::set_xr_eye_sort(g_tweak.eyesort);
     gfx::set_xr_motion_classes((g_tweak.cutout ? 1u : 0u) | (g_tweak.trans ? 2u : 0u));
   }
   if (path == nullptr || ++calls % 30 != 0)
@@ -3675,17 +3680,20 @@ void poll_tweaks() {
       t.gap = v != 0;
     else if (std::sscanf(q, "late=%d", &v) == 1)
       t.late = v != 0;
+    else if (std::sscanf(q, "eyesort=%d", &v) == 1)
+      t.eyesort = v != 0;
     while (*q != '\0' && *q != ' ')
       ++q;
     while (*q == ' ')
       ++q;
   }
   if (t.lead != g_tweak.lead || t.set != g_tweak.set || t.cutout != g_tweak.cutout || t.trans != g_tweak.trans ||
-      t.epoch != g_tweak.epoch || t.gap != g_tweak.gap || t.late != g_tweak.late)
-    Log.info("XR tweak: lead {}, set {}, cutout {}, trans {}, epoch {}, gap {}, late {}", t.lead, t.set, t.cutout,
-             t.trans, t.epoch, t.gap, t.late);
+      t.epoch != g_tweak.epoch || t.gap != g_tweak.gap || t.late != g_tweak.late || t.eyesort != g_tweak.eyesort)
+    Log.info("XR tweak: lead {}, set {}, cutout {}, trans {}, epoch {}, gap {}, late {}, eyesort {}", t.lead, t.set,
+             t.cutout, t.trans, t.epoch, t.gap, t.late, t.eyesort);
   g_tweak = t;
   gfx::set_xr_motion_classes((t.cutout ? 1u : 0u) | (t.trans ? 2u : 0u));
+  gfx::set_xr_eye_sort(t.eyesort);
 }
 
 bool render_xr_frame() {

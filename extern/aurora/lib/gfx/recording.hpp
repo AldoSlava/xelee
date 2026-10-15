@@ -166,6 +166,10 @@ uint32_t xr_motion_classes() noexcept;
 // as fixed in the game world instead (its depth and the head's motion stay).
 void set_xr_motion_zero_prev(bool on) noexcept;
 bool xr_motion_zero_prev() noexcept;
+// Eye replays regroup reorderable opaque draws for batching (gx
+// AURORA_XR_EYE_SORT; settable live from lib/xr's tweak file).
+void set_xr_eye_sort(bool on) noexcept;
+bool xr_eye_sort() noexcept;
 // Render worker: encode_xr_replay is replaying with a view mask.
 bool xr_multiview_replay() noexcept;
 // Render worker: ... and into the motion vectors (gx::DrawData::xrMotionPipeline).

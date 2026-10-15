@@ -51,6 +51,10 @@ struct DrawData {
   // The motion twin keeps the game's fragment stage (a cutout or translucent
   // one): batched only with draws of the same material, like the eyes' are.
   bool xrMotionMaterial = false;
+  // Eye replay (AURORA_XR_EYE_SORT): an opaque, depth-tested and -writing draw
+  // with no alpha test or polygon offset, which may be drawn out of order
+  // with others like it (only exact depth ties between them could differ).
+  bool xrReorderable = false;
   uint64_t uniformSharedKey = 0;
 };
 

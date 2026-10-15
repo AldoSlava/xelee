@@ -292,6 +292,10 @@ struct XrBatcher {
     uint32_t indices = 0;
   };
   bool sorting = false;
+  // Eye replay (AURORA_XR_EYE_SORT=1): runs of reorderable opaque draws go in
+  // buckets too, emitted when anything else comes (blended, depth-test-off,
+  // alpha-tested, decal) or at a flush; everything else keeps its order.
+  bool eyeSorting = false;
   std::vector<Bucket> buckets;
   size_t bucketsUsed = 0;
 } sXrBatch;
@@ -433,6 +437,7 @@ void xr_batch_begin(const gfx::detail::FramePacket& frame, bool multiview, bool 
     return v == nullptr || *v != '0';
   }();
   b.sorting = b.active && motion && sort;
+  b.eyeSorting = b.active && !motion && gfx::xr_eye_sort();
   b.bucketsUsed = 0;
 }
 
@@ -483,12 +488,16 @@ void bucket_add(const DrawData& d, const wgpu::RenderPassEncoder& pass) {
 }
 } // namespace
 
-void xr_batch_flush(const wgpu::RenderPassEncoder& pass) {
+void emit_buckets(const wgpu::RenderPassEncoder& pass) {
   auto& b = sXrBatch;
-  emit_members(pass);
   for (size_t k = 0; k < b.bucketsUsed; ++k)
     emit_bucket(b.buckets[k], pass);
   b.bucketsUsed = 0;
+}
+
+void xr_batch_flush(const wgpu::RenderPassEncoder& pass) {
+  emit_members(pass);
+  emit_buckets(pass);
 }
 
 void xr_batch_end() {
@@ -524,6 +533,14 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass) {
       else
         render_direct(data, pass);
       return;
+    }
+    if (b.eyeSorting && gfx::xr_multiview_replay() && !gfx::xr_motion_replay()) {
+      if (data.xrReorderable && batchable(data) && !xr_link_filter(data)) {
+        emit_members(pass); // a run before it keeps its place
+        bucket_add(data, pass);
+        return;
+      }
+      emit_buckets(pass); // anything else comes after every bucketed draw
     }
     if (!gfx::xr_multiview_replay() || !batchable(data) ||
         (!gfx::xr_motion_replay() && xr_link_filter(data))) {

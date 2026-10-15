@@ -1706,6 +1706,14 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
       .xrMotionBatchPipeline =
           xrMotionPipeline != 0 && cls_inside ? xr_batch_pipeline(true, xrMotionKind) : 0,
       .xrMotionMaterial = xrMotionKind != XrMotionKind::Plain,
+      .xrReorderable = [&] {
+        const auto& c = cache.config;
+        const bool opaque = c.blendMode == GX_BM_NONE ||
+                            (c.blendMode == GX_BM_BLEND && c.blendFacSrc == GX_BL_ONE && c.blendFacDst == GX_BL_ZERO);
+        return opaque && c.depthCompare && c.depthUpdate && c.colorUpdate && !c.shaderConfig.alphaCompare &&
+               (c.depthFunc == GX_LESS || c.depthFunc == GX_LEQUAL) && c.polygonOffsetBits == 0 &&
+               c.polygonOffsetScaleBits == 0 && c.shaderConfig.lineMode == 0;
+      }(),
 #else
       // xr_batch_pipeline() is XR-only (it needs the multiview/motion layouts),
       // so off XR the batch pipelines stay 0. The DrawData fields exist either
