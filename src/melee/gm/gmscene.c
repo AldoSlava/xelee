@@ -432,6 +432,23 @@ void gm_801A4D34(void (*on_frame)(void), GameSceneInfo* info)
         if (pc_xr_place_hold()) {
             pad_queue_count = 0;
         }
+        /* One tick per render offline too, as netplay already does
+         * (src/pc/net_sync.c pad_queue_pin). The loop below runs one tick per
+         * queued pad sample and renders once after them, so a late frame
+         * that let the alarm queue two ran a tick with no render after it.
+         * Fighter hurtbox bones depend on that render (HSD_JObjSetupMatrix
+         * sets up only dirty joints, and the render sets up the skeleton), so
+         * such a tick computes hurtboxes a GameCube would not, and a .slp of
+         * the match could play out differently in Dolphin. Merge the backlog
+         * into one sample instead: the newest one's sticks with every queued
+         * button press kept (HSD_PadRawMerge), and the game slows down by the
+         * lost tick. Done here, at the read, because alarms fire whenever
+         * interrupts are re-enabled (src/pc/os.c), not only at the frame
+         * boundary. */
+        if (pad_queue_count > 1 && !pc_net_active()) {
+            HSD_PadFlushQueue(HSD_PAD_FLUSH_QUEUE_MERGE);
+            pad_queue_count = 1;
+        }
 #endif
         for (i = 0; i < pad_queue_count; i++) {
             HSD_PerfSetStartTime();
