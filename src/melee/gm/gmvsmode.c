@@ -256,6 +256,14 @@ static void fillDebugVs(GameModeState* state, UNUSED bool dummy)
             }
         }
     }
+    /* MELEE_DEBUG_VS_ITEMS=<0-4>: items on, very low to very high (off by
+     * default), for runs that need item models and effects. */
+    if (getenv("MELEE_DEBUG_VS_ITEMS") != NULL) {
+        int freq = atoi(getenv("MELEE_DEBUG_VS_ITEMS"));
+        if (freq >= 0 && freq <= 4) {
+            start->rules.item_freq = (s8) freq;
+        }
+    }
     /* MELEE_DEBUG_VS_STOCKS=<n>: a stock match instead of an untimed time
      * one, so a run can end on GAME! with stocks the replay (src/pc/slp.c)
      * must carry. */
