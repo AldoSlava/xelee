@@ -14,7 +14,7 @@
 #include "pc/slippi/slp_user.h"
 #include "pc/xr_place.h"
 
-/* Main Menu > Online Play. Each entry selects its GM_ONLINE lobby mode. The
+/* Main Menu > Online Mode. Each entry selects its GM_ONLINE lobby mode. The
  * labels are drawn text (the menu's own labels are textures with no room for
  * new words), spelled as Slippi spells them. */
 
@@ -29,7 +29,7 @@ static const char* const online_descriptions[] = {
     "Play another player on your local network.",
 };
 
-/* Online Play > Slippi: signed out there is only Login; signed in it is
+/* Online Mode > Slippi: signed out there is only Login; signed in it is
  * Unranked, Direct, Place Stage (only with a headset presenting) and Logout. */
 enum { row_unranked, row_direct, row_place, row_logout, row_count };
 static const char* const slippi_in_labels[row_count] = { "Unranked", "Direct", "Place Stage",
@@ -68,7 +68,7 @@ void mnOnline_SlippiBuilt(void)
 const char* mnOnline_Label(MenuKind kind, int selection)
 {
     if (kind == MENU_KIND_MAIN && selection == SEL_MAIN_ONLINE) {
-        return "Online Play";
+        return "Online Mode";
     }
     if (kind == MENU_KIND_ONLINE && selection >= 0 &&
         selection < (int) ARRAY_SIZE(online_labels))
@@ -176,7 +176,7 @@ void mnOnline_Think(HSD_GObj* gp)
     }
 }
 
-/// @brief Online Play > Slippi think: Login, or the Slippi modes and Logout
+/// @brief Online Mode > Slippi think: Login, or the Slippi modes and Logout
 void mnOnline_SlippiThink(HSD_GObj* gp)
 {
     u32 buttons = mn_80229624(4);

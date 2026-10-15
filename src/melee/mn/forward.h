@@ -140,7 +140,7 @@ typedef enum MainMenuSelection {
     SEL_MAIN_1P = 0,
     SEL_MAIN_VS = 1,
 #ifdef TARGET_PC
-    SEL_MAIN_ONLINE = 2, ///< PC only: Online Play, under VS. Mode
+    SEL_MAIN_ONLINE = 2, ///< PC only: Online Mode, under VS. Mode
     SEL_MAIN_TOY = 3,
     SEL_MAIN_SETTINGS = 4,
     SEL_MAIN_DATA = 5,
@@ -180,13 +180,13 @@ typedef enum VsMenuSelection {
 } VsMenuSelection;
 
 #ifdef TARGET_PC
-/* Online Play: Slippi (a submenu of its modes) or LAN. */
+/* Online Mode: Slippi (a submenu of its modes) or LAN. */
 typedef enum OnlineMenuSelection {
     SEL_ONLINE_SLIPPI = 0,
     SEL_ONLINE_LAN = 1,
 } OnlineMenuSelection;
 
-/* Online Play > Slippi: signed out there is just Login (row 0); signed in
+/* Online Mode > Slippi: signed out there is just Login (row 0); signed in
  * it is Unranked, Direct and Logout. See mnOnline_SlippiAction. */
 typedef enum SlippiMenuSelection {
     SEL_SLIPPI_UNRANKED = 0,

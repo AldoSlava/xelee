@@ -1432,7 +1432,7 @@ static bool directEntryFrame(OnlineLobbyView* view, u64 input)
 
 #ifdef TARGET_PC
 /* ---- Slippi sign-in ---------------------------------------------------
- * Online Play > Slippi > Login: the email, then the password, typed on Melee's
+ * Online Mode > Slippi > Login: the email, then the password, typed on Melee's
  * own Name Entry screen (mnNameNew_PcOpen), as Slippi's Direct keyboard is.
  * The sign-in itself is blocking HTTPS (pc_slippi_account_login), so it runs
  * on a thread; the lobby view shows "Signing in..." and the result. A
