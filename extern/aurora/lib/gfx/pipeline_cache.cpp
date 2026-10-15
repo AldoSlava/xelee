@@ -714,18 +714,20 @@ static PipelineRef resolve_pipeline(ShaderType type, const gx::PipelineConfig& c
     record_pipeline_pair(type, cacheKey, layout);
   return find_pipeline_impl(
       xxh3_hash(layout.key, cacheKey),
-      [type, cacheKey, config, layout] {
+      [type, cacheKey, config, layout, priority] {
         // AURORA_LOG_SLOW_PIPELINES=<ms>: builds slower than that (Dawn or
-        // driver cache misses), by layout. A diagnostic.
+        // driver cache misses), by layout. Unset, only builds a frame asked
+        // for (not the boot or launcher queues) and 20 ms or more: the ones
+        // that can cost a frame or pop a model in late.
         static const int slowMs = [] {
           const char* v = std::getenv("AURORA_LOG_SLOW_PIPELINES");
-          return v != nullptr ? std::atoi(v) : 0;
+          return v != nullptr ? std::atoi(v) : -20;
         }();
         const auto start = std::chrono::steady_clock::now();
         auto pipeline = create_pipeline(config, layout);
-        if (slowMs > 0) {
+        if (slowMs > 0 || (slowMs < 0 && priority != PipelinePriority::Background)) {
           const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-          if (ms >= slowMs)
+          if (ms >= std::abs(slowMs))
             Log.info("slow pipeline {:.0f} ms: config {:016x} layout {:016x} views {} samples {} batch {} motion {} "
                      "softclip {} colors {}",
                      ms, cacheKey, layout.key, layout.viewCount, layout.sampleCount, layout.xrBatch, layout.xrMotion,

@@ -30,6 +30,10 @@ int melee_main(void);
 
 #if defined(__ANDROID__)
 #include <android/log.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 #endif
 
 #if defined(__ANDROID__)
@@ -108,10 +112,54 @@ static void melee_install_crash_handler(void) {
 static void melee_install_crash_handler(void) {}
 #endif
 
+#if defined(__ANDROID__)
+#define ANDROID_LOG_DIR "/sdcard/Android/data/dev.melee.game/files/logs"
+#define ANDROID_LOGS_KEPT 10
+
+/* The newest ANDROID_LOGS_KEPT - 1 logs stay; the names sort by time. */
+static void android_prune_logs(void) {
+    DIR* d = opendir(ANDROID_LOG_DIR);
+    if (d == NULL) {
+        return;
+    }
+    char names[64][64];
+    int n = 0;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL && n < 64) {
+        if (strncmp(e->d_name, "melee-", 6) == 0 && strlen(e->d_name) < sizeof names[0]) {
+            strcpy(names[n++], e->d_name);
+        }
+    }
+    closedir(d);
+    qsort(names, n, sizeof names[0], (int (*)(const void*, const void*))strcmp);
+    for (int i = 0; i < n - (ANDROID_LOGS_KEPT - 1); i++) {
+        char path[160];
+        snprintf(path, sizeof path, "%s/%s", ANDROID_LOG_DIR, names[i]);
+        remove(path);
+    }
+}
+
+/* logcat is a RAM ring that a headset's power-off clears, so a session in
+ * the headset left nothing to read afterwards. Each process (the launcher
+ * panel, the game) writes its own file. */
+static const char* android_default_log_path(void) {
+    static char path[160];
+    mkdir(ANDROID_LOG_DIR, 0770);
+    android_prune_logs();
+    const time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    snprintf(path, sizeof path, "%s/melee-%04d%02d%02d-%02d%02d%02d-%d.log", ANDROID_LOG_DIR,
+        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, (int)getpid());
+    return path;
+}
+#endif
+
 /* A log file sink, so a double-clicked build still leaves a diagnosable
  * trace after its console disappears. MELEE_LOG_FILE picks the path; an
  * empty value disables it. Windows defaults it on because that is where the
- * console is not a reliable place to read errors from. */
+ * console is not a reliable place to read errors from, Android because
+ * logcat does not outlive the device's power. */
 static FILE* log_file(void) {
     static FILE* fp;
     static bool tried;
@@ -121,6 +169,10 @@ static FILE* log_file(void) {
 #if defined(_WIN32)
         if (path == NULL) {
             path = "melee-pc.log";
+        }
+#elif defined(__ANDROID__)
+        if (path == NULL) {
+            path = android_default_log_path();
         }
 #endif
         if (path != NULL && path[0] != '\0') {
@@ -192,6 +244,12 @@ static void log_callback(
         break;
     }
     __android_log_print(prio, "Aurora", "[%s] %.*s", module, (int)len, message);
+    static const char* const names[] = {"DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
+    FILE* lf = log_file();
+    if (lf != NULL) {
+        fprintf(lf, "[%9.3f] [%s] %s: %.*s\n", log_now_ms(), names[level], module, (int)len, message);
+        fflush(lf);
+    }
 #else
     static const char* const names[] = {"DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
     FILE* out = level >= LOG_ERROR ? stderr : stdout;
