@@ -457,6 +457,12 @@ input.range sliderarrowdec, input.range sliderarrowinc { width: 0; height: 0; }
 /* ---- Platforms ---------------------------------------------------------- */
 
 .quest .no-quest, .mobile .no-mobile { display: none; }
+/* Without Controls the Quest has four categories: the wedge's point is the
+ * middle two. */
+.quest #tab-graphics { margin-left: 4.5%; }
+.quest #tab-audio { margin-left: 0; }
+.quest #tab-cheats { margin-left: 0; }
+.quest #tab-online { margin-left: 4.5%; }
 
 /* ---- Small windows ------------------------------------------------------ */
 
