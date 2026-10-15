@@ -309,11 +309,13 @@ static const ClipRule s_clips[] = {
     RC_BOX(1), RC_BOX(4), RC_BOX(5), RC_BOX(6),
 #undef RC_BOX
     /* Brinstar: only the stretch of the acid's river around the stage (it
-     * runs the length of the cave). LevelRule hides it while it is low. */
+     * runs the length of the cave). LevelRule hides it while it is low. Its
+     * cost is fill, so it is cut 10 past the stage's depth: the model (part
+     * 6) reaches z -35.3 to 34.4 (tools/stagebounds.py). */
     CLIP_LEFT(0x08, 8, -120.f, 0.f),
     CLIP_RIGHT(0x08, 8, 125.f, 0.f),
-    CLIP_FRONT(0x08, 8, 70.f, 0.f),
-    CLIP_BEHIND(0x08, 8, -90.f, 0.f),
+    CLIP_FRONT(0x08, 8, 45.f, 0.f),
+    CLIP_BEHIND(0x08, 8, -45.f, 0.f),
     /* All-Star's rest area: the meadow (parts 0 and 1) boxed to the fight,
      * about its blast zones across, cut hard. */
     CLIP_LEFT(0x42, 0, -200.f, 0.f), CLIP_RIGHT(0x42, 0, 200.f, 0.f), CLIP_BEHIND(0x42, 0, -130.f, 0.f),
