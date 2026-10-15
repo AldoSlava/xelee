@@ -125,7 +125,7 @@ The eye pass at GPU level 2, four CPUs on Brinstar, scale 0.8 (~11 ms at 4x):
 2), 2x -> 1x a further 1.8; GX lighting 1.55 ms at 2x (it runs per eye and per
 bin); an eye draw ~14 us of GPU, a motion draw ~6 us. Batching the motion pass
 by bucket instead of by run took it from 2.7 to 1.75 ms; regrouping opaque eye
-draws (`AURORA_XR_EYE_SORT=1`, off until checked by eye) took the eyes from
+draws (`AURORA_XR_EYE_SORT`, now on by default) took the eyes from
 9.35 to 8.1 ms: about 52 3D frames a second. Still to try: lighting each
 vertex once in a pre-pass.
 

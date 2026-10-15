@@ -293,7 +293,7 @@ struct XrBatcher {
     uint32_t indices = 0;
   };
   bool sorting = false;
-  // Eye replay (AURORA_XR_EYE_SORT=1): runs of reorderable opaque draws go in
+  // Eye replay (AURORA_XR_EYE_SORT, on by default): runs of reorderable opaque draws go in
   // buckets too, emitted when anything else comes (blended, depth-test-off,
   // alpha-tested, decal) or at a flush; everything else keeps its order.
   bool eyeSorting = false;

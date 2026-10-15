@@ -1461,7 +1461,7 @@ void set_xr_motion_zero_prev(bool on) noexcept { g_xrMotionZeroPrev.store(on, st
 bool xr_motion_zero_prev() noexcept { return g_xrMotionZeroPrev.load(std::memory_order_relaxed); }
 
 namespace {
-std::atomic<bool> g_xrEyeSort{false};
+std::atomic<bool> g_xrEyeSort{true};
 } // namespace
 
 void set_xr_eye_sort(bool on) noexcept { g_xrEyeSort.store(on, std::memory_order_relaxed); }

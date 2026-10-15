@@ -653,7 +653,7 @@ the eyes (`AURORA_XR_EYE_NOLIGHT=1`, a measurement only) 1.9 ms less at 4x,
 more and the motion pass 2.2 ms more: an eye draw costs about 14 us of GPU
 at this clock, a motion draw about 6. With 2x MSAA, the motion pass batching
 by bucket (`AURORA_XR_MOTION_SORT`, default on: 2.7 -> 1.75 ms) and the eyes
-regrouping opaque draws (`AURORA_XR_EYE_SORT=1`, off until checked by eye:
+regrouping opaque draws (`AURORA_XR_EYE_SORT`, default on:
 9.35 -> 8.1 ms), about 52 3D frames a second.
 
 ### Dynamic resolution
@@ -1502,7 +1502,8 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_APPSW_CUTOUT` | 1 | Alpha-tested draws go into SpaceWarp's depth and motion |
 | `AURORA_XR_APPSW_TRANSLUCENT` | 1 | Source-alpha blended draws without depth writes go into SpaceWarp's depth and motion where at least `AURORA_XR_APPSW_TRANS_ALPHA` (0.5) solid |
 | `AURORA_XR_MOTION_SORT` | 1 | The motion pass batches joinable draws regardless of order |
-| `AURORA_XR_EYE_SORT` | 0 | The eye pass regroups opaque, depth-writing draws for batching |
+| `AURORA_XR_EYE_SORT` | 1 | The eye pass regroups opaque, depth-writing draws for batching |
+| `AURORA_XR_BINDLESS` | 1 | Eye batches join across textures through Dawn's resource table, where the device offers it |
 | `AURORA_XR_MOTION_WHY` | 0 | Logs which world draws SpaceWarp's depth and motion leave out, and why |
 | `AURORA_XR_EYE_NOLIGHT` | 0 | Measurement only: no GX lighting in the eyes |
 | `AURORA_XR_SCREEN_Y` | 0 | Height offset in meters |

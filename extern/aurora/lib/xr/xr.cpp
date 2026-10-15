@@ -1521,7 +1521,7 @@ std::array<uint32_t, 3> g_tickMismatch{};
 //   late: 1 a frame over AURORA_XR_APPSW_DROP_MS late is drawn and submitted
 //     anyway; the next one, if it is late too, is skipped (render_eyes).
 //   eyesort: 1 the eye replay regroups reorderable opaque draws for batching
-//     (gx pipeline.cpp; AURORA_XR_EYE_SORT).
+//     (gx pipeline.cpp; AURORA_XR_EYE_SORT, on by default).
 //   bindless: 1 eye batches join across textures through the resource table
 //     (AURORA_XR_BINDLESS, on by default; only where the device offers it).
 struct Tweaks {
@@ -1532,7 +1532,7 @@ struct Tweaks {
   bool epoch = true;
   bool gap = true;
   bool late = false;
-  bool eyesort = false;
+  bool eyesort = true;
   bool bindless = true;
 } g_tweak;
 // The device offers Dawn's resource table (bindless eye batching can run).
@@ -3664,7 +3664,7 @@ void poll_tweaks() {
     g_tweak.epoch = env_flag("AURORA_XR_APPSW_EPOCH", true);
     g_tweak.gap = env_flag("AURORA_XR_APPSW_GAP", true);
     g_tweak.late = env_flag("AURORA_XR_APPSW_LATE", false);
-    g_tweak.eyesort = env_flag("AURORA_XR_EYE_SORT", false);
+    g_tweak.eyesort = env_flag("AURORA_XR_EYE_SORT", true);
     gfx::set_xr_eye_sort(g_tweak.eyesort);
     g_tweak.bindless = env_flag("AURORA_XR_BINDLESS", true);
     gfx::set_xr_motion_classes((g_tweak.cutout ? 1u : 0u) | (g_tweak.trans ? 2u : 0u));
