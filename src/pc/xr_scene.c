@@ -1106,6 +1106,26 @@ static void xr_gamepad_to_port1(s32 index) {
     pc_log_line("xr: gamepad '%s' on port 1", PADGetName(0));
 }
 
+/* A tracked pad on no port at all: SDL numbers players by every gamepad it
+ * sees, Quest's own devices included (two of them by 2026-10-15), and
+ * the saved port preferences then clear a pad whose number lands on a port
+ * they name: an 8BitDo ended up on no port, dead in game. */
+static s32 xr_portless_pad(void) {
+    for (u32 index = 0; index < PADCount(); index++) {
+        bool placed = false;
+        for (u32 port = 0; port < PAD_CHANMAX; port++) {
+            if (PADGetIndexForPort(port) == (s32)index) {
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) {
+            return (s32)index;
+        }
+    }
+    return -1;
+}
+
 void pc_xr_gamepad_added(int instance) {
     if (!aurora_xr_active() || instance < 0) {
         return;
@@ -1114,6 +1134,11 @@ void pc_xr_gamepad_added(int instance) {
     const int port = pad != NULL ? SDL_GetGamepadPlayerIndex(pad) : 0;
     if (port > 0 && port < PAD_CHANMAX) {
         const s32 index = PADGetIndexForPort((u32)port);
+        if (index >= 0) {
+            xr_gamepad_to_port1(index);
+        }
+    } else if (port < 0 || port >= PAD_CHANMAX) {
+        const s32 index = xr_portless_pad();
         if (index >= 0) {
             xr_gamepad_to_port1(index);
         }
@@ -1130,6 +1155,10 @@ static void xr_gamepad_fill_port1(void) {
             xr_gamepad_to_port1(index);
             return;
         }
+    }
+    const s32 index = xr_portless_pad();
+    if (index >= 0) {
+        xr_gamepad_to_port1(index);
     }
 }
 
