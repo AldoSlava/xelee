@@ -50,9 +50,9 @@ DISC_RING = (215, 211, 85)
 # Sprite sheet layout. Sizes are sprite pixels at 2x (the sheet's
 # `resolution: 2x`), so a 112 px plate is 56 dp tall. launcher.rcss repeats
 # these rectangles; keep the two in step.
-PLATE_W, PLATE_H = 480, 136
-SMALL_H = 100
-DISC_SIZE = 160
+PLATE_W, PLATE_H = 480, 180
+SMALL_H = 124
+DISC_SIZE = 184
 # The disc as it sits on a plate's tab: the tab's centre is this far in from
 # the plate's right edge, more than the disc's half width, so the plate's
 # rectangle carries transparent room on the right.
@@ -104,16 +104,21 @@ def rounded_chevron(x0, y0, x1, y1, top_in, bottom_in, radius, steps=12):
 def plate_geometry(w, h, scale=1):
     """Where a plate's parts sit, in sprite pixels times `scale`. The
     proportions are measured off Melee's Main Menu: the gold band is about
-    18% of the plate's height along the top and 12% along the bottom."""
+    18% of the plate's height along the top and 12% along the bottom, and the
+    right end is a black ring around the gold P (see draw_plate)."""
     g = GLOW * scale
     x0, y0, x1, y1 = g, g, w * scale - g, h * scale - g
     bh = y1 - y0
     wy0, wy1 = y0 + bh * 0.18, y1 - bh * 0.12
     wh = wy1 - wy0
-    return dict(x0=x0, y0=y0, x1=x1, y1=y1, bh=bh, wy0=wy0, wy1=wy1,
-                casing=(bh * 0.39, bh * 0.14),
-                wx0=x0 + bh * 0.22, wx1=x1 - bh * 0.24, window=(wh * 0.36, wh * 0.18),
-                stem_x=x1 - bh * 0.70, stem_w=bh * 0.12)
+    # The ring is a little taller than wide; its top runs flush with the
+    # window's top edge.
+    ring_out, ring_in = (wh * 0.42, wh * 0.50), (wh * 0.25, wh * 0.33)
+    cx = x1 - ring_out[0] - bh * 0.14  # the ring's centre, and the cursor disc's
+    cy = wy0 + wh * 0.50
+    return dict(x0=x0, y0=y0, x1=x1, y1=y1, bh=bh, wy0=wy0, wy1=wy1, wh=wh,
+                casing=(bh * 0.39, bh * 0.14), wx0=x0 + bh * 0.22, window=(wh * 0.36, wh * 0.18),
+                wx1=cx - wh * 0.22, cx=cx, cy=cy, ring_out=ring_out, ring_in=ring_in)
 
 
 def ninepatch_rect(h):
@@ -121,22 +126,32 @@ def ninepatch_rect(h):
     the bands and the tab."""
     p = plate_geometry(PLATE_W, h)
     left = int(p["x0"] + p["casing"][0] + 6)
-    right = int(p["stem_x"] - 6)
+    right = int(p["wx1"] - 6)
     top, bottom = int(p["wy0"] + 2), int(p["wy1"] - 2)
     return left, top, right - left, bottom - top
 
 
+def tab_centre(h):
+    """The ring's centre, from the plate's right edge and top, in sprite
+    pixels: where the cursor disc goes."""
+    p = plate_geometry(PLATE_W, h)
+    return PLATE_W - p["cx"], p["cy"]
+
+
 def draw_plate(h, selected):
     """Melee's menu plate. Idle: a soft, glowing gold band around a
-    see-through black window, with a gold P-shaped tab at its right end.
+    see-through black window. At the right end the window stops square, and a
+    black ring arcs from its top edge round the right and drops straight down
+    through the bottom band; the gold it encloses is the P (a small black
+    half disc for its counter), and the casing's rounded end wraps the ring.
     Selected: the whole plate solid yellow, glowing (the cursor disc goes on
-    the tab, as a separate sprite)."""
+    the ring, as a separate sprite)."""
     w = PLATE_W
     W, H = w * SS, h * SS
     g = GLOW * SS
     p = plate_geometry(w, h, SS)
     x0, y0, x1, y1, bh = p["x0"], p["y0"], p["x1"], p["y1"], p["bh"]
-    casing = rounded_chevron(x0, y0, x1, y1, *p["casing"], bh * 0.34)
+    casing = rounded_chevron(x0, y0, x1, y1, *p["casing"], bh * 0.46)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).polygon(casing, fill=255)
@@ -146,36 +161,36 @@ def draw_plate(h, selected):
         body = vgradient(W, H, [(0, (255, 226, 70)), (0.2, YELLOW), (0.85, YELLOW), (1, (240, 178, 0))])
         img.paste(body, (0, 0), mask.filter(ImageFilter.GaussianBlur(SS)))
         return img.resize((w, h), Image.LANCZOS)
-    wy0, wy1 = p["wy0"], p["wy1"]
-    window = rounded_chevron(p["wx0"], wy0, p["wx1"], wy1, *p["window"], bh * 0.12)
-    win = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(win).polygon(window, fill=255)
+    wy0, wy1, wh = p["wy0"], p["wy1"], p["wh"]
+    cx, cy, (rox, roy), (rix, riy) = p["cx"], p["cy"], p["ring_out"], p["ring_in"]
+    # Everything black: the window, square at its right end ...
+    black = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(black)
+    d.polygon(rounded_chevron(p["wx0"], wy0, p["wx1"] + wh * 0.02, wy1, *p["window"], 1, steps=1), fill=255)
+    # ... the ring's right half, its top joined to the window's top edge ...
+    d.pieslice((cx - rox, cy - roy, cx + rox, cy + roy), -90, 90, fill=255)
+    d.pieslice((cx - rix, cy - riy, cx + rix, cy + riy), -90, 90, fill=0)
+    d.rectangle((p["wx1"], cy - roy, cx, cy - riy), fill=255)
+    # ... its foot dropping straight down through the bottom band ...
+    d.rectangle((cx - wh * 0.11, cy + riy, cx - wh * 0.01, y1), fill=255)
+    d.rectangle((cx - wh * 0.11, cy + riy, cx, cy + roy), fill=255)  # the ring's lower end
+    # ... and the P's counter, a half disc against its stem.
+    ccx, ccy, rc = cx - wh * 0.12, cy - wh * 0.02, wh * 0.13
+    d.pieslice((ccx - rc, ccy - rc, ccx + rc, ccy + rc), -90, 90, fill=255)
+    # The casing's glowing gold, everywhere the black is not.
     gold = vgradient(W, H, [(0, (236, 190, 84)), (0.35, (218, 166, 58)), (1, (184, 132, 40))])
-    # The window, black but see-through, so the grid shows in it.
-    img.paste((6, 6, 10, 205), (0, 0), win)
-    # The band: the casing less the window, blurred so it glows rather than
-    # edges, over a fainter, wider glow.
-    band = ImageChops.subtract(mask, win)
+    band = ImageChops.subtract(mask, black)
     glow = band.filter(ImageFilter.GaussianBlur(g * 0.4)).point(lambda v: int(v * 0.6))
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     layer.paste(gold, (0, 0), glow)
     img.alpha_composite(layer)
+    # The black, see-through, so the grid shows in it (clipped to the casing:
+    # the ring's foot stops at its bottom edge).
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    layer.paste((6, 6, 10, 205), (0, 0), ImageChops.multiply(black, mask))
+    img.alpha_composite(layer)
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     layer.paste(gold, (0, 0), band.filter(ImageFilter.GaussianBlur(SS * 3)))
-    img.alpha_composite(layer)
-    # The tab: a gold P at the window's right end, its stem running down
-    # through the bottom band, its bowl's counter see-through black.
-    tab = Image.new("L", (W, H), 0)
-    d = ImageDraw.Draw(tab)
-    stem_x, stem_w = p["stem_x"], p["stem_w"]
-    cy = wy0 + (wy1 - wy0) * 0.45
-    r_out, r_in = bh * 0.22, bh * 0.09
-    d.rectangle((stem_x, wy0 + bh * 0.06, stem_x + stem_w, y1), fill=255)
-    d.pieslice((stem_x + stem_w - r_out, cy - r_out, stem_x + stem_w + r_out, cy + r_out), -90, 90, fill=255)
-    d.rectangle((stem_x, cy - r_out, stem_x + stem_w, cy + r_out), fill=255)
-    d.ellipse((stem_x + stem_w - r_in, cy - r_in, stem_x + stem_w + r_in, cy + r_in), fill=0)
-    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    layer.paste(gold, (0, 0), tab.filter(ImageFilter.GaussianBlur(SS * 1.5)))
     img.alpha_composite(layer)
     return img.resize((w, h), Image.LANCZOS)
 
@@ -343,6 +358,9 @@ def main():
         lines.append(f"/* {name} edges: {edges} */")
     lines.append(f"disc: 0px {disc_y}px {DISC_SIZE}px {DISC_SIZE}px;")
     lines.append(f"disc-plate: 0px {disc_y}px {DISC_SIZE + DISC_PAD}px {DISC_SIZE}px;")
+    for name, h in [("plate", PLATE_H), ("small", SMALL_H)]:
+        right, top = tab_centre(h)
+        lines.append(f"/* {name} ring centre: {right / 2:g}dp from the right, {top / 2:g}dp down */")
     for i, n in enumerate(["arrow-l", "arrow-r", "arrow-l-dark", "arrow-r-dark"]):
         lines.append(f"{n}: {ARROWS_X + i * (ARROW_W + 8)}px {disc_y}px {ARROW_W}px {ARROW_H}px;")
     print("\n".join(lines))
