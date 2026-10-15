@@ -128,7 +128,7 @@ button {
     height: 68dp;
     padding: 0 56dp 0 38dp;
     line-height: 70dp;  /* centred on the black window, which sits low */
-    font-size: 37dp;
+    font-size: 33dp;
     font-weight: 800;
     color: #dba63c;
     font-effect: outline(2dp #000000);
