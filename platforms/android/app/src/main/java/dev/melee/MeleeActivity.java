@@ -238,6 +238,19 @@ public class MeleeActivity extends SDLActivity {
 
     @Override
     public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        /* The system's own keys go to Android, as SDLActivity's dispatch does:
+         * consumed here, the headset's volume buttons did nothing in game. */
+        switch (event.getKeyCode()) {
+        case android.view.KeyEvent.KEYCODE_VOLUME_UP:
+        case android.view.KeyEvent.KEYCODE_VOLUME_DOWN:
+        case android.view.KeyEvent.KEYCODE_VOLUME_MUTE:
+        case android.view.KeyEvent.KEYCODE_CAMERA:
+        case android.view.KeyEvent.KEYCODE_ZOOM_IN:
+        case android.view.KeyEvent.KEYCODE_ZOOM_OUT:
+            return super.dispatchKeyEvent(event);
+        default:
+            break;
+        }
         if (mSurface != null) {
             handleKeyEvent(mSurface, event.getKeyCode(), event, null);
             return true;
