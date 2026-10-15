@@ -320,7 +320,7 @@ static float mn_803EB3CC[] = {
 static AnimLoopSettings mn_803EB3FC[] = { { 0, 49, 20 },
                                           { 50, 99, 70 },
 #ifdef TARGET_PC
-                                          { 700, 749, 720 }, /* Online Play: the Melee preview */
+                                          { 700, 749, 720 }, /* Online Mode: the Melee preview */
 #endif
                                           { 100, 149, 120 },
                                           { 150, 199, 170 },
@@ -393,7 +393,7 @@ static AnimLoopSettings mn_803EB5E8[] = {
 };
 
 #ifdef TARGET_PC
-/* the Online Play row (index 2) has literal text, so its id is never read */
+/* the Online Mode row (index 2) has literal text, so its id is never read */
 static u16 mn_803EB660[] = { 0x81, 0x82, 0x82, 0x83, 0x84, 0x85, 0x00 };
 #else
 static u16 mn_803EB660[] = { 0x81, 0x82, 0x83, 0x84, 0x85, 0x00 };
@@ -1727,7 +1727,7 @@ void fn_8022AFEC(HSD_GObj* gp)
 }
 
 #ifdef TARGET_PC
-/* Online Play sits third on the main menu and has no label texture; the
+/* Online Mode sits third on the main menu and has no label texture; the
  * rows below it keep the textures of the vanilla rows they came from. */
 static int mn_PcSelectionFrames(MenuKind kind, int selection)
 {
@@ -2114,7 +2114,7 @@ int mn_8022C010(int menu_kind, int selection)
 {
     if (menu_kind == MENU_KIND_MAIN) {
 #ifdef TARGET_PC
-        /* Online Play shares VS. Mode's colour; the rows below keep theirs. */
+        /* Online Mode shares VS. Mode's colour; the rows below keep theirs. */
         return selection <= SEL_MAIN_VS ? selection : selection == SEL_MAIN_ONLINE ? 1 : selection - 1;
 #else
         return selection;
