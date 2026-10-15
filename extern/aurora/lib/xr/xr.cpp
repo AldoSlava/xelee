@@ -6114,6 +6114,10 @@ void add_required_features(const wgpu::Adapter& adapter, std::vector<wgpu::Featu
     if (adapter.HasFeature(f) && std::find(features.begin(), features.end(), f) == features.end())
       features.push_back(f);
   }
+  // Bindless batching's prerequisite (not requested yet): eye draws with
+  // different textures could join if they named them in Dawn's resource table.
+  Log.info("Dawn resource table (bindless textures): {}",
+           adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) ? "offered" : "not offered");
   // Both eyes in one pass (Dawn fork multiview).
   if (adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalMultiview) &&
       std::find(features.begin(), features.end(), wgpu::FeatureName::ChromiumExperimentalMultiview) == features.end())
@@ -6167,6 +6171,36 @@ wgpu::Texture begin_frame(uint32_t width, uint32_t height) noexcept {
     B.queueFamily = h.queueFamilyIndex;
     B.queueIndex = 1;
     B.queue = dawn::native::vulkan::GetExtraQueue(webgpu::g_device.Get(), 0);
+    {
+      // What the device's descriptor indexing allows, for bindless batching
+      // (Dawn's resource table asks 65536 + 1000 update-after-bind images
+      // and samplers per stage before it offers itself).
+      VkPhysicalDeviceDescriptorIndexingProperties dip{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES};
+      VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+      p2.pNext = &dip;
+      VkPhysicalDeviceDescriptorIndexingFeatures dif{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
+      VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+      f2.pNext = &dif;
+      // Vulkan 1.1 entry points: through the instance (Android's libvulkan
+      // exports only 1.0 at our API level).
+      const auto getProps = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
+          vkGetInstanceProcAddr(B.vkInstance, "vkGetPhysicalDeviceProperties2"));
+      const auto getFeatures = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+          vkGetInstanceProcAddr(B.vkInstance, "vkGetPhysicalDeviceFeatures2"));
+      if (getProps != nullptr && getFeatures != nullptr) {
+        getProps(B.phys, &p2);
+        getFeatures(B.phys, &f2);
+      }
+      Log.info("Descriptor indexing: non-uniform sampled images {}, samplers in arrays update-after-bind {} / "
+               "images {} per stage, {} / {} per set, all pools {}; partially bound {}, variable count {}, "
+               "update-after-bind images {}, robust buffer access with it {}",
+               dif.shaderSampledImageArrayNonUniformIndexing != 0,
+               dip.maxPerStageDescriptorUpdateAfterBindSamplers, dip.maxPerStageDescriptorUpdateAfterBindSampledImages,
+               dip.maxDescriptorSetUpdateAfterBindSamplers, dip.maxDescriptorSetUpdateAfterBindSampledImages,
+               dip.maxUpdateAfterBindDescriptorsInAllPools, dif.descriptorBindingPartiallyBound != 0,
+               dif.descriptorBindingVariableDescriptorCount != 0,
+               dif.descriptorBindingSampledImageUpdateAfterBind != 0, dip.robustBufferAccessUpdateAfterBind != 0);
+    }
     g_streams[kScreen].name = "screen";
     g_streams[kStereo].name = "3d";
     g_streams[kHud].name = "hud";
