@@ -4,6 +4,7 @@
 #include <Runtime/platform.h>
 #ifdef TARGET_PC
 #include "pc/file_cache.h"
+#include "pc/net.h"
 #endif
 
 #include <sysdolphin/baselib/forward.h>
@@ -172,6 +173,9 @@ int main(void)
     if (getenv("MELEE_SEED") != NULL) {
         *HSD_RandSeedPtr = (u32) strtoul(getenv("MELEE_SEED"), NULL, 0);
     }
+    /* MELEE_NET_RECORD/REPLAY: the recording carries this seed, a replay
+     * boots from the recorded one (src/pc/net_snapshot.c). */
+    pc_net_record_boot_seed();
 #endif
     lbAudioAx_8002838C();
     lb_80019AAC(&gmMain_8015FD24);

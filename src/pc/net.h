@@ -90,6 +90,7 @@ bool pc_net_rules(bool* unlock_all, bool* frozen_stadium);
  * frame, predicting the remote one when it has not arrived (stalling only
  * when the remote is more than the rollback window behind). */
 void pc_net_sync(void);
+void pc_net_record_boot_seed(void); /* gmmain.c, right after the RNG is seeded */
 
 /* Called after each tick. Returns true when the tick must be run again
  * (rollback re-simulation or the MELEE_NET_SYNCTEST self-check). */

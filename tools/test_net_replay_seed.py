@@ -48,6 +48,8 @@ int main(int argc, char** argv) {
     PADStatus pads[4] = {0};
     pads[0].button = 0x1234;
     setenv("MELEE_NET_RECORD", argv[1], 1);
+    seed_value = 5; /* The boot seed: draws before the first tick come from it. */
+    pc_net_record_boot_seed();
     record_open();
     seed_value = 7;
     replay_feed(pads);
@@ -63,9 +65,10 @@ int main(int argc, char** argv) {
     unsetenv("MELEE_NET_RECORD");
     FILE* f = fopen(argv[1], "rb");
     unsigned char bytes[160]; /* 8-byte header + two 76-byte records */
+    uint32_t word;
     assert(fread(bytes, 1, sizeof bytes, f) == sizeof bytes);
     assert(fgetc(f) == EOF && memcmp(bytes, "MRC5", 4) == 0);
-    uint32_t word;
+    memcpy(&word, bytes + 4, 4); assert(word == 5); /* the header carries the boot seed */
     int32_t at;
     memcpy(&word, bytes + 8 + 64, 4); assert(word == 0x11111111);
     memcpy(&word, bytes + 8 + 68, 4); assert(word == 11);
@@ -73,6 +76,9 @@ int main(int argc, char** argv) {
     memcpy(&word, bytes + 8 + 76 + 68, 4); assert(word == 23);
     fclose(f);
     setenv("MELEE_NET_REPLAY", argv[1], 1);
+    seed_value = 0x12345678; /* this run's own OSGetTick boot seed */
+    pc_net_record_boot_seed();
+    assert(seed_value == 5); /* replaced by the recording's before any scene runs */
     record_open();
     assert(s_rep != NULL);
     seed_value = 0xdeadbeef; /* Inject out-of-tick draws before the first tick. */

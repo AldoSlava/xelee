@@ -50,6 +50,10 @@
  *                        from "identical over 1376 frames" to "diverges at
  *                        1359"). Off by default. */
 static FILE* s_rec;
+/* The seed the game booted with (gmmain.c), which the recording's header
+ * carries: see pc_net_record_boot_seed. */
+static uint32_t s_boot_seed;
+static bool s_boot_seed_have;
 static int32_t s_confirmed = INT32_MIN; /* newest final netplay frame, for slp.c */
 static FILE* s_rep;
 static bool s_rep_reported;
@@ -79,61 +83,34 @@ typedef struct FrameRecord {
 static FrameRecord s_rep_next; /* one record of lookahead: see the scene hold */
 static bool s_rep_next_ok;
 
-/* MELEE_NET_DET_TRACE=lo-hi (with MELEE_NET_STATE_LOG): for frames lo..hi,
- * every RNG draw ("net: rnd f<N> <thread> <caller> <seed after>", the caller
- * as an offset from HSD_Rand so two ASLR'd runs compare) and each fighter's
- * whole Fighter struct as hex ("net: fdump f<N> p<slot> ..."). The run-to-run
- * determinism hunt: two runs' draw sequences part at the first call site that
- * reads something the recording does not pin. */
-extern void (*pc_rand_trace)(void* caller, u32 seed_after);
-static int32_t s_det_lo = -1, s_det_hi = -2;
-static int32_t s_det_frame;
-static SDL_ThreadID s_det_game_tid;
-
-static void det_rand_trace(void* caller, u32 seed_after) {
-    SDL_ThreadID t = SDL_GetCurrentThreadID();
-    fprintf(s_state_log, "net: rnd f%d %s %+lld %08x\n", s_det_frame, t == s_det_game_tid ? "g" : "X",
-        (long long)((intptr_t)caller - (intptr_t)&HSD_Rand), seed_after);
-}
-
-static void det_trace_open(void) {
-    const char* d = getenv("MELEE_NET_DET_TRACE");
-    if (d == NULL || s_state_log == NULL || sscanf(d, "%d-%d", &s_det_lo, &s_det_hi) != 2) {
-        s_det_lo = -1;
-        s_det_hi = -2;
-        return;
-    }
-    fprintf(s_state_log, "net: detlayout f-1 sizeof=%zu cpu=%zu input=%zu HSD_Rand=%p\n", sizeof(Fighter),
-        offsetof(Fighter, cpu), offsetof(Fighter, input), (void*)&HSD_Rand);
-    pc_log_line("net: determinism trace frames %d-%d", s_det_lo, s_det_hi);
-}
-
-static void det_trace_frame(int32_t frame) {
-    if (s_det_hi < s_det_lo) {
-        return;
-    }
-    s_det_frame = frame;
-    s_det_game_tid = SDL_GetCurrentThreadID();
-    bool on = frame >= s_det_lo && frame <= s_det_hi;
-    pc_rand_trace = on ? det_rand_trace : NULL;
-    if (!on) {
-        return;
-    }
-    static char hex[2 * sizeof(Fighter) + 1];
-    for (int slot = 0; in_fight() && slot < 4; slot++) {
-        HSD_GObj* gobj = Player_GetEntity(slot);
-        if (gobj == NULL || gobj->classifier != HSD_GOBJ_CLASS_FIGHTER) {
-            continue;
+/* Called once from gmmain.c right after the game seeds its RNG, before any
+ * scene runs. Everything the game draws before the first tick -- a
+ * MELEE_BOOT_SCENE=vs boot creates the fighters, and Fighter_Create's CPU
+ * init (ftCo_800A101C) draws each CPU's AI frame counter cpu.x7C from it --
+ * happens before record_open (first pc_net_sync), so no per-tick seed the
+ * file pins can reach it. The boot seed is OSGetTick(), so every run's CPUs
+ * started on different AI phases: replays of one recording parted a few
+ * hundred frames in, at a different frame each run (2026-10-14, Quest).
+ * So the header holds the boot seed, and a replay boots from it. */
+void pc_net_record_boot_seed(void) {
+    const char* rep = getenv("MELEE_NET_REPLAY");
+    if (rep != NULL && rep[0] != '\0') {
+        FILE* f = fopen(rep, "rb");
+        char magic[4];
+        uint32_t seed;
+        if (f != NULL && fread(magic, 4, 1, f) == 1 && memcmp(magic, "MRC5", 4) == 0 &&
+            fread(&seed, 4, 1, f) == 1)
+        {
+            *HSD_RandSeedPtr = seed;
+            pc_log_line("net: replay boots from seed %08x", seed);
         }
-        const unsigned char* b = (const unsigned char*)GET_FIGHTER(gobj);
-        static const char digits[] = "0123456789abcdef";
-        for (size_t i = 0; i < sizeof(Fighter); i++) {
-            hex[2 * i] = digits[b[i] >> 4];
-            hex[2 * i + 1] = digits[b[i] & 15];
+        if (f != NULL) {
+            fclose(f);
         }
-        hex[2 * sizeof(Fighter)] = '\0';
-        fprintf(s_state_log, "net: fdump f%d p%d %s\n", frame, slot, hex);
+        return;
     }
+    s_boot_seed = *HSD_RandSeedPtr;
+    s_boot_seed_have = true;
 }
 
 void record_open(void) {
@@ -163,7 +140,9 @@ void record_open(void) {
             s_rep = NULL;
         }
         if (s_rep) {
-            *HSD_RandSeedPtr = seed;
+            /* The header seed went in at boot (pc_net_record_boot_seed);
+             * from here every tick starts from its recorded seed. */
+            (void)seed;
             s_rep_next_ok = fread(&s_rep_next, sizeof s_rep_next, 1, s_rep) == 1;
         }
         pc_log_line("net: %s %s", s_rep ? "replaying" : "cannot open", rep);
@@ -178,7 +157,6 @@ void record_open(void) {
         }
         pc_log_line("net: %s state log %s", s_state_log ? "writing" : "cannot open", sl);
     }
-    det_trace_open();
 }
 
 bool record_active(void) {
@@ -239,7 +217,7 @@ static int32_t s_rec_written = -1; /* newest frame on disk */
 static void record_write(const FrameRecord* r, int32_t f) {
     if (f == 0) {
         fwrite("MRC5", 4, 1, s_rec);
-        fwrite(&r->seed, 4, 1, s_rec);
+        fwrite(s_boot_seed_have ? &s_boot_seed : &r->seed, 4, 1, s_rec);
     }
     fwrite(r, sizeof *r, 1, s_rec);
     fflush(s_rec); /* runs usually end by SIGTERM; keep every frame */
@@ -508,6 +486,68 @@ static void state_hash_periodic(int32_t frame) {
      * already in memory even when every checksum still agrees. */
     if (s_state_log != NULL) {
         fprintf(s_state_log, "net: fullhash f%d %016llx\n", frame, (unsigned long long)s_full_hash);
+    }
+}
+
+/* MELEE_NET_DET_TRACE=lo-hi (with MELEE_NET_STATE_LOG): for frames lo..hi,
+ * every RNG draw ("net: rnd f<N> <thread> <caller> <seed after>", the caller
+ * as an offset from HSD_Rand so two ASLR'd runs compare) and each fighter's
+ * whole Fighter struct as hex ("net: fdump f<N> p<slot> ..."). The run-to-run
+ * determinism hunt: two runs' draw sequences part at the first call site that
+ * reads something the recording does not pin. */
+extern void (*pc_rand_trace)(void* caller, u32 seed_after);
+static int32_t s_det_lo = -1, s_det_hi = -2;
+static int32_t s_det_frame;
+static SDL_ThreadID s_det_game_tid;
+
+static void det_rand_trace(void* caller, u32 seed_after) {
+    SDL_ThreadID t = SDL_GetCurrentThreadID();
+    fprintf(s_state_log, "net: rnd f%d %s %+lld %08x\n", s_det_frame, t == s_det_game_tid ? "g" : "X",
+        (long long)((intptr_t)caller - (intptr_t)&HSD_Rand), seed_after);
+}
+
+static void det_trace_open(void) {
+    const char* d = getenv("MELEE_NET_DET_TRACE");
+    if (d == NULL || s_state_log == NULL || sscanf(d, "%d-%d", &s_det_lo, &s_det_hi) != 2) {
+        s_det_lo = -1;
+        s_det_hi = -2;
+        return;
+    }
+    fprintf(s_state_log, "net: detlayout f-1 sizeof=%zu cpu=%zu input=%zu HSD_Rand=%p\n", sizeof(Fighter),
+        offsetof(Fighter, cpu), offsetof(Fighter, input), (void*)&HSD_Rand);
+    pc_log_line("net: determinism trace frames %d-%d", s_det_lo, s_det_hi);
+}
+
+static void det_trace_frame(int32_t frame) {
+    static bool opened;
+    if (!opened) {
+        opened = true;
+        det_trace_open();
+    }
+    if (s_det_hi < s_det_lo) {
+        return;
+    }
+    s_det_frame = frame;
+    s_det_game_tid = SDL_GetCurrentThreadID();
+    bool on = frame >= s_det_lo && frame <= s_det_hi;
+    pc_rand_trace = on ? det_rand_trace : NULL;
+    if (!on) {
+        return;
+    }
+    static char hex[2 * sizeof(Fighter) + 1];
+    for (int slot = 0; in_fight() && slot < 4; slot++) {
+        HSD_GObj* gobj = Player_GetEntity(slot);
+        if (gobj == NULL || gobj->classifier != HSD_GOBJ_CLASS_FIGHTER) {
+            continue;
+        }
+        const unsigned char* b = (const unsigned char*)GET_FIGHTER(gobj);
+        static const char digits[] = "0123456789abcdef";
+        for (size_t i = 0; i < sizeof(Fighter); i++) {
+            hex[2 * i] = digits[b[i] >> 4];
+            hex[2 * i + 1] = digits[b[i] & 15];
+        }
+        hex[2 * sizeof(Fighter)] = '\0';
+        fprintf(s_state_log, "net: fdump f%d p%d %s\n", frame, slot, hex);
     }
 }
 
