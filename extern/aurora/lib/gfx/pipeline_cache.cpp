@@ -176,6 +176,7 @@ static absl::flat_hash_set<PipelineRef> g_recordedPairs;
 static std::thread g_precompileThread;
 static std::atomic_bool g_precompileStop{false};
 static std::atomic_size_t g_precompileTotal{0}, g_precompileDone{0};
+static std::atomic_bool g_precompileFinished{false};
 static bool g_precompiling = false;
 // Recorded pairs queued this process (rebuild_pipeline_cache), and how many.
 static bool g_pairsQueued = false;
@@ -1684,6 +1685,7 @@ static void precompile_recorded_pipelines(unsigned threads) {
   work();
   for (auto& w : workers)
     w.join();
+  g_precompileFinished = true;
   Log.info("Precompiled {} of {} pipelines in {:.1f} s", done.load(), jobs.size(),
            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
   if (const auto line = webgpu::compile_stats_line(); !line.empty())
@@ -1755,18 +1757,20 @@ void initialize_pipeline_cache() {
     g_precompileStop = false;
     g_precompileTotal = 0;
     g_precompileDone = 0;
+    g_precompileFinished = false;
     g_precompileThread = std::thread([precompileThreads] { precompile_recorded_pipelines(precompileThreads); });
   }
 }
 
 uint32_t precompile_pending() {
-  if (!g_precompiling || !g_precompileThread.joinable())
+  if (!g_precompiling || !g_precompileThread.joinable() || g_precompileFinished || g_precompileStop)
     return 0;
   const size_t total = g_precompileTotal.load(), done = g_precompileDone.load();
-  // Still loading the pairs: say there is work without knowing how much.
+  // Still loading the pairs (or none recorded yet, about to finish): say there
+  // is work without knowing how much.
   if (total == 0)
-    return g_precompileStop ? 0 : 1;
-  return done >= total || g_precompileStop ? 0 : static_cast<uint32_t>(total - done);
+    return 1;
+  return done >= total ? 0 : static_cast<uint32_t>(total - done);
 }
 
 void precompile_stop() {
