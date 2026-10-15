@@ -60,10 +60,14 @@ std::mutex sBindlessPipelineLayoutMutex;
 const wgpu::PipelineLayout& bindless_pipeline_layout() {
   std::lock_guard lock{sBindlessPipelineLayoutMutex};
   if (!sBindlessPipelineLayout) {
+    // Three groups: the table takes the next index, and Dawn has four
+    // (kMaxBindGroups). With the texture group kept as well it went at 4,
+    // past Dawn's per-group arrays (skip_validation let the layout through;
+    // AURORA_DAWN_VALIDATION=1 rejects it). The eye uniforms move to group 2
+    // (bindless_batch_rewrite); textures come from the table.
     const std::array layouts{
         gfx::detail::resources().staticBindGroupLayout,
         gfx::detail::resources().uniformBindGroupLayout,
-        sTextureBindGroupLayout,
         g_xrEyeBindGroupLayout,
     };
     wgpu::PipelineLayoutResourceTable table{};
@@ -786,7 +790,10 @@ void initialize() noexcept {
         .binding = 0,
         // The fragment stage reads a clipped draw's opacity from it.
         .visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment,
-        .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = XrEyeUniformSize},
+        // No minimum: per-eye shaders take XrEyeUniformSize, multiview ones
+        // the larger multiview struct (xr.cpp kMultiviewEyeSize); each draw's
+        // binding is checked against its own shader.
+        .buffer = {.type = wgpu::BufferBindingType::Uniform, .minBindingSize = 0},
     };
     const wgpu::BindGroupLayoutDescriptor layoutDesc{
         .label = "GX XR Eye Bind Group Layout",

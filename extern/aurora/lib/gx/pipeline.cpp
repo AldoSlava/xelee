@@ -302,6 +302,9 @@ struct XrBatcher {
   // the resource table (sBindless), bound once per pass.
   bool bindless = false;
   bool tableBound = false;
+  // The eye uniforms the replay has at group 3 (xr_batch_eye_group): a
+  // bindless batch takes them at group 2, the table being group 3.
+  wgpu::BindGroup eyeGroup;
   std::vector<Bucket> buckets;
   size_t bucketsUsed = 0;
 } sXrBatch;
@@ -511,7 +514,9 @@ void emit_batch(const wgpu::RenderPassEncoder& pass) {
   }
   const std::array offsets{first.uniformRange.offset};
   pass.SetBindGroup(1, resources.uniformBindGroup, offsets.size(), offsets.data());
-  if (first.bindGroups.textureBindGroup)
+  if (b.bindless)
+    pass.SetBindGroup(2, b.eyeGroup);
+  else if (first.bindGroups.textureBindGroup)
     pass.SetBindGroup(2, gfx::find_bind_group(first.bindGroups.textureBindGroup));
   pass.SetIndexBuffer(resources.xrBatchBuffer, wgpu::IndexFormat::Uint32, idxOffset, uint64_t{written} * 4);
   pass.SetVertexBuffer(0, resources.storageBuffer);
@@ -520,10 +525,17 @@ void emit_batch(const wgpu::RenderPassEncoder& pass) {
     pass.SetBlendConstant(&color);
   }
   pass.DrawIndexed(written);
+  if (b.bindless) {
+    // Back to the groups the other draws' layout has: textures at 2, the eye at 3.
+    pass.SetBindGroup(2, g_emptyTextureBindGroup);
+    pass.SetBindGroup(3, b.eyeGroup);
+  }
   ++b.batches;
   b.batchedDraws += n;
 }
 } // namespace
+
+void xr_batch_eye_group(const wgpu::BindGroup& group) { sXrBatch.eyeGroup = group; }
 
 void xr_batch_begin(const gfx::detail::FramePacket& frame, bool multiview, bool motion) {
   auto& b = sXrBatch;

@@ -789,6 +789,7 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
     uint32_t boundTransform = 0;
     gx::xr_batch_flush(pass);
     pass.SetBindGroup(3, group(0));
+    gx::xr_batch_eye_group(group(0));
     if (target.fullViewport) {
       const bool whole = view.width <= 0.f || view.height <= 0.f;
       const float vx = whole ? 0.f : view.x, vy = whole ? 0.f : view.y;
@@ -841,6 +842,7 @@ void encode_xr_replay(const wgpu::CommandEncoder& cmd, FramePacket& frame, XrCat
               gx::xr_batch_flush(pass); // batched draws see the transform they were recorded with
               boundTransform = c.xrTransform;
               pass.SetBindGroup(3, group(boundTransform));
+              gx::xr_batch_eye_group(group(boundTransform));
             }
             c.data.draw.encoder(c.data.draw.payload.data(), pass, info);
             if (target.drawCount != nullptr) {

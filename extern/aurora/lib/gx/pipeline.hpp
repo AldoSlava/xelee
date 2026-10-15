@@ -87,6 +87,8 @@ void render(const DrawData& data, const wgpu::RenderPassEncoder& pass);
 // before anything that changes what later draws see (group 3), end (uploads).
 void xr_batch_begin(const gfx::detail::FramePacket& frame, bool multiview, bool motion);
 void xr_batch_flush(const wgpu::RenderPassEncoder& pass);
+// The eye uniforms just set at group 3; a bindless batch binds them at 2.
+void xr_batch_eye_group(const wgpu::BindGroup& group);
 void xr_batch_end();
 #endif
 

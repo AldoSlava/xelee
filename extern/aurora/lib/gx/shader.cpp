@@ -1147,6 +1147,15 @@ void bindless_batch_rewrite(std::string& src) {
     if (const auto d = src.find(decl); d != std::string::npos)
       src.erase(d, decl.size());
   }
+  // The eye uniforms at group 2 in its place: the resource table is group 3
+  // (bindless_pipeline_layout).
+  {
+    const std::string eye = "@group(3) @binding(0)\nvar<uniform> xr: XrEye;";
+    if (const auto e = src.find(eye); e != std::string::npos)
+      src.replace(e, eye.size(), "@group(2) @binding(0)\nvar<uniform> xr: XrEye;");
+    else
+      Log.warn("Bindless batch shader: no XR eye uniform");
+  }
   for (size_t at = src.find("tex"); at != std::string::npos; at = src.find("tex", at)) {
     if ((at > 0 && ident_char(src[at - 1])) || at + 3 >= src.size() || !std::isdigit(static_cast<unsigned char>(src[at + 3]))) {
       at += 3;
