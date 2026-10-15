@@ -20,12 +20,25 @@ parser.add_argument("--binary", type=Path, help="Path to executable or AppImage 
 parser.add_argument("--screenshots", type=Path)
 parser.add_argument("--case", action="append", help="Run only this named case (repeatable)")
 parser.add_argument("--native-picker", action="store_true", help="Also test the desktop's Zenity file picker (requires working GTK/X11)")
+parser.add_argument("--send-event", action="store_true",
+                    help="Deliver keys with XSendEvent instead of XTest (XTest keys never reach the window under KWin's Xwayland)")
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 dpy = display.Display()
 
 
 def key(win, name, repeat=1):
+    if args.send_event:
+        code = dpy.keysym_to_keycode(XK.string_to_keysym(name))
+        for _ in range(repeat):
+            for kind in (protocol.event.KeyPress, protocol.event.KeyRelease):
+                win.send_event(kind(time=X.CurrentTime, root=dpy.screen().root, window=win, same_screen=1,
+                                    child=X.NONE, root_x=0, root_y=0, event_x=0, event_y=0, state=0, detail=code),
+                               propagate=True)
+                dpy.sync()
+                time.sleep(0.05)
+            time.sleep(0.35)
+        return
     for _ in range(repeat):
         if dpy.get_input_focus().focus != win:
             win.set_input_focus(X.RevertToParent, X.CurrentTime)
@@ -68,7 +81,7 @@ def resize(win, width, height):
     assert (size.width, size.height) == (width, height), "window manager did not apply requested test size"
 
 
-def run_case(name, arguments, saved_disc=None, interact=None, saved_preferences=""):
+def run_case(name, arguments, saved_disc=None, interact=None, saved_preferences="", extra_env=None, size=(1280, 960)):
     if args.case and name not in args.case:
         return
     with tempfile.TemporaryDirectory(prefix="melee-launcher-") as directory:
@@ -87,6 +100,7 @@ def run_case(name, arguments, saved_disc=None, interact=None, saved_preferences=
                    XDG_DATA_HOME=directory, XDG_CACHE_HOME=directory, MELEE_VSYNC="0")
         if name == "settings-live":
             env.pop("MELEE_VSYNC", None)
+        env.update(extra_env or {})
         with tempfile.TemporaryFile(mode="w+") as log:
             if name == "relative-cli":
                 arguments = [os.path.relpath(args.disc.resolve(), directory)]
@@ -110,7 +124,7 @@ def run_case(name, arguments, saved_disc=None, interact=None, saved_preferences=
                 time.sleep(2)
                 assert proc.poll() is None, f"{name}: launcher did not stay open"
                 if not name.startswith("f1-"):
-                    resize(win, 1280, 960)
+                    resize(win, *size)
                 screenshot(win, name)
                 if interact:
                     interact(win, proc, config)
@@ -131,9 +145,10 @@ def settings(win, proc, config):
     key(win, "Down")
     key(win, "Return")
     time.sleep(0.5)
-    key(win, "Right")  # tab strip: Graphics -> Audio & interface
+    key(win, "Down")   # categories: Graphics -> Audio, which opens its page
+    key(win, "Right")  # into the rows: Master volume
     for _ in range(6):
-        key(win, "Down")  # volume -> music -> sfx -> mute -> fps -> scale
+        key(win, "Down")  # music -> sfx -> mute -> reverb -> fps -> scale
     time.sleep(0.5)
     screenshot(win, "settings")
     key(win, "Return")
@@ -143,16 +158,17 @@ def settings(win, proc, config):
     resize(win, 720, 760)
     time.sleep(0.5)
     screenshot(win, "settings-small")
-    key(win, "Escape")
-    key(win, "Down", 2)  # discord -> Quit
+    key(win, "Escape")  # rows -> categories
+    key(win, "Escape")  # categories -> main menu, on Settings
+    key(win, "Down")    # Quit
     key(win, "Return")
     assert proc.wait(timeout=20) == 0, "keyboard Quit failed"
 
 
 def settings_live(win, proc, config):
     key(win, "Down")
-    key(win, "Return")  # open settings, focus lands on the tab strip
-    key(win, "Down")    # Display mode
+    key(win, "Return")  # open settings, focus lands on Graphics
+    key(win, "Right")   # Display mode
     key(win, "Return")  # Fullscreen
     assert "fullscreen 1" in config.read_text(), "fullscreen setting was not saved"
     key(win, "Return")  # Windowed
@@ -160,7 +176,31 @@ def settings_live(win, proc, config):
     key(win, "Down")
     key(win, "Return")  # Vsync off
     assert "vsync 0" in config.read_text(), "VSync toggle was not saved"
+    key(win, "Down", 2)  # Internal resolution -> Aspect ratio
+    key(win, "Left")     # steps back: Original -> Auto (window aspect)
+    assert "widescreen 2" in config.read_text(), "Left did not step the aspect ratio back"
+    key(win, "Right")    # and forward again
+    assert "widescreen 0" in config.read_text(), "Right did not step the aspect ratio"
     close(win, proc)
+
+
+def quest_layout(win, proc, config):
+    """The Quest panel's layout (MELEE_LAUNCHER_PLATFORM=quest) at its default
+    1280x800: the rows it has no use for are skipped, and Back is reachable
+    without scrolling."""
+    key(win, "Down")
+    key(win, "Return")  # Graphics
+    key(win, "Right")   # first row shown: Internal resolution (no display mode or sync)
+    key(win, "Return")
+    assert "render_scale 1\n" in config.read_text(), "the first Quest row was not Internal resolution"
+    key(win, "Escape")
+    key(win, "Down", 3)  # Audio -> Gameplay -> Online (Controls is hidden)
+    screenshot(win, "quest-online")
+    key(win, "Down")     # Back
+    key(win, "Return")
+    key(win, "Down")     # Settings -> Quit
+    key(win, "Return")
+    assert proc.wait(timeout=20) == 0, "Back and Quit were not reachable in the Quest layout"
 
 
 def picker_cancel(win, proc, config):
@@ -199,6 +239,8 @@ try:
     run_case("invalid-cli", ["/nonexistent/disc.iso"])
     run_case("missing-saved", [], saved_disc="/nonexistent/disc with spaces.iso")
     run_case("settings-live", [], interact=settings_live)
+    run_case("quest-layout", [], interact=quest_layout, extra_env={"MELEE_LAUNCHER_PLATFORM": "quest"},
+             size=(1280, 800))
     if args.disc:
         def port_menu(win, proc, config):
             time.sleep(12)

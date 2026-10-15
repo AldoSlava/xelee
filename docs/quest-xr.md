@@ -12,7 +12,11 @@ It's a hybrid app, following Meta's
 
 - **Launcher.** `MeleeActivity` is a 2D panel in the Home environment, with
   the `com.oculus.intent.category.2D` category. Disc selection, Verify, and
-  settings work with the controller pointer like any panel app.
+  settings work with the controller pointer like any panel app. Its layout
+  fits the default 1280x800 dp panel without scrolling. It leaves out what
+  the immersive game ignores: display mode, VSync, the graphics backend,
+  anti-aliasing (the eyes take `AURORA_XR_MSAA`), the keyboard and F1
+  controls page, and updates (the updater knows only the phone APK).
 - **Play.** It starts `MeleeXrActivity` with the chosen disc as the `disc`
   extra, then closes the panel (`src/pc/main.c`,
   `pc_android_launch_xr`).
