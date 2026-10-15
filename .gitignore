@@ -27,6 +27,7 @@ platforms/android/local.properties
 platforms/android/*/build/
 platforms/android/app/libs/
 platforms/android/app/src/main/jniLibs/
+platforms/android/app/src/asan/jniLibs/
 platforms/android/app/src/main/assets/
 
 # Release signing material stays local; CI reads it from repository secrets.

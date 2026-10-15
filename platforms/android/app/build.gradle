@@ -10,6 +10,11 @@ def releaseKeystore = rootProject.file('melee-release.keystore')
 // mixed-reality build. Merges src/xr/AndroidManifest.xml over the main one.
 def meleeXr = (project.findProperty('melee.xr') ?: 'false').toString().toBoolean()
 
+// -Pmelee.asan=true: AddressSanitizer build (debug only). libmelee.so must be
+// built with -fsanitize=address; src/asan adds wrap.sh, which preloads the
+// ASan runtime the build stages next to it (src/asan/jniLibs, untracked).
+def meleeAsan = (project.findProperty('melee.asan') ?: 'false').toString().toBoolean()
+
 android {
     namespace 'dev.melee.game'
     compileSdk 34
@@ -52,6 +57,17 @@ android {
         sourceSets {
             debug.manifest.srcFile 'src/xr/AndroidManifest.xml'
             release.manifest.srcFile 'src/xr/AndroidManifest.xml'
+        }
+    }
+
+    if (meleeAsan) {
+        sourceSets {
+            debug.jniLibs.srcDirs += 'src/asan/jniLibs'
+            debug.resources.srcDirs += 'src/asan/resources'
+        }
+        // wrap.sh runs only from libraries extracted at install.
+        packaging {
+            jniLibs.useLegacyPackaging true
         }
     }
 

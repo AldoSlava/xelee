@@ -107,6 +107,10 @@ for i, arg in enumerate(cmd_args):
         continue
     if arg in CLANG_ONLY_FLAGS:
         continue
+    # An ASan build instruments the Clang code only: GCC's runtime is not
+    # Android's (the game's C runs uninstrumented next to it).
+    if arg.startswith(('-fsanitize', '-fno-sanitize')):
+        continue
     filtered_args.append(arg)
 
 gcc_cmd = [
