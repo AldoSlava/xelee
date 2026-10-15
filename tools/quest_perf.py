@@ -209,9 +209,12 @@ def view_coverage():
 
 
 def set_levels(cpu, gpu):
-    """Pins (or, with None, releases) the CPU and GPU clock levels."""
+    """Pins (or, with None, releases) the CPU and GPU clock levels. -1 releases
+    the override (the runtime logs "override released (value=-1)"); an empty
+    value left it at level 0, so the GPU ran at 285 MHz in normal play after
+    a benchmark (2026-10-15)."""
     for prop, lvl in (("debug.oculus.cpuLevel", cpu), ("debug.oculus.gpuLevel", gpu)):
-        adb("shell", "setprop", prop, "''" if lvl is None else str(lvl), check=False)
+        adb("shell", "setprop", prop, "-1" if lvl is None else str(lvl), check=False)
 
 
 def replay_status(text):
