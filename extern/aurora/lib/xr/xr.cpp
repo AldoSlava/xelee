@@ -853,12 +853,14 @@ VkImageCreateInfo swapchain_image_info(const Stream& st) {
   ici.arrayLayers = st.layers;
   ici.samples = VK_SAMPLE_COUNT_1_BIT;
   ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-  // The SpaceWarp images also take copies of the motion pass (render_eyes).
+  // The SpaceWarp images also take copies of the motion pass (render_eyes),
+  // the color ones the staged ring's (release_staged).
   ici.usage = st.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                              VK_IMAGE_USAGE_TRANSFER_DST_BIT
               : st.ownFormat
                   ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                             : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+                             : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   return ici;
@@ -873,7 +875,7 @@ bool create_swapchain(Stream& st) {
                   : st.ownFormat ? XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
                                        XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT
                                  : XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT |
-                                       XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
+                                       XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT | XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
   ci.format = st.swapFormat;
   ci.sampleCount = 1;
   ci.width = st.width;
@@ -904,12 +906,13 @@ bool create_swapchain(Stream& st) {
 }
 
 // A staged stream's own images: the swapchain's, in the format Dawn draws as
-// (copied into the sRGB swapchain bit for bit), also a copy source.
+// (copied into the sRGB swapchain bit for bit), also a copy source. Copy
+// destination too: Dawn's views of any texture ask for it (its clears).
 VkImageCreateInfo ring_image_info(const Stream& st) {
   VkImageCreateInfo ici = swapchain_image_info(st);
   ici.flags = 0;
   ici.usage = (st.depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) |
-              VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+              VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   return ici;
 }
 
@@ -3184,7 +3187,9 @@ void free_finished_uploads(bool all = false) {
 bool create_static_swapchain(XrSwapchain& out, uint32_t w, uint32_t h, const std::vector<uint8_t>& rgba) {
   XrSwapchainCreateInfo ci{XR_TYPE_SWAPCHAIN_CREATE_INFO};
   ci.createFlags = XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT;
-  ci.usageFlags = XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+  // Color attachment: released in that layout, as OpenXR expects of color images.
+  ci.usageFlags =
+      XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT | XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
   ci.format = B.swapFormat;
   ci.sampleCount = 1;
   ci.width = w;

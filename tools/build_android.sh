@@ -20,7 +20,7 @@ if [[ "${MELEE_XR}" == 1 ]]; then
     # Without one, the pinned commit of github.com/rhythmerc/dawn (branch
     # melee-xr) is cloned into build/dawn-src with its dependencies.
     MELEE_DAWN_REPO="${MELEE_DAWN_REPO:-https://github.com/rhythmerc/dawn.git}"
-    MELEE_DAWN_REF="${MELEE_DAWN_REF:-4ed74db8fbaca856a10b58557dec20694164d48e}"
+    MELEE_DAWN_REF="${MELEE_DAWN_REF:-3a0c73272e2867d1af2382d703c9b456a252ad4e}"
     if [[ -z "${MELEE_DAWN_SOURCE:-}" ]]; then
         if [[ -d "${HOME}/projects/dawn/.git" ]]; then
             MELEE_DAWN_SOURCE="${HOME}/projects/dawn"
