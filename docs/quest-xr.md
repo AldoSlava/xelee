@@ -585,8 +585,8 @@ limited by vertex fetch, not by pixels.
 
 ### MSAA on the 3D eyes
 
-`AURORA_XR_MSAA=<1|2|4>` multisamples the 3D eyes alone (4 by default on
-Android); the flat frame keeps its own sample count. The eyes keep multiview and the direct path:
+`AURORA_XR_MSAA=<1|2|4>` multisamples the 3D eyes alone (2 by default on
+Android, since 2026-10-14; 4 before); the flat frame keeps its own sample count. The eyes keep multiview and the direct path:
 color, the extra attachments and depth are multisampled, transient where
 the device allows (`TransientAttachments`, so on a tiler they stay in tile
 memory), and the pass resolves into the shared image and discards the
@@ -605,6 +605,49 @@ Fountain of Dreams 58.9 -> 59.8 (4.04 -> 4.22 ms), Pokémon Stadium rock
 After a build that invalidates the pipeline cache (a new Dawn), the first
 runs compile thousands of pipelines for over a minute and are CPU bound;
 `quest_perf.py` flags them ("pipeline cache cold").
+
+Why 2x: every eye sample sits in tile memory, so 4x needs twice the bins of
+2x, and the tiler replays every draw per bin. On the benchmark below (four
+CPUs on Brinstar at the passthrough clock caps, scale 0.8) the eye pass
+took 10.7 ms at 4x, 9.4 at 2x and 7.6 at 1x. WebGPU allows only 1 and 4
+samples; 2 needs the Dawn fork's 051c687 (without it, a 2x texture aborted
+in `VulkanSampleCount`).
+
+### Benchmarking at the passthrough clock caps
+
+Meta documents CPU level 3 and GPU level 2 as the caps for an app showing
+passthrough. Left alone, the runtime granted GPU levels 5-7 at random,
+which made the same build swing between 50 and 60 3D frames a second.
+Benchmarks pin the clocks and replay a recorded match:
+
+```sh
+tools/quest_perf.py run --stage 6 --players 4 --phases mr:90 --warmup 100 \
+  --cpu-level 3 --gpu-level 2 --replay bench-b.mrc --no-view-check \
+  --env AURORA_XR_DYNRES=0 --env AURORA_XR_EYE_SCALE=0.8
+```
+
+- `--cpu-level` / `--gpu-level` set `debug.oculus.cpuLevel` / `gpuLevel` for
+  the run and clear them after. The VrApi line confirms them (CPU 3 at
+  1651 MHz, GPU 2 at 456 MHz).
+- `--record NAME` saves the match's seed and pads (`MELEE_NET_RECORD`) to the
+  app's files directory; `--replay NAME` plays them back, with the game's
+  log (`MELEE_LOG_FILE`) kept as `LABEL-game.log` for its verdict.
+- Replays still diverge a few seconds into the fight, at a different frame
+  each run (the Quest XR build isn't deterministic yet), but the fights run
+  close enough: 90 s means of the eye pass repeat within about 0.3 ms.
+  Compare 90 s means, not single 10 s windows.
+- The tool raises logcat's ring to 64 MB. The default turned over in about
+  20 s, so a phase's log used to hold only its last two stats windows.
+
+Four CPUs on Brinstar at the caps, scale 0.8 (2026-10-14): 4x MSAA, eyes
+11.3 ms, motion 2.8 ms, about 40 3D frames a second. Without GX lighting in
+the eyes (`AURORA_XR_EYE_NOLIGHT=1`, a measurement only) 1.9 ms less at 4x,
+1.55 at 2x. Without eye batching (`AURORA_XR_BATCH=0`) the eyes take 1.1 ms
+more and the motion pass 2.2 ms more: an eye draw costs about 14 us of GPU
+at this clock, a motion draw about 6. With 2x MSAA, the motion pass batching
+by bucket (`AURORA_XR_MOTION_SORT`, default on: 2.7 -> 1.75 ms) and the eyes
+regrouping opaque draws (`AURORA_XR_EYE_SORT=1`, off until checked by eye:
+9.35 -> 8.1 ms), about 52 3D frames a second.
 
 ### Dynamic resolution
 
@@ -1443,6 +1486,18 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_BOUNDARY` | 0 | 1 keeps the Guardian boundary in mixed reality (by default it's hidden while passthrough shows the room) |
 | `AURORA_XR_SCREEN_WIDTH` | 0.7 | Starting screen width in meters (grab with two hands to change) |
 | `AURORA_XR_SCREEN_DISTANCE` | 0.85 | Meters in front of the starting head position |
+| `AURORA_XR_TWEAK` | unset | A file read twice a second (`lead=N set=N cutout=N trans=N epoch=N gap=N late=N eyesort=N`), to switch the presentation modes below mid-fight |
+| `AURORA_XR_POSE_LEAD` | 1 | Each 3D frame's eye poses are predicted for the display time it's shown at, not the loop it started in |
+| `AURORA_XR_SET_HANDOVER` | 1 | With SpaceWarp, a tick's 3D, motion and depth images go out together or not at all |
+| `AURORA_XR_APPSW_EPOCH` | 1 | The previous poses SpaceWarp's vectors pair with advance only when a frame's eyes go out |
+| `AURORA_XR_APPSW_GAP` | 1 | After a tick that never went out, no draw pairs with its recorded previous matrices |
+| `AURORA_XR_APPSW_LATE` | 0 | A late frame is submitted instead of dropped (the next is skipped if also late) |
+| `AURORA_XR_APPSW_CUTOUT` | 1 | Alpha-tested draws go into SpaceWarp's depth and motion |
+| `AURORA_XR_APPSW_TRANSLUCENT` | 1 | Source-alpha blended draws without depth writes go into SpaceWarp's depth and motion where at least `AURORA_XR_APPSW_TRANS_ALPHA` (0.5) solid |
+| `AURORA_XR_MOTION_SORT` | 1 | The motion pass batches joinable draws regardless of order |
+| `AURORA_XR_EYE_SORT` | 0 | The eye pass regroups opaque, depth-writing draws for batching |
+| `AURORA_XR_MOTION_WHY` | 0 | Logs which world draws SpaceWarp's depth and motion leave out, and why |
+| `AURORA_XR_EYE_NOLIGHT` | 0 | Measurement only: no GX lighting in the eyes |
 | `AURORA_XR_SCREEN_Y` | 0 | Height offset in meters |
 | `AURORA_XR_SCREEN_HEIGHT` | 1080 | Screen texture height in pixels |
 | `AURORA_XR_3D` | 1 | 3D fights. Set 0 to keep fights on the virtual screen |
