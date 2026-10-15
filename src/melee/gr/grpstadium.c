@@ -2477,6 +2477,15 @@ void grStadium_801D4548(Ground_GObj* gobj)
         if (gp->u.stadium.xDE == 5) {
             gp->u.stadium.xD8 =
                 randi_between_2(yakumono_param->x0, yakumono_param->x4);
+#ifdef TARGET_PC
+            /* xCC is the transformation's load buffer, not an archive
+             * struct: the call only zeroes the buffer's first words (the DAT
+             * header's third word reads as a kind that frees nothing). The
+             * buffer is preload memory no rollback snapshot covers, so a
+             * re-run of this frame finds the header already zeroed, reads it
+             * as {NULL, kind 0} and frees NULL. The zeroing is done; skip it. */
+            if (((UnkArchiveStruct*) gp->u.stadium.xCC)->unk0 != NULL)
+#endif
             grAnime_801C65B0((void*) gp->u.stadium.xCC);
             mpLib_800575B0(0x55);
             mpLib_800575B0(0x6F);
