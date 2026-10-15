@@ -115,7 +115,17 @@ static void HSD_SynthSFXSampleLoadCallback(int result, uintptr_t length,
              * voice blocks }, copied behind the node's next/id words. */
             n = HSD_Synth_804D7734->v;
             nbytes = SfxLoadStreamDataSize(n << 6);
+#ifdef TARGET_PC
+            /* The stream data was moved to the end of this same buffer
+             * (above) and the entries are rebuilt from its front, so the
+             * source can sit just past the destination with the ranges
+             * overlapping (ASan saw 0x40 bytes apart, 0x48 copied). The
+             * GameCube's forward memcpy got away with it; memmove is
+             * defined. */
+            memmove((u8*) e + 8, HSD_Synth_804D7734, nbytes);
+#else
             memcpy((u8*) e + 8, HSD_Synth_804D7734, nbytes);
+#endif
             for (k = 0; k < n; k++) {
                 struct SfxVoiceAddr* a =
                     (struct SfxVoiceAddr*) ((u8*) e + 0x10 + k * 0x40);
