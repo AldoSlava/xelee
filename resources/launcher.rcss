@@ -9,19 +9,19 @@
     src: launcher/sprites.png;
     resolution: 2x;
     plate: 0px 0px 480px 136px;
-    plate-inner: 65px 41px 306px 60px;
+    plate-inner: 61px 32px 321px 78px;
     plate-on: 512px 0px 480px 136px;
-    plate-on-inner: 577px 41px 306px 60px;
+    plate-on-inner: 573px 32px 321px 78px;
     small: 0px 136px 480px 100px;
-    small-inner: 49px 168px 351px 40px;
+    small-inner: 47px 162px 361px 52px;
     small-on: 512px 136px 480px 100px;
-    small-on-inner: 561px 168px 351px 40px;
+    small-on-inner: 559px 162px 361px 52px;
     disc: 0px 236px 160px 160px;
-    disc-plate: 0px 236px 166px 160px;
-    arrow-l: 174px 236px 28px 40px;
-    arrow-r: 210px 236px 28px 40px;
-    arrow-l-dark: 246px 236px 28px 40px;
-    arrow-r-dark: 282px 236px 28px 40px;
+    disc-plate: 0px 236px 160px 160px;
+    arrow-l: 168px 236px 28px 40px;
+    arrow-r: 204px 236px 28px 40px;
+    arrow-l-dark: 240px 236px 28px 40px;
+    arrow-r-dark: 276px 236px 28px 40px;
 }
 
 div, p, h1, h2, h3 { display: block; }
@@ -127,19 +127,19 @@ button {
 .plate {
     height: 68dp;
     padding: 0 56dp 0 38dp;
-    line-height: 70dp;  /* centred on the black window, which sits low */
+    line-height: 72dp;  /* centred on the black window, which sits low */
     font-size: 33dp;
     font-weight: 800;
     color: #dba63c;
     font-effect: outline(2dp #000000);
-    decorator: ninepatch(plate, plate-inner, 20.5dp 54.5dp 17.5dp 32.5dp);
+    decorator: ninepatch(plate, plate-inner, 16dp 49dp 13dp 30.5dp);
     transition: transform 0.12s cubic-out;
 }
 .plate:hover { color: #ffe9a8; }
 .plate:focus {
     color: #141008;
     font-effect: none;
-    decorator: image(disc-plate none scale-none right center), ninepatch(plate-on, plate-on-inner, 20.5dp 54.5dp 17.5dp 32.5dp);
+    decorator: image(disc-plate none scale-none right center), ninepatch(plate-on, plate-on-inner, 16dp 49dp 13dp 30.5dp);
     transform: translateX(-14dp) scale(1.04);
 }
 .plate span { display: inline-block; }
@@ -151,26 +151,26 @@ button {
 
 .plate.small {
     height: 50dp;
-    line-height: 53dp;
+    line-height: 52dp;
     padding: 0 42dp 0 28dp;
     font-size: 22dp;
-    decorator: ninepatch(small, small-inner, 16dp 40dp 14dp 24.5dp);
+    decorator: ninepatch(small, small-inner, 13dp 36dp 11dp 23.5dp);
 }
 .plate.small.selected {
     color: #141008;
     font-effect: none;
-    decorator: ninepatch(small-on, small-on-inner, 16dp 40dp 14dp 24.5dp);
+    decorator: ninepatch(small-on, small-on-inner, 13dp 36dp 11dp 23.5dp);
 }
 /* The cursor on Back: the open page's plate goes back to idle. */
 .on-back .plate.small.selected {
     color: #dba63c;
     font-effect: outline(2dp #000000);
-    decorator: ninepatch(small, small-inner, 16dp 40dp 14dp 24.5dp);
+    decorator: ninepatch(small, small-inner, 13dp 36dp 11dp 23.5dp);
 }
 .plate.small:focus {
     color: #141008;
     font-effect: none;
-    decorator: image(disc-plate none contain right center), ninepatch(small-on, small-on-inner, 16dp 40dp 14dp 24.5dp);
+    decorator: image(disc-plate none contain right center), ninepatch(small-on, small-on-inner, 13dp 36dp 11dp 23.5dp);
     transform: translateX(-10dp);
 }
 

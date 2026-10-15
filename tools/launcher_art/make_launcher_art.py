@@ -56,7 +56,7 @@ DISC_SIZE = 160
 # The disc as it sits on a plate's tab: the tab's centre is this far in from
 # the plate's right edge, more than the disc's half width, so the plate's
 # rectangle carries transparent room on the right.
-DISC_PAD = 6
+DISC_PAD = 0
 ARROW_W, ARROW_H = 28, 40
 ARROWS_X = DISC_SIZE + DISC_PAD + 8
 
@@ -82,12 +82,13 @@ def vgradient(w, h, stops):
 GLOW = 10  # sprite pixels kept clear around each plate for the selected glow
 
 
-def rounded_chevron(x0, y0, x1, y1, tip, radius, steps=12):
-    """A plate silhouette: a blunt chevron pointing left, its right end
-    rounded with `radius`. `tip` is how far the chevron's top corner sits in
-    from its point."""
+def rounded_chevron(x0, y0, x1, y1, top_in, bottom_in, radius, steps=12):
+    """A plate silhouette: Melee's leaning chevron at the left, its point
+    two thirds of the way down, its top corner `top_in` in from the point and
+    its bottom corner `bottom_in` (less, so the bottom reaches further left);
+    the right end rounded with `radius`."""
     h = y1 - y0
-    pts = [(x0, y0 + h * 0.52), (x0 + tip, y0)]
+    pts = [(x0, y0 + h * 0.70), (x0 + top_in, y0)]
     cx, cy = x1 - radius, y0 + radius  # top-right corner
     for i in range(steps + 1):
         a = -math.pi / 2 + (math.pi / 2) * i / steps
@@ -96,35 +97,38 @@ def rounded_chevron(x0, y0, x1, y1, tip, radius, steps=12):
     for i in range(steps + 1):
         a = (math.pi / 2) * i / steps
         pts.append((cx + radius * math.cos(a), cy + radius * math.sin(a)))
-    pts.append((x0 + tip * 1.1, y1))
+    pts.append((x0 + bottom_in, y1))
     return pts
 
 
 def plate_geometry(w, h, scale=1):
-    """Where a plate's parts sit, in sprite pixels times `scale`."""
+    """Where a plate's parts sit, in sprite pixels times `scale`. The
+    proportions are measured off Melee's Main Menu: the gold band is about
+    18% of the plate's height along the top and 12% along the bottom."""
     g = GLOW * scale
     x0, y0, x1, y1 = g, g, w * scale - g, h * scale - g
     bh = y1 - y0
-    wy0, wy1 = y0 + bh * 0.25, y1 - bh * 0.19
-    wx0, wx1 = x0 + bh * 0.20, x1 - bh * 0.30
-    stem_x = x1 - bh * 0.80
-    return dict(x0=x0, y0=y0, x1=x1, y1=y1, bh=bh, wy0=wy0, wy1=wy1, wx0=wx0, wx1=wx1, stem_x=stem_x,
-                stem_w=bh * 0.14, tip=(wy1 - wy0) * 0.40)
+    wy0, wy1 = y0 + bh * 0.18, y1 - bh * 0.12
+    wh = wy1 - wy0
+    return dict(x0=x0, y0=y0, x1=x1, y1=y1, bh=bh, wy0=wy0, wy1=wy1,
+                casing=(bh * 0.39, bh * 0.14),
+                wx0=x0 + bh * 0.22, wx1=x1 - bh * 0.24, window=(wh * 0.36, wh * 0.18),
+                stem_x=x1 - bh * 0.70, stem_w=bh * 0.12)
 
 
 def ninepatch_rect(h):
     """The stretchable middle of a plate (x, y, w, h): clear of the chevron,
-    the thick bands and the tab."""
+    the bands and the tab."""
     p = plate_geometry(PLATE_W, h)
-    left = int(p["wx0"] + p["tip"] + 6)
+    left = int(p["x0"] + p["casing"][0] + 6)
     right = int(p["stem_x"] - 6)
     top, bottom = int(p["wy0"] + 2), int(p["wy1"] - 2)
     return left, top, right - left, bottom - top
 
 
 def draw_plate(h, selected):
-    """Melee's menu plate. Idle: a soft gold casing, thick along the top, with
-    a black window set into it and a gold P-shaped tab at its right end.
+    """Melee's menu plate. Idle: a soft, glowing gold band around a
+    see-through black window, with a gold P-shaped tab at its right end.
     Selected: the whole plate solid yellow, glowing (the cursor disc goes on
     the tab, as a separate sprite)."""
     w = PLATE_W
@@ -132,7 +136,7 @@ def draw_plate(h, selected):
     g = GLOW * SS
     p = plate_geometry(w, h, SS)
     x0, y0, x1, y1, bh = p["x0"], p["y0"], p["x1"], p["y1"], p["bh"]
-    casing = rounded_chevron(x0, y0, x1, y1, bh * 0.40, bh * 0.36)
+    casing = rounded_chevron(x0, y0, x1, y1, *p["casing"], bh * 0.34)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).polygon(casing, fill=255)
@@ -140,36 +144,39 @@ def draw_plate(h, selected):
         halo = mask.filter(ImageFilter.GaussianBlur(g * 0.45)).point(lambda v: int(v * 0.75))
         img.paste((255, 214, 40, 255), (0, 0), halo)
         body = vgradient(W, H, [(0, (255, 226, 70)), (0.2, YELLOW), (0.85, YELLOW), (1, (240, 178, 0))])
-        img.paste(body, (0, 0), mask)
+        img.paste(body, (0, 0), mask.filter(ImageFilter.GaussianBlur(SS)))
         return img.resize((w, h), Image.LANCZOS)
-    # Idle. A dark shadow under the casing, then the casing itself, softened
-    # the way Melee's filtered textures are.
-    shadow = mask.filter(ImageFilter.GaussianBlur(g * 0.3)).point(lambda v: int(v * 0.6))
-    img.paste((0, 0, 0, 255), (0, int(SS * 2)), shadow)
-    gold = vgradient(W, H, [(0, (240, 196, 92)), (0.3, (220, 168, 60)), (0.7, (200, 146, 46)),
-                            (1, (168, 118, 34))])
-    soft = mask.filter(ImageFilter.GaussianBlur(SS * 1.6))
-    img.paste(gold, (0, 0), soft)
-    # The black window: in from the casing's chevron, below its thick top band.
     wy0, wy1 = p["wy0"], p["wy1"]
-    window = rounded_chevron(p["wx0"], wy0, p["wx1"], wy1, p["tip"], bh * 0.14)
+    window = rounded_chevron(p["wx0"], wy0, p["wx1"], wy1, *p["window"], bh * 0.12)
     win = Image.new("L", (W, H), 0)
     ImageDraw.Draw(win).polygon(window, fill=255)
-    edge = win.filter(ImageFilter.GaussianBlur(SS * 2.5))
-    img.paste((40, 26, 6, 255), (0, 0), edge)  # a dark seam where gold meets black
-    img.paste(vgradient(W, H, [(0, (20, 18, 24)), (0.5, (10, 10, 14)), (1, (4, 4, 6))]), (0, 0), win)
+    gold = vgradient(W, H, [(0, (236, 190, 84)), (0.35, (218, 166, 58)), (1, (184, 132, 40))])
+    # The window, black but see-through, so the grid shows in it.
+    img.paste((6, 6, 10, 205), (0, 0), win)
+    # The band: the casing less the window, blurred so it glows rather than
+    # edges, over a fainter, wider glow.
+    band = ImageChops.subtract(mask, win)
+    glow = band.filter(ImageFilter.GaussianBlur(g * 0.4)).point(lambda v: int(v * 0.6))
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    layer.paste(gold, (0, 0), glow)
+    img.alpha_composite(layer)
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    layer.paste(gold, (0, 0), band.filter(ImageFilter.GaussianBlur(SS * 3)))
+    img.alpha_composite(layer)
     # The tab: a gold P at the window's right end, its stem running down
-    # through the bottom band, its bowl's counter black.
+    # through the bottom band, its bowl's counter see-through black.
     tab = Image.new("L", (W, H), 0)
     d = ImageDraw.Draw(tab)
     stem_x, stem_w = p["stem_x"], p["stem_w"]
     cy = wy0 + (wy1 - wy0) * 0.45
-    r_out, r_in = bh * 0.25, bh * 0.10
-    d.rectangle((stem_x, wy0 + bh * 0.08, stem_x + stem_w, y1), fill=255)
+    r_out, r_in = bh * 0.22, bh * 0.09
+    d.rectangle((stem_x, wy0 + bh * 0.06, stem_x + stem_w, y1), fill=255)
     d.pieslice((stem_x + stem_w - r_out, cy - r_out, stem_x + stem_w + r_out, cy + r_out), -90, 90, fill=255)
     d.rectangle((stem_x, cy - r_out, stem_x + stem_w, cy + r_out), fill=255)
     d.ellipse((stem_x + stem_w - r_in, cy - r_in, stem_x + stem_w + r_in, cy + r_in), fill=0)
-    img.paste(gold, (0, 0), tab.filter(ImageFilter.GaussianBlur(SS * 0.8)))
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    layer.paste(gold, (0, 0), tab.filter(ImageFilter.GaussianBlur(SS * 1.5)))
+    img.alpha_composite(layer)
     return img.resize((w, h), Image.LANCZOS)
 
 
