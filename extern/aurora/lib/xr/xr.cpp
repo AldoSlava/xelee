@@ -523,8 +523,10 @@ struct Bridge {
   uint32_t loopOver4 = 0, gapOver10 = 0;
   // Sections of a slow loop (over 4 ms): begin, then release and acquire per
   // stream, then the rest up to xrEndFrame, and xrEndFrame itself.
-  std::array<int64_t, 9> sectionNs{}, sectionMaxNs{};
-  std::array<uint32_t, 9> sectionWorst{}; // slow loops each section was the largest part of
+  // 0-8 from xrBeginFrame on; 9-12 the loop's start before it (uploads,
+  // pacing, input, views).
+  std::array<int64_t, 13> sectionNs{}, sectionMaxNs{};
+  std::array<uint32_t, 13> sectionWorst{}; // slow loops each section was the largest part of
   std::array<uint64_t, kStreamCount> releasedSinceStats{};
   std::chrono::steady_clock::time_point statsStart;
 };
@@ -3752,7 +3754,9 @@ bool render_xr_frame() {
     B.gapOver10 += gap > 10000000 ? 1 : 0;
   }
   B.loopLastWaitNs = B.loopWaitNs;
+  std::array<int64_t, 5> pre{B.loopWaitNs};
   free_finished_uploads();
+  pre[1] = monotonic_ns();
   if (const int per = g_displayPerGameFrame; per > 0 && ++B.displayFrame % static_cast<uint64_t>(per) == 0) {
     {
       std::lock_guard lock{g_paceMutex};
@@ -3779,8 +3783,11 @@ bool render_xr_frame() {
     for (const auto& [lat, late] : lateness)
       note_lateness(lat, late);
   }
+  pre[2] = monotonic_ns();
   update_input();
+  pre[3] = monotonic_ns();
   publish_views(fs.predictedDisplayTime);
+  pre[4] = monotonic_ns();
   if (B.focused && g_arenaToHead.exchange(false)) {
     const XrVector3f fwd = qrot(B.headOrientation, {0.f, 0.f, -1.f});
     const float yaw = std::atan2(-fwd.x, -fwd.z); // rot_y's sense
@@ -3800,6 +3807,8 @@ bool render_xr_frame() {
     mark = t;
   };
   B.sectionNs = {};
+  for (int i = 0; i < 4; ++i)
+    B.sectionNs[9 + i] = pre[i + 1] - pre[i];
   {
     TraceSection trace{"xrBeginFrame"};
     XR_TRY(xrBeginFrame(B.session, nullptr));
@@ -4034,7 +4043,7 @@ bool render_xr_frame() {
   section(8);
   if (monotonic_ns() - B.loopWaitNs > 4000000) {
     int worst = 0;
-    for (int i = 0; i < 9; ++i) {
+    for (int i = 0; i < 13; ++i) {
       B.sectionMaxNs[i] = std::max(B.sectionMaxNs[i], B.sectionNs[i]);
       worst = B.sectionNs[i] > B.sectionNs[worst] ? i : worst;
     }
@@ -4062,9 +4071,11 @@ bool render_xr_frame() {
   if (secs >= 10.0) {
     static constexpr const char* kSections[] = {"begin",           "release screen", "acquire screen",
                                                 "release 3D",      "acquire 3D",     "release HUD",
-                                                "acquire HUD",     "layers",         "end"};
+                                                "acquire HUD",     "layers",         "end",
+                                                "uploads",         "pacing",         "input",
+                                                "views"};
     std::string sections;
-    for (int i = 0; i < 9; ++i)
+    for (int i = 0; i < 13; ++i)
       if (B.sectionWorst[i] > 0 || B.sectionMaxNs[i] > 2000000)
         sections += fmt::format("{}{} {:.1f}/{}", sections.empty() ? "" : ", ", kSections[i],
                                 B.sectionMaxNs[i] / 1e6, B.sectionWorst[i]);
