@@ -52,6 +52,8 @@ static int32_t s_confirmed = INT32_MIN; /* newest final netplay frame, for slp.c
 static FILE* s_rep;
 static bool s_rep_reported;
 static FILE* s_state_log;
+static char s_state_log_path[512];
+static void region_chunks_periodic(int32_t frame);
 
 typedef struct FrameRecord {
     PADStatus pads[4];
@@ -110,6 +112,7 @@ void record_open(void) {
     const char* sl = getenv("MELEE_NET_STATE_LOG");
     if (sl != NULL && sl[0] != '\0') {
         s_state_log = fopen(sl, "w");
+        snprintf(s_state_log_path, sizeof s_state_log_path, "%s", sl);
         if (s_state_log != NULL) {
             static char buf[1 << 16];
             setvbuf(s_state_log, buf, _IOFBF, sizeof buf);
@@ -484,6 +487,7 @@ void record_state(const PADStatus* head, int32_t frame) {
         }
     }
     state_hash_periodic(frame);
+    region_chunks_periodic(frame);
 }
 
 /* Dump the recorded states around `frame` (both peers do this on DESYNC, so
@@ -858,6 +862,91 @@ static uint64_t state_hash(void) {
     uint64_t h = XXH3_64bits_digest(st);
     XXH3_freeState(st);
     return h;
+}
+
+/* MELEE_NET_HASH_REGIONS=k (with MELEE_NET_STATE_LOG): every k frames up to
+ * MELEE_NET_HASH_REGIONS_UNTIL (400), a 32-bit hash of each 64 KB chunk of
+ * every snapshot region, so two runs' logs show the first frame and chunk
+ * where memory parts (the full hash is every 180 frames, in a fight, and only
+ * says that it did). MELEE_NET_DUMP_CHUNK=frame:region:chunk writes that
+ * chunk's bytes at that frame to <state log>.chunk, with its address logged.
+ * Diagnostics, off by default; hashing every region takes milliseconds. */
+enum { CHUNK_BYTES = 64 * 1024 };
+
+static uint32_t chunk_hash(const uint8_t* p, size_t len, const SynctestIgnoredSpan* ignored, int nignored) {
+    static uint8_t buf[CHUNK_BYTES];
+    memcpy(buf, p, len);
+    for (int j = 0; j < nignored; j++) {
+        uintptr_t lo = (uintptr_t)ignored[j].ptr, hi = lo + ignored[j].len;
+        uintptr_t a = (uintptr_t)p, b = a + len;
+        if (hi > a && lo < b) {
+            uintptr_t from = lo > a ? lo : a, to = hi < b ? hi : b;
+            memset(buf + (from - a), 0, to - from);
+        }
+    }
+    return (uint32_t)XXH3_64bits(buf, len);
+}
+
+static void region_chunks_periodic(int32_t frame) {
+    static int every = -1, until = 400, dumpFrame = -1, dumpRegion = -1, dumpChunk = -1;
+    if (every < 0) {
+        const char* v = getenv("MELEE_NET_HASH_REGIONS");
+        every = v != NULL ? atoi(v) : 0;
+        v = getenv("MELEE_NET_HASH_REGIONS_UNTIL");
+        if (v != NULL) {
+            until = atoi(v);
+        }
+        v = getenv("MELEE_NET_DUMP_CHUNK");
+        if (v != NULL) {
+            sscanf(v, "%d:%d:%d", &dumpFrame, &dumpRegion, &dumpChunk);
+        }
+    }
+    if (s_state_log == NULL) {
+        return;
+    }
+    const bool doHash = every > 0 && frame <= until && frame % every == 0;
+    const bool doDump = frame == dumpFrame;
+    if (!doHash && !doDump) {
+        return;
+    }
+    if (aurora_dvd_inflight() > 0 || aurora_arq_inflight() > 0) {
+        fprintf(s_state_log, "net: chunks f%d skipped (I/O in flight)\n", frame);
+        return;
+    }
+    Region r[MAX_REGIONS];
+    int n = regions_now(r);
+    SynctestIgnoredSpan ignored[3];
+    int nignored = synctest_ignored_spans(ignored);
+    bool intr = OSDisableInterrupts();
+    if (doHash) {
+        fprintf(s_state_log, "net: chunks f%d", frame);
+        for (int i = 0; i < n; i++) {
+            fprintf(s_state_log, " r%d:%s:%zx:", i, r[i].name, r[i].len);
+            for (size_t off = 0; off < r[i].len; off += CHUNK_BYTES) {
+                size_t len = r[i].len - off < CHUNK_BYTES ? r[i].len - off : CHUNK_BYTES;
+                fprintf(s_state_log, "%s%08x", off ? "," : "",
+                    chunk_hash((const uint8_t*)r[i].ptr + off, len, ignored, nignored));
+            }
+        }
+        fputc('\n', s_state_log);
+    }
+    if (doDump && dumpRegion >= 0 && dumpRegion < n && dumpChunk >= 0 &&
+        (size_t)dumpChunk * CHUNK_BYTES < r[dumpRegion].len) {
+        size_t off = (size_t)dumpChunk * CHUNK_BYTES;
+        size_t len = r[dumpRegion].len - off < CHUNK_BYTES ? r[dumpRegion].len - off : CHUNK_BYTES;
+        char path[600];
+        snprintf(path, sizeof path, "%s.chunk", s_state_log_path);
+        FILE* f = fopen(path, "wb");
+        if (f != NULL) {
+            fwrite((const uint8_t*)r[dumpRegion].ptr + off, 1, len, f);
+            fclose(f);
+        }
+        fprintf(s_state_log, "net: dumped f%d r%d:%s chunk %d at %p (region at %p, data at %p, bss at %p) to %s\n", frame,
+            dumpRegion, r[dumpRegion].name, dumpChunk, (const void*)((const uint8_t*)r[dumpRegion].ptr + off),
+            r[dumpRegion].ptr, (const void*)__melee_data_start, (const void*)__melee_bss_start, path);
+    }
+    OSRestoreInterrupts(intr);
+    fflush(s_state_log);
 }
 
 /* Tally of differing 64-byte chunks across every mismatch, keyed by address
