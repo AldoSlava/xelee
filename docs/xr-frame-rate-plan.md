@@ -129,7 +129,7 @@ draws (`AURORA_XR_EYE_SORT=1`, off until checked by eye) took the eyes from
 9.35 to 8.1 ms: about 52 3D frames a second. Still to try: lighting each
 vertex once in a pre-pass.
 
-**Bindless eye batches** (`AURORA_XR_BINDLESS=1`, off until checked by eye):
+**Bindless eye batches** (on by default; `AURORA_XR_BINDLESS=0` turns them off):
 eye draws join across textures and uniforms, each record carrying its draw's
 texture and sampler slots in Dawn's resource table. It needed Tint's
 NonUniform decoration (dawn 321ddc2), a table Adreno can allocate (dawn
@@ -139,6 +139,12 @@ textures come from its record; a fragment quad never spans two draws). Warm
 cache, 90 s means, with eye sort: eyes 8.25/8.06 -> 4.49/4.55 ms (the
 ignore-textures ceiling was 4.0), 3D 50.1/46.3 -> 55.9/55.5 frames a second,
 GPU busy ~90% -> ~80%. Stale-frame spikes remain.
+They crashed at fight start in 5-6 boots in 40 until two Dawn fixes: Adreno
+corrupts memory when a variable-count descriptor set is allocated below its
+layout's maximum (dawn 8a3aa12017 allocates the full length: 0 in 40), and
+the layout put the table past Dawn's four bind groups (the eye uniforms now
+take the texture group's place). Found with AURORA_DAWN_VALIDATION=1 and
+40-boot runs against a bindless-off control.
 
 ## The problem
 

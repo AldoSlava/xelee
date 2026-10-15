@@ -1523,7 +1523,7 @@ std::array<uint32_t, 3> g_tickMismatch{};
 //   eyesort: 1 the eye replay regroups reorderable opaque draws for batching
 //     (gx pipeline.cpp; AURORA_XR_EYE_SORT).
 //   bindless: 1 eye batches join across textures through the resource table
-//     (AURORA_XR_BINDLESS; only where the device offers it).
+//     (AURORA_XR_BINDLESS, on by default; only where the device offers it).
 struct Tweaks {
   bool lead = true;
   bool set = true;
@@ -1533,7 +1533,7 @@ struct Tweaks {
   bool gap = true;
   bool late = false;
   bool eyesort = false;
-  bool bindless = false;
+  bool bindless = true;
 } g_tweak;
 // The device offers Dawn's resource table (bindless eye batching can run).
 bool g_bindlessOk = false;
@@ -3666,7 +3666,7 @@ void poll_tweaks() {
     g_tweak.late = env_flag("AURORA_XR_APPSW_LATE", false);
     g_tweak.eyesort = env_flag("AURORA_XR_EYE_SORT", false);
     gfx::set_xr_eye_sort(g_tweak.eyesort);
-    g_tweak.bindless = env_flag("AURORA_XR_BINDLESS", false);
+    g_tweak.bindless = env_flag("AURORA_XR_BINDLESS", true);
     gfx::set_xr_motion_classes((g_tweak.cutout ? 1u : 0u) | (g_tweak.trans ? 2u : 0u));
   }
   if (path == nullptr || ++calls % 30 != 0)
@@ -6141,8 +6141,9 @@ void add_required_features(const wgpu::Adapter& adapter, std::vector<wgpu::Featu
   // different textures could join if they named them in Dawn's resource table.
   Log.info("Dawn resource table (bindless textures): {}",
            adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) ? "offered" : "not offered");
-  // AURORA_XR_BINDLESS=1: eye batches sample through it (gx pipeline.cpp).
-  if (env_flag("AURORA_XR_BINDLESS", false) &&
+  // Eye batches sample through it (gx pipeline.cpp); AURORA_XR_BINDLESS=0
+  // turns that off.
+  if (env_flag("AURORA_XR_BINDLESS", true) &&
       adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) &&
       std::find(features.begin(), features.end(), wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable) ==
           features.end())
@@ -6212,7 +6213,7 @@ wgpu::Texture begin_frame(uint32_t width, uint32_t height) noexcept {
     B.queueIndex = 1;
     B.queue = dawn::native::vulkan::GetExtraQueue(webgpu::g_device.Get(), 0);
     g_bindlessOk = webgpu::g_device.HasFeature(wgpu::FeatureName::ChromiumExperimentalSamplingResourceTable);
-    gfx::set_xr_bindless(env_flag("AURORA_XR_BINDLESS", false) && g_bindlessOk);
+    gfx::set_xr_bindless(env_flag("AURORA_XR_BINDLESS", true) && g_bindlessOk);
     Log.info("Bindless eye batching: {}", gfx::xr_bindless() ? "on" : "off");
     {
       // What the device's descriptor indexing allows, for bindless batching
