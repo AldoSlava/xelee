@@ -266,6 +266,11 @@ bool gmOnline_SlippiFlow(void)
 void gmOnline_SetKind(OnlineKind kind)
 {
     online_kind = kind;
+#ifdef TARGET_PC
+    /* Entered from the menu: a pick from an earlier visit (START on the CSS,
+     * then backed out) would skip this visit's CSS for the lobby view. */
+    slippi_picked = false;
+#endif
 }
 
 OnlineKind gmOnline_GetKind(void)
