@@ -4,6 +4,7 @@
 #include "frame_packet.hpp"
 
 #include <optional>
+#include <string>
 
 namespace aurora::gfx::detail {
 
@@ -52,6 +53,14 @@ void initialize();
 void shutdown();
 bool begin_frame();
 void end_frame(EndFrameCallback callback);
+// The CPU time the game, FIFO and render threads spend per frame: their
+// thread CPU clocks, sampled at each begin_frame (they run as a pipeline, so
+// a frame interval's time is about a frame's). Threads register themselves.
+enum class FrameCpuThread : int { Game, Fifo, Render, Count };
+void register_frame_cpu_thread(FrameCpuThread which) noexcept;
+// "game a/b/c, FIFO a/b/c, render a/b/c" (ms per frame, median/95%/max)
+// since the last call; empty without samples.
+std::string frame_cpu_summary();
 // Game thread: the frame's commands are all issued (before the FIFO drains);
 // the next end_frame's packet carries the time (XR pacing probe).
 void mark_game_frame_done() noexcept;

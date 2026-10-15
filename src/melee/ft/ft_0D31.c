@@ -25,6 +25,8 @@
 #include <melee/pl/plstale.h>
 #include <sysdolphin/baselib/random.h>
 
+#include "pc/pc.h"
+
 const Quaternion lbl_803B7500 = { 0, 3.1415927f, 0, 0 };
 
 bool ftCo_800D3158(Fighter_GObj* gobj)
@@ -215,6 +217,12 @@ static inline void processDeath(Fighter_GObj* gobj)
 static inline void enterDead(Fighter_GObj* gobj, FtMotionId msid)
 {
     Fighter* fp = GET_FIGHTER(gobj);
+    /* A KO, to line frame drops up against in the session log. */
+    pc_log_line("ko: player %d (%s)", fp->player_idx,
+                msid == ftCo_MS_DeadLeft    ? "left"
+                : msid == ftCo_MS_DeadRight ? "right"
+                : msid == ftCo_MS_DeadDown  ? "down"
+                                            : "up");
     ftCo_800D331C(gobj);
     fp->mv.co.unk_800D3680.x40 = p_ftCommonData->x500;
     Fighter_ChangeMotionState(gobj, msid, Ft_MF_None, 0.0F, 1.0F, 0.0F, NULL);

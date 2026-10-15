@@ -4,6 +4,7 @@
 
 #include "../internal.hpp"
 #include "../webgpu/gpu.hpp"
+#include "../gfx/frame.hpp"
 #include "../gfx/recording.hpp"
 #include "../gfx/xr_replay.hpp"
 #include "../gx/gx.hpp"
@@ -1746,6 +1747,8 @@ std::string pace_summary() {
                    margin.size());
   for (auto& v : g_pace.ms)
     v.clear();
+  if (const std::string cpu = gfx::frame_cpu_summary(); !cpu.empty())
+    s += "; CPU per frame (ms, median/95%/max): " + cpu;
   return s;
 }
 
@@ -4710,6 +4713,7 @@ enum TimingZone : uint32_t {
   kZoneMotion,
   kZoneCount
 };
+std::atomic<bool> g_spikeSeen{false}; // a GPU frame spike was logged (RenderDoc trigger)
 constexpr std::array<const char*, kZoneCount> kZoneNames{"3D eyes", "3D right eye (fallback)", "3D compose", "HUD",
                                                          "HUD compose", "frame", "motion"};
 
@@ -4905,6 +4909,27 @@ void map_timing() {
             if (end > begin) {
               t.lastFrameNs = static_cast<double>(end - begin);
               ++t.frameSeq;
+              // AURORA_XR_LOG_GPU_SPIKES=<ms> (default 12, 0 off): frames
+              // whose GPU span runs that long, pass by pass, to tell our own
+              // work getting dearer from the GPU being taken from us.
+              static const float spikeMs = env_float("AURORA_XR_LOG_GPU_SPIKES", 12.f);
+              static auto spikeWindow = std::chrono::steady_clock::now();
+              static int spikesLogged = 0;
+              if (spikeMs > 0.f && t.lastFrameNs >= spikeMs * 1e6) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now - spikeWindow > std::chrono::seconds(10)) {
+                  spikeWindow = now;
+                  spikesLogged = 0;
+                }
+                if (++spikesLogged <= 30) {
+                  std::string passes;
+                  for (uint32_t z = 0; z < kZoneCount; ++z)
+                    if (z != kZoneFrame && (rb.zones & (1u << z)) && ts[z * 2 + 1] > ts[z * 2])
+                      passes += fmt::format(", {} {:.1f}", kZoneNames[z], (ts[z * 2 + 1] - ts[z * 2]) / 1e6);
+                  Log.info("GPU frame spike: {:.1f} ms{}", t.lastFrameNs / 1e6, passes);
+                  g_spikeSeen = true;
+                }
+              }
             }
           }
           ++t.frames;

@@ -2,6 +2,7 @@
 
 #include "../thread.hpp"
 #include "command_processor.hpp"
+#include "../gfx/frame.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -85,6 +86,7 @@ void process_to(uint64_t target, std::memory_order order) noexcept {
 
 void worker_main(std::stop_token token) noexcept {
   std::stop_callback wakeOnStop{token, wake_worker};
+  gfx::register_frame_cpu_thread(gfx::FrameCpuThread::Fifo);
   while (true) {
     const uint32_t event = sWorkerWake.load(std::memory_order_acquire);
     const uint64_t processed = sProcessed.load(std::memory_order_relaxed);

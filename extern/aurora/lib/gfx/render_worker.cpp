@@ -1,5 +1,6 @@
 #include "render_worker.hpp"
 #include "atrace.hpp"
+#include "frame.hpp"
 
 #include "../thread.hpp"
 
@@ -34,6 +35,7 @@ void complete_sync(const std::shared_ptr<SyncState>& sync) {
 
 void worker_main(std::stop_token token) {
   g_workerThreadId = std::this_thread::get_id();
+  register_frame_cpu_thread(FrameCpuThread::Render);
 
   while (true) {
     bool closed = false;

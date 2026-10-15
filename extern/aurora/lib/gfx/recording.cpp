@@ -612,8 +612,9 @@ bool xr_batching() noexcept {
 void begin_recording(FramePacket& packet, size_t frameSlot) {
   CHECK(!g_recorder.active(), "A recording session is already active");
   ++g_recordingSeq;
+  // Not zeroed: only ranges push_indices wrote this frame are read.
   if (xr_batching() && !packet.indexShadow)
-    packet.indexShadow = std::make_unique<uint8_t[]>(IndexBufferSize);
+    packet.indexShadow = std::make_unique_for_overwrite<uint8_t[]>(IndexBufferSize);
   if (g_recorder.normalRequested && webgpu::enable_normal_buffer()) {
     g_recorder.normalRequested = false;
   }

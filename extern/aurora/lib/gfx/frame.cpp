@@ -38,6 +38,13 @@ extern "C" void browser_upload_pools(void* queue, const unsigned* entries, unsig
 #include <utility>
 #include <vector>
 
+#if defined(__linux__)
+#include <pthread.h>
+#include <time.h>
+#include <unistd.h>
+#include <cstdio>
+#endif
+
 #include <tracy/Tracy.hpp>
 #include <magic_enum.hpp>
 
@@ -753,6 +760,67 @@ std::optional<size_t> acquire_mapped_staging_buffer() {
   }
 }
 
+namespace {
+struct FrameCpu {
+  static constexpr int N = static_cast<int>(FrameCpuThread::Count);
+  std::mutex mutex;
+#if defined(__linux__)
+  std::array<pthread_t, N> threads{};
+#endif
+  std::array<bool, N> known{};
+  std::array<int64_t, N> lastNs{};
+  std::array<std::vector<float>, N> ms;
+  // Time each was runnable but waiting for a core (schedstat's run delay).
+  std::array<int, N> tids{};
+  std::array<int64_t, N> lastWaitNs{};
+  std::array<std::vector<float>, N> waitMs;
+  // Wall time begin_frame waited for a frame slot and a mapped staging buffer.
+  std::vector<float> slotWaitMs, stagingWaitMs;
+} g_frameCpu;
+
+#if defined(__linux__)
+int64_t run_delay_ns(int tid) noexcept {
+  char path[64];
+  snprintf(path, sizeof path, "/proc/self/task/%d/schedstat", tid);
+  FILE* f = fopen(path, "r");
+  if (f == nullptr)
+    return -1;
+  unsigned long long run = 0, wait = 0;
+  const int n = fscanf(f, "%llu %llu", &run, &wait);
+  fclose(f);
+  return n == 2 ? static_cast<int64_t>(wait) : -1;
+}
+
+int64_t thread_cpu_ns(pthread_t thread) noexcept {
+  clockid_t id;
+  timespec ts{};
+  if (pthread_getcpuclockid(thread, &id) != 0 || clock_gettime(id, &ts) != 0)
+    return -1;
+  return static_cast<int64_t>(ts.tv_sec) * 1000000000 + ts.tv_nsec;
+}
+#endif
+
+// Game thread, once a frame (begin_frame).
+void sample_frame_cpu() noexcept {
+#if defined(__linux__)
+  auto& c = g_frameCpu;
+  std::lock_guard lock{c.mutex};
+  for (int i = 0; i < FrameCpu::N; ++i) {
+    if (!c.known[i])
+      continue;
+    const int64_t ns = thread_cpu_ns(c.threads[i]);
+    if (ns >= 0 && c.lastNs[i] > 0 && c.ms[i].size() < 4096)
+      c.ms[i].push_back(static_cast<float>(ns - c.lastNs[i]) / 1.0e6f);
+    c.lastNs[i] = ns;
+    const int64_t wait = run_delay_ns(c.tids[i]);
+    if (wait >= 0 && c.lastWaitNs[i] > 0 && c.waitMs[i].size() < 4096)
+      c.waitMs[i].push_back(static_cast<float>(wait - c.lastWaitNs[i]) / 1.0e6f);
+    c.lastWaitNs[i] = wait;
+  }
+#endif
+}
+} // namespace
+
 bool begin_frame() {
   ZoneScoped;
   // Opt-in until display-specific button-to-photon measurements validate it.
@@ -762,15 +830,34 @@ bool begin_frame() {
     return value && value[0] == '1';
   }();
   if (jit && aurora_vsync_enabled()) pace_frame_start();
+  {
+    static const bool registered = (register_frame_cpu_thread(FrameCpuThread::Game), true);
+    (void)registered;
+    sample_frame_cpu();
+  }
+  const auto waitStart = std::chrono::steady_clock::now();
   const size_t frameSlot = acquire_frame_slot();
+  const auto slotDone = std::chrono::steady_clock::now();
   const auto stagingSlot = acquire_mapped_staging_buffer();
+  {
+    const auto ms = [](auto d) { return std::chrono::duration<float, std::milli>(d).count(); };
+    std::lock_guard lock{g_frameCpu.mutex};
+    if (g_frameCpu.slotWaitMs.size() < 4096) {
+      g_frameCpu.slotWaitMs.push_back(ms(slotDone - waitStart));
+      g_frameCpu.stagingWaitMs.push_back(ms(std::chrono::steady_clock::now() - slotDone));
+    }
+  }
   if (!stagingSlot) {
     g_frameSlots.release(frameSlot);
     return false;
   }
 
   auto& frame = g_framePackets[frameSlot];
+  // The index shadow outlives the reset: allocated each frame, its 2-4 MiB
+  // were zeroed every frame on the game thread (0.16 ms on the Quest).
+  auto indexShadow = std::move(frame.indexShadow);
   frame = {};
+  frame.indexShadow = std::move(indexShadow);
   frame.frameId = g_nextFrameId++;
   frame.frameIndex = g_frameIndex;
 #if defined(AURORA_ENABLE_OPENXR) && !defined(__EMSCRIPTEN__)
@@ -814,7 +901,66 @@ bool begin_frame() {
 
 namespace {
 int64_t g_gameDoneNs = 0;
+
 } // namespace
+
+void register_frame_cpu_thread(FrameCpuThread which) noexcept {
+#if defined(__linux__)
+  auto& c = g_frameCpu;
+  std::lock_guard lock{c.mutex};
+  const int i = static_cast<int>(which);
+  c.threads[i] = pthread_self();
+  c.tids[i] = static_cast<int>(gettid());
+  c.known[i] = true;
+  c.lastNs[i] = 0;
+  c.lastWaitNs[i] = 0;
+#else
+  (void)which;
+#endif
+}
+
+std::string frame_cpu_summary() {
+  auto& c = g_frameCpu;
+  std::lock_guard lock{c.mutex};
+  static constexpr const char* kNames[] = {"game", "FIFO", "render"};
+  std::string s;
+  for (int i = 0; i < FrameCpu::N; ++i) {
+    auto& v = c.ms[i];
+    if (v.empty())
+      continue;
+    const auto at = [&](float q) {
+      const size_t k = std::min(v.size() - 1, static_cast<size_t>(q * static_cast<float>(v.size())));
+      std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(k), v.end());
+      return v[k];
+    };
+    s += fmt::format("{}{} {:.1f}/{:.1f}/{:.1f}", s.empty() ? "" : ", ", kNames[i], at(0.5f), at(0.95f), at(1.f));
+    v.clear();
+  }
+  for (int i = 0; i < FrameCpu::N; ++i) {
+    auto& v = c.waitMs[i];
+    if (v.empty())
+      continue;
+    const auto at = [&](float q) {
+      const size_t k = std::min(v.size() - 1, static_cast<size_t>(q * static_cast<float>(v.size())));
+      std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(k), v.end());
+      return v[k];
+    };
+    s += fmt::format(", {} waiting for a core {:.1f}/{:.1f}/{:.1f}", kNames[i], at(0.5f), at(0.95f), at(1.f));
+    v.clear();
+  }
+  for (auto [name, v] : {std::pair{"slot wait", &c.slotWaitMs}, std::pair{"staging wait", &c.stagingWaitMs}}) {
+    if (v->empty())
+      continue;
+    const auto at = [&](float q) {
+      const size_t k = std::min(v->size() - 1, static_cast<size_t>(q * static_cast<float>(v->size())));
+      std::nth_element(v->begin(), v->begin() + static_cast<std::ptrdiff_t>(k), v->end());
+      return (*v)[k];
+    };
+    s += fmt::format(", {} {:.1f}/{:.1f}/{:.1f}", name, at(0.5f), at(0.95f), at(1.f));
+    v->clear();
+  }
+  return s;
+}
 
 void mark_game_frame_done() noexcept {
   g_gameDoneNs = std::chrono::steady_clock::now().time_since_epoch().count();
