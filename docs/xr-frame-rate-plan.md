@@ -126,11 +126,19 @@ The eye pass at GPU level 2, four CPUs on Brinstar, scale 0.8 (~11 ms at 4x):
 bin); an eye draw ~14 us of GPU, a motion draw ~6 us. Batching the motion pass
 by bucket instead of by run took it from 2.7 to 1.75 ms; regrouping opaque eye
 draws (`AURORA_XR_EYE_SORT=1`, off until checked by eye) took the eyes from
-9.35 to 8.1 ms: about 52 3D frames a second. Still to try: joining eye draws
-across textures with Dawn's bindless resource table (offered on the Quest;
-needs per-draw texture slots and sizes in the batch records, and Tint's
-NonUniform decoration, dawn 321ddc2), and lighting each vertex once in a
-pre-pass.
+9.35 to 8.1 ms: about 52 3D frames a second. Still to try: lighting each
+vertex once in a pre-pass.
+
+**Bindless eye batches** (`AURORA_XR_BINDLESS=1`, off until checked by eye):
+eye draws join across textures and uniforms, each record carrying its draw's
+texture and sampler slots in Dawn's resource table. It needed Tint's
+NonUniform decoration (dawn 321ddc2), a table Adreno can allocate (dawn
+4ed74db: the 64K maximum failed with VK_ERROR_OUT_OF_POOL_MEMORY), and the
+derivative-uniformity diagnostic off in the rewritten shaders (a draw's
+textures come from its record; a fragment quad never spans two draws). Warm
+cache, 90 s means, with eye sort: eyes 8.25/8.06 -> 4.49/4.55 ms (the
+ignore-textures ceiling was 4.0), 3D 50.1/46.3 -> 55.9/55.5 frames a second,
+GPU busy ~90% -> ~80%. Stale-frame spikes remain.
 
 ## The problem
 

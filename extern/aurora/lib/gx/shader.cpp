@@ -1172,7 +1172,11 @@ void bindless_batch_rewrite(std::string& src) {
   for (const auto& [name, fn] : fns)
     loaders += fn;
   src += loaders;
-  src.insert(0, "enable chromium_experimental_resource_table;\n");
+  // A draw's textures come from its record (xr_rec), which the uniformity
+  // analysis can't see is uniform, so textureNumLevels() guarding
+  // textureSampleBias fails it. It is uniform where derivatives need it: a
+  // fragment quad never spans two primitives, so never two draws.
+  src.insert(0, "enable chromium_experimental_resource_table;\ndiagnostic(off, derivative_uniformity);\n");
 }
 #endif
 } // namespace
