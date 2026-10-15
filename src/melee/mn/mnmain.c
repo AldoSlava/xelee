@@ -990,13 +990,12 @@ static void mn_PcLabelLean(void* gobj_)
         }
     }
     {
-        /* The stock label textures lean right a little (about 3 degrees) and sit a hair
-         * off level; the joint's own turn is only the tilt. Shear x by y and
-         * turn about z, in the joint's frame, before the tilt. */
-        const float k = 0.05f, z = -0.01f;
-        const float cz = cosf(z), sz = sinf(z);
-        Mtx lean = { { cz + k * sz, -sz + k * cz, 0.0f, 0.0f },
-                     { sz, cz, 0.0f, 0.0f },
+        /* The stock label textures lean right a little (about 3 degrees) but sit
+         * level; the joint's own turn is only the tilt. Shear x by y, in the
+         * joint's frame, before the tilt. */
+        const float k = 0.05f;
+        Mtx lean = { { 1.0f, k, 0.0f, 0.0f },
+                     { 0.0f, 1.0f, 0.0f, 0.0f },
                      { 0.0f, 0.0f, 1.0f, 0.0f } };
         Mtx tilt;
         for (r = 0; r < 3; r++) {
