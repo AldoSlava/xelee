@@ -1735,6 +1735,27 @@ static int mn_PcSelectionFrames(MenuKind kind, int selection)
     }
     return 2 * selection;
 }
+
+/* The row layouts are keyed by row count, and the stock ones for two and three
+ * rows (Trophies) leave gaps and zig-zag. Online Mode's menus stack their rows
+ * touching instead, each one step down and left of the last. In world terms
+ * the middle row sits at (-5.5, -0.2, 20.7) and a step is (-1.0, -2.2, -0.1);
+ * below are the same two in the rows' parent frame. */
+static void mn_PcStackRow(MenuKind kind, HSD_JObj* row, int index, int count)
+{
+    static const Vec3 middle = { 16.9684f, 2.6541f, -3.8327f };
+    static const Vec3 step = { 0.0438f, 2.3351f, 0.6289f };
+    float at = index - (count - 1) * 0.5f;
+    Vec3 pos;
+
+    if ((kind != MENU_KIND_ONLINE && kind != MENU_KIND_ONLINE_SLIPPI) || count < 2) {
+        return;
+    }
+    pos.x = middle.x + at * step.x;
+    pos.y = middle.y + at * step.y;
+    pos.z = middle.z + at * step.z;
+    HSD_JObjSetTranslate(row, &pos);
+}
 #endif
 
 /// @brief frame offset of a selection's cursor animation
@@ -1855,6 +1876,10 @@ HSD_GObj* mn_8022B3A0(u8 state)
             unlocked_index = mn_80229A04(menu_kind, i);
             HSD_JObjReqAnim(option_jobjs[unlocked_index], unlocked_count);
             HSD_JObjAnim(option_jobjs[unlocked_index]);
+#ifdef TARGET_PC
+            mn_PcStackRow(menu_kind, option_jobjs[unlocked_index], unlocked_index,
+                          unlocked_count);
+#endif
             cursor_jobj = HSD_JObjLoadJoint(DP(HSD_Joint, model->joint));
             HSD_JObjAddAnimAll(cursor_jobj, DP(HSD_AnimJoint, model->animjoint),
                                DP(HSD_MatAnimJoint,
