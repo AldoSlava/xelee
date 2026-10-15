@@ -10,7 +10,7 @@
  *   server -> "create-ticket-resp" (or {"error": "..."})
  *   server -> "get-ticket-resp" once paired: matchId, isHost (the decider),
  *             players[] (uid, displayName, connectCode, port 1..4,
- *             isLocalPlayer, ipAddress "ip:port", ipAddressLan), stages[].
+ *             isLocalPlayer, ipAddress "ip:port", ipAddressLan), stages[] (-s).
  * Modes: 1 Unranked pairs any two tickets; 2 Direct pairs two tickets that
  * name each other's connect codes. Ranked, Teams and Party are refused.
  * Players' game ports are the ones the clients advertise in ipAddressLan
@@ -145,6 +145,10 @@ static void player_json(char* out, size_t cap, const Ticket* t, int port, bool l
              uid, disp, code, port, local ? "true" : "false", t->ip, t->game_port, t->lan);
 }
 
+/* The legal stages each ticket names (-s): Slippi's singles six by default;
+ * one stage forces it, for testing a stage at a time. */
+static char stage_list[128] = "3,8,28,31,32,2";
+
 static void pair(Ticket* a, Ticket* b) {
     /* a queued first and is the decider. Both see the same player order. */
     for (int side = 0; side < 2; side++) {
@@ -154,9 +158,9 @@ static void pair(Ticket* a, Ticket* b) {
         player_json(pb, sizeof pb, b, 2, me == b);
         snprintf(body, sizeof body,
                  "{\"type\":\"get-ticket-resp\",\"matchId\":\"mode.%s.local-%u\","
-                 "\"isHost\":%s,\"players\":[%s,%s],\"stages\":[3,8,28,31,32,2],\"items\":0}",
+                 "\"isHost\":%s,\"players\":[%s,%s],\"stages\":[%s],\"items\":0}",
                  a->mode == 1 ? "unranked" : "direct", match_serial, me == a ? "true" : "false",
-                 pa, pb);
+                 pa, pb, stage_list);
         send_json(me->peer, body);
     }
     logf_("matched %s (%s) with %s (%s), match %u, %s decides", a->code, a->ip, b->code, b->ip,
@@ -269,8 +273,12 @@ int main(int argc, char** argv) {
             port = (unsigned)atoi(argv[++i]);
         } else if (strcmp(argv[i], "-v") == 0) {
             verbose = true;
+        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc &&
+                   strspn(argv[i + 1], "0123456789,") == strlen(argv[i + 1]) &&
+                   strlen(argv[i + 1]) < sizeof stage_list) {
+            snprintf(stage_list, sizeof stage_list, "%s", argv[++i]);
         } else {
-            fprintf(stderr, "usage: %s [-p port] [-v]\n", argv[0]);
+            fprintf(stderr, "usage: %s [-p port] [-v] [-s stage,stage,...]\n", argv[0]);
             return 2;
         }
     }
