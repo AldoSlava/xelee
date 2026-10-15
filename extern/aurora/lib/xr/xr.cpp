@@ -3946,7 +3946,16 @@ bool render_xr_frame() {
         g_tickMismatch[1] += mds.shownTick != stereo.shownTick ? 1 : 0;
         g_tickMismatch[2] += hud.haveImage && hud.shownTick != stereo.shownTick ? 1 : 0;
       }
-      if (appsw_on() && mvs.haveImage && mds.haveImage) {
+      // An image submitted again (no new one since) goes without its
+      // vectors, so the compositor timewarps it instead of extrapolating the
+      // same motion a second time. AURORA_XR_APPSW_REPEAT=1: vectors on every
+      // submit, as before.
+      static const bool swOnRepeat = env_flag("AURORA_XR_APPSW_REPEAT", false);
+      static uint64_t lastSwTick = 0;
+      const bool repeat = stereo.shownTick != 0 && stereo.shownTick == lastSwTick;
+      if (i == 1)
+        lastSwTick = stereo.shownTick;
+      if (appsw_on() && mvs.haveImage && mds.haveImage && (swOnRepeat || !repeat)) {
         auto& sw = spaceWarp[i];
         sw = {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB};
         sw.motionVectorSubImage.swapchain = mvs.swapchain;
@@ -5801,11 +5810,20 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
   const int perGame = std::max(g_displayPerGameFrame.load(), 1);
   const bool gap = g_tweak.gap && thisTick != 0 && base.tick != 0 && thisTick > base.tick + static_cast<uint64_t>(perGame);
   const bool havePrevViews = base.count != 0;
+  // One game tick's worth of the head's motion in the vectors however many
+  // ticks back `base` is. SpaceWarp extrapolates a frame's vectors as one
+  // frame's motion; after frames that never went out, last-frame-out eyes put
+  // several frames of head motion in, and the stage overshot the head and
+  // snapped back. AURORA_XR_APPSW_HEAD_GAP=0: the whole gap's motion.
+  static const bool headGap = env_flag("AURORA_XR_APPSW_HEAD_GAP", true);
+  const uint64_t ticksBack =
+      thisTick != 0 && base.tick != 0 && thisTick > base.tick ? (thisTick - base.tick) / static_cast<uint64_t>(perGame) : 1;
+  const float share = headGap && ticksBack > 1 ? headShare / static_cast<float>(ticksBack) : headShare;
   for (int eye = 0; eye < 2; ++eye) {
     const Mat4 eyeToClip = mul(projection(views[eye].fov, 0.05f), view_from_pose(views[eye].pose));
     const Mat4 prevEyeToClip =
         havePrevViews ? mul(projection(views[eye].fov, 0.05f),
-                            view_from_pose(blend_pose(views[eye].pose, base.views[eye].pose, headShare)))
+                            view_from_pose(blend_pose(views[eye].pose, base.views[eye].pose, share)))
                       : eyeToClip;
     for (size_t t = 0; t < transforms; ++t) {
       Mat4 world = cameraToWorld;
