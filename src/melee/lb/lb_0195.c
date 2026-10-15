@@ -9,6 +9,10 @@
 #include <dolphin/vi.h>
 #include <sysdolphin/baselib/controller.h>
 
+#ifdef TARGET_PC
+#include "pc/pc.h"
+#endif
+
 struct UnkArrElem {
     /* 0x00 */ s64 x0;
     /* 0x08 */ s64 x8;
@@ -115,6 +119,28 @@ void lb_80019880(u64 arg0)
 {
     lb_804329F0.x38 = arg0;
 }
+
+#ifdef TARGET_PC
+/* XR pacing: the frame boundary follows the headset, while the pad alarm
+ * queues its samples on its own 60 Hz grid, and the frame loop waits for a
+ * sample before it simulates (gm_801A4D34). The two drift apart, and while
+ * the alarm trailed the boundary every frame slept up to 9 ms after it: on
+ * four-CPU Brinstar the world then finished recording at 14 ms instead of
+ * 8 at the 95th percentile, and 3D frames fell to 50 a second for minutes
+ * at a time. Called at each XR-paced boundary: a sample is queued now if
+ * none is, and the alarm's next one is a period from now, so a frame gets
+ * one sample and never waits for it. */
+void lb_pc_pad_alarm_to_frame(void)
+{
+    if (!lb_804329F0.x48) {
+        return;
+    }
+    int enabled = OSDisableInterrupts();
+    const bool queued = HSD_PadGetRawQueueCount() != 0;
+    OSRestoreInterrupts(enabled);
+    pc_os_rearm_periodic_alarm(&lb_804329F0.alarm, !queued);
+}
+#endif
 
 u8 lb_80019894(void)
 {

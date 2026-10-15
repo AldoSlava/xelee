@@ -126,8 +126,39 @@ The eye pass at GPU level 2, four CPUs on Brinstar, scale 0.8 (~11 ms at 4x):
 bin); an eye draw ~14 us of GPU, a motion draw ~6 us. Batching the motion pass
 by bucket instead of by run took it from 2.7 to 1.75 ms; regrouping opaque eye
 draws (`AURORA_XR_EYE_SORT`, now on by default) took the eyes from
-9.35 to 8.1 ms: about 52 3D frames a second. Still to try: lighting each
-vertex once in a pre-pass.
+9.35 to 8.1 ms: about 52 3D frames a second.
+
+Lighting each vertex once in a pre-pass (instead of per eye and per bin) is
+shelved: with bindless eye batches, GX lighting costs 0.57 ms of a 3.66 ms
+eye pass (four CPUs on Brinstar, bench-d replay, CPU 3 / GPU 2, scale 0.8,
+`AURORA_XR_EYE_NOLIGHT=1` against default, two 120 s runs each), and the 3D
+rate was the same either way (56-57 frames a second). A pre-pass would win
+at most ~0.4 ms net for days of work.
+
+What four CPUs on Brinstar were missing at the clock caps (2026-10-15) was
+neither GPU nor CPU work but a pacing bug. The frame loop waits for the pad
+alarm's sample before it simulates (gm_801A4D34), and the alarm ran on its
+own 60 Hz grid while the XR frame boundary follows the display. The two
+drifted, and while the alarm trailed the boundary every frame slept up to
+9 ms after the tick: world recorded at 14 ms instead of 8 at the 95th
+percentile, 3D frames at 50-55 a second for a minute or two at a time.
+Per-thread CPU per frame (game ~3.4 ms, FIFO ~6.0, render ~5.3) and run
+queue waits (~0.5 ms at the 95th percentile) were the same in good and bad
+windows; an off-CPU profile showed the FIFO thread idle, waiting for the
+game thread. Each XR-paced boundary now hands the frame its pad sample and
+re-anchors the alarm (lb_pc_pad_alarm_to_frame; `MELEE_XR_PAD_ALARM_FREE=1`
+for the old way): 57.0 -> 58.2 frames a second, world recorded 8.2-9.0 ms at
+the 95th percentile in every window. Netplay keeps its own frame clock; a
+local two-instance match measured no pad waits. What is left on this
+benchmark is KOs (the explosion's fill).
+
+Where the CPU goes per frame (simpleperf, same benchmark): the FIFO thread
+(GX commands to draws) is ~6 ms, 60% of it push_gx_draw: copying cached
+decoded vertices into the frame (~1 ms), re-hashing every vertex array and
+draw's raw vertices to key that cache (~0.7 ms), decoding misses, building
+uniforms (~0.55 ms), resolving and hashing textures (~0.5 ms). The render
+worker is ~5.5 ms, half of it Dawn recording Vulkan commands at submit. The
+game itself is ~3.4 ms (drawing ~1.9, simulation ~1.1).
 
 **Bindless eye batches** (on by default; `AURORA_XR_BINDLESS=0` turns them off):
 eye draws join across textures and uniforms, each record carrying its draw's

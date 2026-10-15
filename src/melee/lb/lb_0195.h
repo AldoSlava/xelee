@@ -9,6 +9,9 @@
 /* 019628 */ void lb_80019628(void);
 /* 019880 */ void lb_80019880(u64);
 /* 019894 */ u8 lb_80019894(void);
+#ifdef TARGET_PC
+void lb_pc_pad_alarm_to_frame(void);
+#endif
 /* 0198E0 */ void lb_800198E0(void);
 /* 019900 */ void lb_80019900(void);
 /* 019A30 */ bool lb_80019A30(int);

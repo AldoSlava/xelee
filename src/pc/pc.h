@@ -24,6 +24,9 @@ uint64_t pc_sim_period_ns(void);
 /* Sleep (at most 1 ms) toward the next due OSAlarm instead of spinning for it,
  * and a 0.1 ms sleep for the game's disc wait loops, src/pc/os.c. */
 void pc_os_wait_alarm(void);
+uint64_t pc_os_take_alarm_wait_ns(void);
+struct OSAlarm;
+void pc_os_rearm_periodic_alarm(struct OSAlarm* alarm, bool fire_now);
 void pc_os_yield(void);
 
 /* Append a line to the diagnostic log (src/pc/main.c), so frame stalls

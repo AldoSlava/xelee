@@ -33,6 +33,7 @@ extern void browser_yield(void);
 #include "pc/net_chat.h"
 #include <melee/if/ifnetchat.h>
 #include <dolphin/pad.h>
+#include <melee/lb/lb_0195.h>
 #include "pc/net_lan.h"
 #include "pc/net_match.h"
 #include "pc/net_rank_session.h"
@@ -75,7 +76,31 @@ static void pc_pace_wait(u64 ns) {
 #define pc_pace_wait SDL_DelayPrecise
 #endif
 
+static int cmp_float(const void* a, const void* b) {
+    const float x = *(const float*)a, y = *(const float*)b;
+    return (x > y) - (x < y);
+}
+
+/* Every 600 frames: how long each frame waited for its pad sample (the pad
+ * alarm runs on its own 60 Hz grid; in XR the frame boundary follows the
+ * headset's), as median/95%/max, and how many frames waited over 2 ms. */
+static void log_pad_wait(void) {
+    static float ms[600];
+    static int n;
+    ms[n++] = (float)pc_os_take_alarm_wait_ns() / 1e6f;
+    if (n < 600)
+        return;
+    int over2 = 0;
+    for (int i = 0; i < n; i++)
+        over2 += ms[i] > 2.f;
+    qsort(ms, (size_t)n, sizeof ms[0], cmp_float);
+    pc_log_line("pad wait per frame (ms, median/95%%/max): %.1f/%.1f/%.1f, %d of %d over 2 ms", ms[n / 2],
+        ms[n * 95 / 100], ms[n - 1], over2, n);
+    n = 0;
+}
+
 void pc_frame_boundary(void) {
+    log_pad_wait();
     static int timing_debug = -1;
     static int fps_log = -1;
     static u64 fps_t0;
@@ -262,6 +287,9 @@ void pc_frame_boundary(void) {
      * the simulation would run at 2x-4x speed. Pacing strictly to 60.000 Hz ensures physics,
      * hitboxes, and timers remain bit-identical. */
     static u64 next_sim_ns;
+#ifdef AURORA_ENABLE_OPENXR
+    bool xr_paced = false; /* this boundary waited for the XR tick */
+#endif
     const u64 sim_period = pc_sim_period_ns();
     u64 now = SDL_GetTicksNS();
     /* How far behind its schedule this boundary is, and how much of that to
@@ -278,6 +306,7 @@ void pc_frame_boundary(void) {
      * repeats frames unevenly). Netplay keeps its own clock. */
     if (!pc_net_active() && aurora_xr_pace()) {
         next_sim_ns = SDL_GetTicksNS();
+        xr_paced = true;
     } else
 #endif
     if (next_sim_ns == 0 || now > next_sim_ns) {
@@ -364,6 +393,16 @@ void pc_frame_boundary(void) {
     /* Age of the 1000 Hz sample the sim is about to consume, before the pad
      * alarms (fn_800195FC -> PADRead) fire from pc_os_run_alarms. */
     pc_input_latency_record();
+#ifdef AURORA_ENABLE_OPENXR
+    /* MELEE_XR_PAD_ALARM_FREE=1: the pad alarm keeps its own grid (as
+     * before), for comparison. */
+    static int pad_alarm_free = -1;
+    if (pad_alarm_free < 0)
+        pad_alarm_free = getenv("MELEE_XR_PAD_ALARM_FREE") != NULL;
+    if (xr_paced && !pad_alarm_free) {
+        lb_pc_pad_alarm_to_frame();
+    }
+#endif
     u64 alarms_started = timing_debug ? SDL_GetTicksNS() : 0;
     pc_os_run_alarms();
     if (timing_debug) {

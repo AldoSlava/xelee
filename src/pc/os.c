@@ -228,6 +228,26 @@ void pc_os_run_alarms(void) {
  * gap: measured at 95% of a core after one injected 25 ms stall. Sleep toward
  * the earliest alarm instead, at most 1 ms at a time so the loop's own polls
  * (disc status, card tasks) keep their cadence. */
+static uint64_t s_alarm_wait_ns;
+
+/* XR pacing (vi.c): moves a periodic alarm's grid onto the frame boundary,
+ * firing it now (at the next pc_os_run_alarms) or one period from now. */
+void pc_os_rearm_periodic_alarm(struct OSAlarm* alarm, bool fire_now) {
+    BOOL intr = OSDisableInterrupts();
+    if (alarm->handler != NULL && alarm->period > 0) {
+        alarm->fire = OSGetTime() + (fire_now ? 0 : alarm->period);
+    }
+    OSRestoreInterrupts(intr);
+}
+
+/* The time slept waiting for alarms since the last call (vi.c logs it per
+ * frame: the frame's wait for its pad sample after the frame boundary). */
+uint64_t pc_os_take_alarm_wait_ns(void) {
+    const uint64_t ns = s_alarm_wait_ns;
+    s_alarm_wait_ns = 0;
+    return ns;
+}
+
 void pc_os_wait_alarm(void) {
     BOOL intr = OSDisableInterrupts();
     OSTime next = 0;
@@ -246,7 +266,9 @@ void pc_os_wait_alarm(void) {
         browser_yield();
 #else
         const uint64_t ns = (uint64_t)OSTicksToMicroseconds(wait) * 1000u;
+        const uint64_t start = SDL_GetTicksNS();
         SDL_DelayPrecise(ns < 1000000u ? ns : 1000000u);
+        s_alarm_wait_ns += SDL_GetTicksNS() - start;
 #endif
     }
 }
