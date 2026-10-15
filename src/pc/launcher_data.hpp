@@ -41,7 +41,8 @@ struct Preferences {
     int hud_mode = 0;
     bool frozen_stadium = false;
     bool free_camera = false;
-    bool ucf = false;
+    bool ucf = true;             // UCF 0.84 rules (dashback, shield drop, SDI, tumble, cardinals)
+    bool slippi_fixes = true;    // Slippi's other gameplay rules: no wobbling, neutral spawns, freeze-glitch fix
     float music_volume = 1.0f;
     float sfx_volume = 1.0f;
     uint64_t install_id = 0;  // random once per install (LAN host election); 0 = not yet

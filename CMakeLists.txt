@@ -136,6 +136,47 @@ else ()
     endif ()
 endif ()
 
+# ---- Vendored ENet (MIT), for Slippi netplay -------------------------------
+# src/pc/slippi/ speaks Slippi's ENet protocol (docs/slippi-migration-plan.md
+# M1/M2). ENet is vendored at extern/enet (v1.3.13) because nothing on Android
+# or iOS provides it as a package. win32.c is empty off Windows and unix.c on
+# Windows, so both are listed unconditionally. It is a normal target now that
+# the slp_net test links it; nothing in the shipped melee target links it until
+# M3 wires the Slippi transport in.
+set(ENET_SOURCES
+        extern/enet/callbacks.c
+        extern/enet/compress.c
+        extern/enet/host.c
+        extern/enet/list.c
+        extern/enet/packet.c
+        extern/enet/peer.c
+        extern/enet/protocol.c
+        extern/enet/win32.c
+        extern/enet/unix.c)
+add_library(melee_enet STATIC ${ENET_SOURCES})
+target_include_directories(melee_enet PUBLIC extern/enet/include)
+target_compile_definitions(melee_enet PRIVATE ENET_BUILDING_LIB)
+if (WIN32)
+    target_link_libraries(melee_enet PUBLIC ws2_32 winmm)
+else ()
+    # ENet's unix.c leans on these for its POSIX path. Upstream probes them
+    # with check_function_exists/check_type_size; every target this port builds
+    # for is POSIX and has all of them, so they are set directly rather than
+    # adding the checks. (Without HAS_SOCKLEN_T, unix.c typedefs socklen_t and
+    # collides with the system one, which is how this was first noticed.)
+    target_compile_definitions(melee_enet PRIVATE
+            HAS_FCNTL=1 HAS_POLL=1 HAS_INET_PTON=1 HAS_INET_NTOP=1
+            HAS_MSGHDR_FLAGS=1 HAS_SOCKLEN_T=1)
+endif ()
+
+# A local stand-in for Slippi's matchmaking server, for testing netplay
+# without the real one (tools/slippi_mm_server.c). Not part of the default build.
+add_executable(slippi_mm_server EXCLUDE_FROM_ALL
+        tools/slippi_mm_server.c
+        src/pc/slippi/slp_json.c)
+target_include_directories(slippi_mm_server PRIVATE src)
+target_link_libraries(slippi_mm_server PRIVATE melee_enet)
+
 # ---- Game code (decomp, compiled as C) -------------------------------------
 include(cmake/GameSources.cmake)
 
@@ -198,6 +239,23 @@ set(PC_SOURCES
         src/pc/region.c
         src/pc/slp.c
         src/pc/slp_format.c
+        # Slippi netplay protocol (docs/slippi-migration-plan.md). slp_proto.h is
+        # the constants header; slp_packet.c is the wire codec (M1); slp_msg.c
+        # is the message bodies, slp_session.c the transport-free session core,
+        # slp_net.c the ENet driver, and slp_checksum.c Slippi's wire desync
+        # checksum (M3). slp_adapter.c is the game-side transport seam; slp_json.c
+        # (M4) parses matchmaking replies and account files.
+        src/pc/slippi/slp_packet.c
+        src/pc/slippi/slp_msg.c
+        src/pc/slippi/slp_session.c
+        src/pc/slippi/slp_net.c
+        src/pc/slippi/slp_checksum.c
+        src/pc/slippi/slp_adapter.c
+        src/pc/slippi/slp_json.c
+        src/pc/slippi/slp_user.c
+        src/pc/slippi/slp_http.c
+        src/pc/slippi/slp_http_android.cpp
+        src/pc/slippi/slp_match.c
         src/pc/stb_vorbis.c
         src/pc/thp.c
         src/pc/touch.c
@@ -206,6 +264,8 @@ set(PC_SOURCES
         src/pc/xr_scene.c
         src/pc/xr_place.c
         src/pc/xr_pointer.c
+        src/pc/button_icons.c
+        src/pc/button_icons_data.c
         src/pc/windows_arm64_softfp.c
         src/pc/android_compat.cpp
         src/pc/file_cache.cpp
@@ -271,7 +331,7 @@ target_compile_options(melee PRIVATE
         $<$<AND:$<COMPILE_LANGUAGE:C>,$<NOT:$<BOOL:${WIN32}>>,$<NOT:$<BOOL:${ANDROID}>>,$<NOT:$<BOOL:${APPLE}>>>:-fno-pie>
         $<$<BOOL:${ANDROID}>:-march=armv8-a+crc+crypto>
         $<$<BOOL:${ANDROID}>:-mtune=cortex-a73>)
-target_link_libraries(melee PRIVATE melee_game aurora::main ${MELEE_CRYPTO_LIBS} ${MELEE_NETWORK_LIBS})
+target_link_libraries(melee PRIVATE melee_game aurora::main melee_enet ${MELEE_CRYPTO_LIBS} ${MELEE_NETWORK_LIBS})
 
 if (IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     target_link_libraries(melee PRIVATE
@@ -488,6 +548,20 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
                 target_sources(${case}_test PRIVATE extern/monocypher/monocypher.c)
                 target_include_directories(${case}_test PRIVATE extern/monocypher)
             endif()
+            if (case STREQUAL "net_resume")
+                # net_resume includes net.c itself, which now references the
+                # Slippi transport (src/pc/slippi/). Compile those sources in
+                # and link ENet; the test does not include them itself.
+                target_sources(${case}_test PRIVATE
+                        src/pc/slippi/slp_packet.c
+                        src/pc/slippi/slp_msg.c
+                        src/pc/slippi/slp_session.c
+                        src/pc/slippi/slp_net.c
+                        src/pc/slippi/slp_checksum.c
+                        src/pc/slippi/slp_adapter.c)
+                target_include_directories(${case}_test PRIVATE extern/enet/include)
+                target_link_libraries(${case}_test PRIVATE melee_enet)
+            endif()
             target_include_directories(${case}_test PRIVATE extern/aurora/include src src/sdk_include)
             target_compile_definitions(${case}_test PRIVATE TARGET_PC=1 MELEE_PC=1 AURORA NDEBUG XXH_INLINE_ALL)
             target_link_libraries(${case}_test PRIVATE ${AURORA_SDL3_TARGET} xxhash)
@@ -516,6 +590,82 @@ if (NOT ANDROID AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         add_test(NAME net_chat COMMAND net_chat_test)
         set_tests_properties(net_chat PROPERTIES LABELS melee TIMEOUT 30)
         add_dependencies(unit_tests net_chat_test)
+        # Slippi netplay packet codec (src/pc/slippi/, docs/slippi-migration-plan.md
+        # M1). Plain C: the test #includes the .c, so no source is linked here.
+        add_executable(slp_packet_test EXCLUDE_FROM_ALL tools/test_slp_packet.c)
+        target_include_directories(slp_packet_test PRIVATE src)
+        target_compile_options(slp_packet_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_packet COMMAND slp_packet_test)
+        set_tests_properties(slp_packet PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_packet_test)
+        add_executable(slp_msg_test EXCLUDE_FROM_ALL tools/test_slp_msg.c)
+        target_include_directories(slp_msg_test PRIVATE src)
+        target_compile_options(slp_msg_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_msg COMMAND slp_msg_test)
+        set_tests_properties(slp_msg PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_msg_test)
+        add_executable(slp_session_test EXCLUDE_FROM_ALL tools/test_slp_session.c)
+        target_include_directories(slp_session_test PRIVATE src)
+        target_compile_options(slp_session_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_session COMMAND slp_session_test)
+        set_tests_properties(slp_session PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_session_test)
+        # slp_json (M4): the JSON reader, #includes its .c like the others.
+        add_executable(slp_json_test EXCLUDE_FROM_ALL tools/test_slp_json.c)
+        target_include_directories(slp_json_test PRIVATE src)
+        target_compile_options(slp_json_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_json COMMAND slp_json_test)
+        set_tests_properties(slp_json PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_json_test)
+        # slp_user (M4): account parse/serialize, #includes its .c. Needs SDL
+        # for the pref path; no network (the HTTP edge is stubbed in the test).
+        add_executable(slp_user_test EXCLUDE_FROM_ALL tools/test_slp_user.c)
+        target_include_directories(slp_user_test PRIVATE src extern/aurora/include)
+        target_compile_options(slp_user_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_user_test PRIVATE ${AURORA_SDL3_TARGET})
+        add_test(NAME slp_user COMMAND slp_user_test)
+        set_tests_properties(slp_user PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_user_test)
+        # slp_match (M4): ticket parse + local-peer mode, #includes its .c.
+        # Needs ENet for the client and SDL for the search thread.
+        add_executable(slp_match_test EXCLUDE_FROM_ALL tools/test_slp_match.c)
+        target_include_directories(slp_match_test PRIVATE src extern/aurora/include)
+        target_compile_options(slp_match_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_match_test PRIVATE melee_enet ${AURORA_SDL3_TARGET})
+        if (NOT WIN32)
+            target_link_libraries(slp_match_test PRIVATE pthread)
+        endif ()
+        add_test(NAME slp_match COMMAND slp_match_test)
+        set_tests_properties(slp_match PROPERTIES LABELS melee TIMEOUT 60)
+        add_dependencies(unit_tests slp_match_test)
+        # The ENet driver (M2c) runs two peers over loopback, so it links the
+        # vendored ENet. Timed generously: it waits on real ENet handshakes.
+        add_executable(slp_net_test EXCLUDE_FROM_ALL tools/test_slp_net.c)
+        target_include_directories(slp_net_test PRIVATE src)
+        target_compile_options(slp_net_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_net_test PRIVATE melee_enet)
+        if (NOT WIN32)
+            target_link_libraries(slp_net_test PRIVATE pthread)
+        endif ()
+        add_test(NAME slp_net COMMAND slp_net_test)
+        set_tests_properties(slp_net PROPERTIES LABELS melee TIMEOUT 60)
+        add_dependencies(unit_tests slp_net_test)
+        add_executable(slp_checksum_test EXCLUDE_FROM_ALL tools/test_slp_checksum.c)
+        target_include_directories(slp_checksum_test PRIVATE src)
+        target_compile_options(slp_checksum_test PRIVATE -UNDEBUG)
+        add_test(NAME slp_checksum COMMAND slp_checksum_test)
+        set_tests_properties(slp_checksum PROPERTIES LABELS melee TIMEOUT 30)
+        add_dependencies(unit_tests slp_checksum_test)
+        add_executable(slp_adapter_test EXCLUDE_FROM_ALL tools/test_slp_adapter.c)
+        target_include_directories(slp_adapter_test PRIVATE src)
+        target_compile_options(slp_adapter_test PRIVATE -UNDEBUG)
+        target_link_libraries(slp_adapter_test PRIVATE melee_enet)
+        if (NOT WIN32)
+            target_link_libraries(slp_adapter_test PRIVATE pthread)
+        endif ()
+        add_test(NAME slp_adapter COMMAND slp_adapter_test)
+        set_tests_properties(slp_adapter PROPERTIES LABELS melee TIMEOUT 60)
+        add_dependencies(unit_tests slp_adapter_test)
         add_executable(net_dht_bootstrap_test EXCLUDE_FROM_ALL tools/test_net_dht_bootstrap.c)
         target_compile_options(net_dht_bootstrap_test PRIVATE -UNDEBUG)
         add_test(NAME net_dht_bootstrap COMMAND net_dht_bootstrap_test)

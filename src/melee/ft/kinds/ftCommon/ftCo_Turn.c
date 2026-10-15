@@ -19,6 +19,7 @@
 #include "ftCo_Jump.h"
 #include "ftCo_SpecialS.h"
 #include <melee/ft/fighter.h>
+#include <melee/ft/ftucf.h>
 #include <melee/ft/ft_081B.h>
 #include <melee/ft/ft_084E.h>
 #include <melee/ft/ft_0892.h>
@@ -27,31 +28,25 @@
 #include <melee/pl/player.h>
 #include <pc/pc.h>
 
-s8 ftCo_ucf_raw_x[4][3];
-
-/// UCF 0.8x dashback (AltimorTASDK/ucf src/dashback/dashback.cpp +
-/// include/ucf/pad_buffer.h check_ucf_xsmash, "tilt intent algorithm by
-/// tauKhan"). Vanilla only dashes back when the stick reaches
-/// dash_smash_stick_threshold (0.8) on the very frame it leaves the smash
-/// deadzone; one frame of an in-between poll enters a tilt turn instead. UCF
-/// lets tilt-turn anim frame 2 cancel into the dashback when the vanilla
-/// smash-turn stick conditions hold (|x| >= 0.8 toward the new direction,
-/// stick X active < dash_smash_window = 2 frames) AND the raw stick X moved
-/// more than 75 of 80 units since two frames ago, i.e. it was a fast flick,
-/// not a slow tilt. Nana (sub fighter) is excluded; she is patched
-/// retroactively by the caller instead.
+/// UCF 0.84 dashback (Slippi's UCF Dashback.asm, hook 0x800C9A44 in
+/// ftCo_Turn_IASA, checked against the vanilla instructions there). Vanilla
+/// only dashes back when the stick reaches dash_smash_stick_threshold (0.8) on
+/// the very frame it leaves the smash deadzone; one frame of an in-between
+/// poll enters a tilt turn instead. UCF lets tilt-turn anim frame 2 cancel
+/// into the dashback when the vanilla smash-turn stick conditions hold
+/// (|x| >= 0.8 toward the new direction, stick X timer at most 1 frame old)
+/// AND the raw stick X moved more than 75 of 80 units since two frames ago,
+/// i.e. it was a fast flick, not a slow tilt. The history is the pad buffer's
+/// (ftucf.c), the raw pre-clamp stick, as UCF reads it. Nana (sub fighter) is
+/// excluded; she is patched retroactively by the caller instead. The asm
+/// hardcodes the timer test as <= 1 rather than reading dash_smash_window.
 bool ftCo_UcfDashback(Fighter* fp)
 {
-    // The history is the pre-clamp stick (pc_pad_game_raw_x, fighter.c), as
-    // UCF reads it: past the 80-unit rim the clamped value is shorter, and a
-    // -5 -> -85 flick (80 units raw, 75 clamped) used to miss the dashback.
-    s8* h = ftCo_ucf_raw_x[fp->player_idx];
-    int delta = h[0] - h[2];
     return !fp->is_sub_fighter && fp->cur_anim_frame == 2.0f &&
            fp->input.lstick[0].x * fp->mv.co.turn.facing_after >=
                p_ftCommonData->dash_smash_stick_threshold &&
-           fp->active_timer.lstick.x < p_ftCommonData->dash_smash_window &&
-           delta * delta > 75 * 75;
+           fp->active_timer.lstick.x <= 1 && fp->pad_port < 4 &&
+           ftUcf_FlickXSq(fp->pad_port) > 0x15F9;
 }
 
 bool ftCo_800C97A8(Fighter_GObj* gobj)

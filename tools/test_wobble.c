@@ -17,6 +17,11 @@ static bool teams;
 bool pc_net_deterministic(void) {
     return rule_on;
 }
+/* ftwobble.c asks whether the Slippi rules apply (online, or the offline
+ * preference); the test drives both with the one switch. */
+bool pc_is_slippi_fixes_enabled(void) {
+    return rule_on;
+}
 bool gm_8016B168(void) {
     return teams;
 }

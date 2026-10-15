@@ -902,13 +902,16 @@ static void follow_update(void) {
     }
 }
 
+/* Slippi's pause: the overlay only, the match runs on (gm/gmvs.c). */
+extern bool gm_vs_soft_paused(void);
+
 void pc_xr_world_camera(const float view[3][4]) {
     if (s_flat_view) {
         pc_xr_mono_camera();
         return;
     }
     /* Pause flags 1 and 2: a player paused the match (gm_DoPauseChecksAndRoutine). */
-    aurora_xr_set_paused(gm_GetDbPauseFlag(1) || gm_GetDbPauseFlag(2));
+    aurora_xr_set_paused(gm_GetDbPauseFlag(1) || gm_GetDbPauseFlag(2) || gm_vs_soft_paused());
     s_category = AURORA_XR_WORLD;
     aurora_xr_camera(AURORA_XR_WORLD, view);
     follow_update();

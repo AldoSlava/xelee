@@ -1,5 +1,8 @@
 #include "ftCo_DamageFall.h"
 
+#include <melee/ft/ftucf.h>
+#include <pc/pc.h>
+
 #include <Runtime/platform.h>
 
 #include <sysdolphin/baselib/forward.h>
@@ -123,7 +126,13 @@ void ftCo_DamageFall_IASA(HSD_GObj* gobj)
         RETURN_IF(ftCo_800D705C(gobj));
         RETURN_IF(ftCo_800CB870(gobj));
         if (ABS(fp->input.lstick[0].x) >= p_ftCommonData->x210 &&
+#ifdef TARGET_PC
+            (pc_is_ucf_enabled() ? ftUcf_TumbleAllowed(fp) :
+                                   fp->active_timer.lstick.x <
+                                       p_ftCommonData->x214))
+#else
             fp->active_timer.lstick.x < p_ftCommonData->x214)
+#endif
         {
             ftCo_Fall_Enter(gobj);
             return;

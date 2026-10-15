@@ -120,6 +120,8 @@ typedef enum MenuKind {
 #ifdef TARGET_PC
     /* PC: VS Mode > Online. Its row is appended to mnmain.c's tables. */
     MENU_KIND_ONLINE = 34,
+    /* PC: VS Mode > Online > Slippi (Unranked, Direct, ...). */
+    MENU_KIND_ONLINE_SLIPPI = 35,
 #endif
 } MenuKind;
 
@@ -137,9 +139,16 @@ typedef enum MenuState {
 typedef enum MainMenuSelection {
     SEL_MAIN_1P = 0,
     SEL_MAIN_VS = 1,
+#ifdef TARGET_PC
+    SEL_MAIN_ONLINE = 2, ///< PC only: Online Play, under VS. Mode
+    SEL_MAIN_TOY = 3,
+    SEL_MAIN_SETTINGS = 4,
+    SEL_MAIN_DATA = 5,
+#else
     SEL_MAIN_TOY = 2,
     SEL_MAIN_SETTINGS = 3,
     SEL_MAIN_DATA = 4,
+#endif
 } MainMenuSelection;
 
 typedef enum OnePlayerMenuSelection {
@@ -168,17 +177,23 @@ typedef enum VsMenuSelection {
     SEL_VS_SPECIAL = 2,
     SEL_VS_RULES = 3,
     SEL_VS_NAME = 4,
-    SEL_VS_ONLINE = 5,
 } VsMenuSelection;
 
 #ifdef TARGET_PC
+/* Online Play: Slippi (a submenu of its modes) or LAN. */
 typedef enum OnlineMenuSelection {
-    SEL_ONLINE_LAN = 0,
-    SEL_ONLINE_DIRECT = 1,
-    SEL_ONLINE_RANKED = 2,
-    SEL_ONLINE_UNRANKED = 3,
-    SEL_ONLINE_PROFILE = 4,
+    SEL_ONLINE_SLIPPI = 0,
+    SEL_ONLINE_LAN = 1,
 } OnlineMenuSelection;
+
+/* Online Play > Slippi: signed out there is just Login (row 0); signed in
+ * it is Unranked, Direct and Logout. See mnOnline_SlippiAction. */
+typedef enum SlippiMenuSelection {
+    SEL_SLIPPI_UNRANKED = 0,
+    SEL_SLIPPI_DIRECT = 1,
+    SEL_SLIPPI_PLACE = 2, /* XR only: Logout is one row lower then */
+    SEL_SLIPPI_LOGOUT = 2,
+} SlippiMenuSelection;
 #endif
 
 typedef enum SpecialVsMenuSelection {

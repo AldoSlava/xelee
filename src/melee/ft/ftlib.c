@@ -1,4 +1,5 @@
 #include "ftlib.h"
+#include <pc/pc.h>
 #include <stdlib.h>
 
 #include <melee/it/forward.h>
@@ -266,6 +267,14 @@ float ftLib_GetOpponentsDir(Vec3* v, HSD_GObj* gobj)
             {
                 continue;
             }
+#ifdef TARGET_PC
+            /* Slippi's WhispyBlowDirFix (hook 0x8008653C): a fighter in a
+             * death or respawn state (motion ids 0-11) does not vote on the
+             * direction. */
+            if (pc_is_slippi_fixes_enabled() && cur_fp->motion_id <= 11) {
+                continue;
+            }
+#endif
 
             ftLib_GetCameraBonePos(cur, &vec);
             result += sgn(vec.x - v->x);

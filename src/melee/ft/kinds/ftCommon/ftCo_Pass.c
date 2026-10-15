@@ -3,6 +3,8 @@
 #include <Runtime/platform.h>
 
 #include <melee/ft/forward.h>
+#include <melee/ft/ftucf.h>
+#include <pc/pc.h>
 
 #include "ftCo_0C60.h"
 #include "ftCo_AirCatch.h"
@@ -54,6 +56,21 @@ bool ftCo_8009A080(Fighter_GObj* gobj)
 {
     u8 _[8];
     Fighter* fp = gobj->user_data;
+#ifdef TARGET_PC
+    if (pc_is_ucf_enabled() && fp->input.held_buttons[0] & HSD_PAD_LR) {
+        /* ftCo_80099F1C with UCF's extended stick-down test (Slippi inlines
+         * it here and patches only this copy). */
+        if ((fp->input.lstick[0].y <= -p_ftCommonData->x464 ||
+             ftUcf_ShieldDropHeld(fp)) &&
+            fp->active_timer.lstick.y < p_ftCommonData->x468 &&
+            mpColl_IsOnPlatform(&fp->coll_data))
+        {
+            ftCo_8009A228(gobj);
+            return true;
+        }
+        return false;
+    }
+#endif
     if (fp->input.held_buttons[0] & HSD_PAD_LR && ftCo_80099F1C(gobj)) {
         ftCo_8009A228(gobj);
         return true;

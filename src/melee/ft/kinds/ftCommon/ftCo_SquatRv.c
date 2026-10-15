@@ -5,6 +5,8 @@
 #include <melee/ft/forward.h>
 
 #include <stdbool.h>
+#include <math.h>
+#include <pc/pc.h>
 
 #include "forward.h"
 #include "ftCo_AppealS.h"
@@ -31,7 +33,20 @@
 bool ftCo_SquatRv_CheckInput(Fighter_GObj* gobj)
 {
     Fighter* fp = GET_FIGHTER(gobj);
-    if (fp->input.lstick[0].y > -p_ftCommonData->x94) {
+    float threshold = p_ftCommonData->x94;
+#ifdef TARGET_PC
+    /* UCF 0.84 "DBOOC SquatRv Fix" (hook 0x800D65EC): on the first frame of a
+     * stick at the rim the stand-up threshold drops to 0.59, so a dash back
+     * out of crouch is not lost to a stick that lands just short of x94. */
+    if (pc_is_ucf_enabled() && fp->active_timer.lstick.x < 1) {
+        int xi = (int) fmaf(fabsf(fp->input.lstick[0].x), 80.0F, -9.99999747378752e-05F);
+        int yi = (int) fmaf(fabsf(fp->input.lstick[0].y), 80.0F, -9.99999747378752e-05F);
+        if ((xi + 2) * (xi + 2) + (yi + 2) * (yi + 2) > 0x1900) {
+            threshold = 0.59F;
+        }
+    }
+#endif
+    if (fp->input.lstick[0].y > -threshold) {
         ftCo_SquatRv_Enter(gobj);
         return true;
     }

@@ -50,8 +50,15 @@ The full text is in [`COPYING`](COPYING).
 - `resources/font.ttf`, `resources/font-bold.ttf` — Liberation Sans, SIL Open
   Font License. See `resources/FONT-LICENSE.txt`.
 - `platforms/android/app/src/main/java/org/libsdl/` — SDL3, zlib license.
+- `assets/button_icons/` and `src/pc/button_icons_data.c` — GameCube button
+  icons (L, R, Y, Z) from SmashWiki
+  (<https://www.ssbwiki.com/Category:Button_icons_(GCN)>), Creative Commons
+  Attribution-ShareAlike 4.0 International
+  (<https://creativecommons.org/licenses/by-sa/4.0/>). The SVGs are unmodified;
+  the data file is a rendering of them. See `assets/button_icons/README.md`.
 - Dawn, SDL3, nod, RmlUi and the other dependencies are fetched at build time
   under their own licenses.
 
-MIT, zlib and the SIL OFL are all GPL-3.0 compatible, so combining them with
+MIT, zlib, the SIL OFL and CC BY-SA 4.0 (one way, into GPL-3.0) are all
+GPL-3.0 compatible, so combining them with
 the port code in section 2 is fine.

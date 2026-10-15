@@ -12,6 +12,9 @@
 #include "gmmultiman.h"
 #include "gmpause.h"
 #include "types.h"
+#ifdef TARGET_PC
+#include "pc/xr_place.h"
+#endif
 #include <dolphin/pad.h>
 #include <melee/cm/camera.h>
 #include <melee/db/db.h>
@@ -41,6 +44,11 @@
 #include <melee/mn/types.h>
 #include <melee/mp/mpcoll.h>
 #include <melee/pl/player.h>
+#ifdef TARGET_PC
+#include <sysdolphin/baselib/dobj.h>
+#include <sysdolphin/baselib/mobj.h>
+#include <sysdolphin/baselib/tobj.h>
+#endif
 #include <melee/pl/plbonus.h>
 #include <melee/pl/plbonuslib.h>
 #include <melee/sfx/crowdsfx.h>
@@ -49,6 +57,9 @@
 #include <stdlib.h>
 #ifdef TARGET_PC
 #include "pc/slp.h"
+#include "pc/net.h"
+#include "pc/pc.h"
+#include <sysdolphin/baselib/random.h>
 #endif
 
 static u32 lbl_803D5620[] = {
@@ -1121,11 +1132,82 @@ static inline s8 gm_GetSlotByPlayerId(int pauserId)
     return -1;
 }
 
+#ifdef TARGET_PC
+extern bool pc_net_slippi_active(void);
+
+/* Slippi's pause (InitPause.asm): in a Slippi match Start only shows the pause
+ * overlay, for the player who pressed it, and hides their HUD; the game does
+ * not stop and nothing is sent. Holding L+R+A+Start on any player's (synced)
+ * pad quits the match as a no-contest on both sides. In XR the overlay frees
+ * the hands to grab the stage, so it doubles as the way to re-place it. */
+static bool softPaused;
+/* The port whose L+R+A+Start ended the match, -1 when none did: Slippi's
+ * Direct counts it as that player's loss (CheckIfWonLastGame). */
+int gm_vs_slippi_quitter = -1;
+
+bool gm_vs_soft_paused(void)
+{
+    return softPaused;
+}
+
+static void softPauseReset(void)
+{
+    softPaused = false;
+    gm_vs_slippi_quitter = -1;
+}
+
+static void slippiSoftPause(VsSceneController* c)
+{
+    const u32 quit = HSD_PAD_L | HSD_PAD_R | HSD_PAD_A | HSD_PAD_START;
+    const int port = pc_net_local_player();
+    int p;
+    if (c->state.hud_enabled == 0) {
+        return;
+    }
+    for (p = 0; p < PAD_MAX_CONTROLLERS; p++) {
+        HSD_PadStatus* pad = &HSD_PadCopyStatus[(u8) p];
+        if (pad->err == 0 && (pad->button & quit) == quit) {
+            if (softPaused) {
+                ifAll_802F33CC();
+                gm_801A10FC(port);
+                softPaused = false;
+            }
+            pc_log_line("online: match quit with L+R+A+Start from player %d", p);
+            gm_vs_slippi_quitter = p;
+            fn_8016CF4C(p, OUTCOME_NO_CONTEST);
+            return;
+        }
+    }
+    if (port >= 0 && port < PAD_MAX_CONTROLLERS && HSD_PadCopyStatus[(u8) port].err == 0 &&
+        (HSD_PadCopyStatus[(u8) port].trigger & HSD_PAD_START))
+    {
+        softPaused = !softPaused;
+        pc_log_line("online: pause overlay %s (the match runs on)", softPaused ? "on" : "off");
+        if (softPaused) {
+            lbAudioAx_80024030(5);
+            ifAll_802F3394();
+            gm_801A0FEC(port, 5);
+        } else {
+            ifAll_802F33CC();
+            gm_801A10FC(port);
+        }
+    }
+}
+#endif
+
 void gm_DoPauseChecksAndRoutine(VsSceneController* arg0, int arg1)
 {
     int pauser;
     s8 pauserSlot;
     u8 var_r4;
+
+#ifdef TARGET_PC
+    if (pc_net_slippi_active() && arg0->start.disable_pausing) {
+        /* Slippi's client pause, in matches with the real pause off. */
+        slippiSoftPause(arg0);
+        return;
+    }
+#endif
 
     if (arg0->state.unpause_timer == 0 && arg0->state.hud_enabled != 0 &&
         !arg0->start.disable_pausing)
@@ -1377,6 +1459,9 @@ void fn_8016CFE0(void)
                 {
                     u64 masked_buttons = no_contest_buttons & buttons;
                     if (masked_buttons == no_contest_buttons) {
+#ifdef TARGET_PC
+                        gm_vs_slippi_quitter = tmp->state.pauser;
+#endif
                         fn_8016CF4C_dontinline(unpauser_slot,
                                                OUTCOME_NO_CONTEST);
                         return;
@@ -1552,9 +1637,114 @@ void fn_8016D634(void)
     }
 }
 
+#ifdef TARGET_PC
+/* The stage-placement dummy: the stage's materials are rebuilt translucent
+ * green and the fighters' flat red, once after everything has loaded (the
+ * material's TEV is compiled from its flags, so the rebuild recompiles it).
+ * Presentation only: nothing here is read by the sim. */
+bool gm_vs_place_dummy; /* the Slippi stage-placement scene (gmonlinemode.c) */
+int gm_vs_place_dummy_frame; /* its frames so far; zero as the scene opens */
+static void placeDummyTintJObj(HSD_JObj* j, u8 r, u8 g, u8 b, u8 a)
+{
+    for (; j != NULL; j = j->next) {
+        if (!(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL))) {
+            HSD_DObj* d;
+            for (d = j->u.dobj; d != NULL; d = d->next) {
+                HSD_MObj* m = d->mobj;
+                if (m == NULL || m->mat == NULL) {
+                    continue;
+                }
+                m->mat->diffuse.r = m->mat->ambient.r = r;
+                m->mat->diffuse.g = m->mat->ambient.g = g;
+                m->mat->diffuse.b = m->mat->ambient.b = b;
+                m->mat->alpha = a / 255.0f;
+                m->tobj = NULL; /* no texture stage: the compile below leaves it out */
+                m->rendermode &= ~(RENDER_TEXTURES | RENDER_TOON | RENDER_SPECULAR | RENDER_VERTEX | RENDER_SHADOW |
+                                   RENDER_ALPHA_BITS);
+                m->rendermode |= RENDER_DIFFUSE | RENDER_ALPHA_MAT;
+                if (a < 255) {
+                    m->rendermode |= RENDER_XLU | RENDER_NO_ZUPDATE;
+                }
+                HSD_MObjCompileTev(m);
+            }
+        }
+        placeDummyTintJObj(j->child, r, g, b, a);
+    }
+}
+
+#define PLACE_DUMMY_TINTED_MAX 16
+static HSD_GObj* placeDummyTinted[PLACE_DUMMY_TINTED_MAX];
+
+static bool placeDummyDone(HSD_GObj* g, bool force)
+{
+    int i;
+    for (i = 0; i < PLACE_DUMMY_TINTED_MAX; i++) {
+        if (placeDummyTinted[i] == g) {
+            return !force;
+        }
+    }
+    for (i = 0; i < PLACE_DUMMY_TINTED_MAX; i++) {
+        if (placeDummyTinted[i] == NULL) {
+            placeDummyTinted[i] = g;
+            break;
+        }
+    }
+    return false;
+}
+
+/* Every frame, for what has appeared since (the stage must never show as it is
+ * for even one frame); on frames 20 and 120 for everything, as the fighters'
+ * own code puts some materials back. */
+static void placeDummyTint(void)
+{
+    HSD_GObj* g;
+    int slot, plink;
+    int frame = ++gm_vs_place_dummy_frame;
+    bool force = frame == 20 || frame == 120;
+    if (frame == 1) {
+        memset(placeDummyTinted, 0, sizeof placeDummyTinted);
+    }
+    for (plink = 0; plink < 64; plink++) {
+        for (g = HSD_GObjPLinkHead[plink]; g != NULL; g = g->next) {
+            if (g->classifier == HSD_GOBJ_CLASS_EFFECT && g->obj_kind == HSD_GObj_JObjKind) {
+                GET_JOBJ(g)->flags |= JOBJ_HIDDEN; /* stray glow and spawn sparkle */
+            }
+        }
+    }
+    for (g = HSD_GObjPLinkHead[5]; g != NULL; g = g->next) {
+        if (g->classifier == HSD_GOBJ_CLASS_STAGE && g->obj_kind == HSD_GObj_JObjKind &&
+            !placeDummyDone(g, force))
+        {
+            placeDummyTintJObj(GET_JOBJ(g), 0x20, 0xB0, 0x40, 0xA0);
+            /* the translucent pass: blending is of no use in the opaque one */
+            GET_JOBJ(g)->flags = (GET_JOBJ(g)->flags & ~JOBJ_ROOT_OPA) | JOBJ_ROOT_XLU;
+        }
+    }
+    for (slot = 0; slot < 2; slot++) {
+        g = Player_GetEntity(slot);
+        if (g != NULL && g->obj_kind == HSD_GObj_JObjKind && !placeDummyDone(g, force)) {
+            placeDummyTintJObj(GET_JOBJ(g), 0xE0, 0x20, 0x20, 0xFF);
+        }
+    }
+}
+#endif
+
 void gm_Scene_Vs_OnFrame(void)
 {
     PAD_STACK(8);
+#ifdef TARGET_PC
+    if (gm_vs_place_dummy) {
+        placeDummyTint();
+        if (pc_xr_place_dummy_result() != 0) {
+            /* A or B: the scene ends, no outcome to record. */
+            controller.state.match_result = OUTCOME_TERMINATED;
+            controller.start.x1_5 = true; /* the end does not stop the music: the menu's goes on */
+            fn_8016C7F0();
+            gm_801A4B60();
+            return;
+        }
+    }
+#endif
     if (controller.start.on_frame_start != NULL) {
         controller.start.on_frame_start();
     }
@@ -1768,9 +1958,112 @@ static float direction(float x)
     }
 }
 
+#ifdef TARGET_PC
+/* Slippi's "Neutral Spawn" General Code (GALE01r2.ini, NeutralSpawn.asm, hook
+ * 0x8016E510; the output of tools/gecko_catalog.py). Retail starts player i on the
+ * stage's spawn point i, i.e. by port. Slippi instead numbers the players
+ * 0, 1, ... in port order among the open slots and, on its six standard stages,
+ * puts them on fixed neutral spots (both on platforms, mirrored); on any other
+ * stage the n-th player takes the stage's own spawn point n. The table below is
+ * decoded from the code's data block (singles set only: the code leaves
+ * teams to retail unless every team has exactly two players, and we only play
+ * 1v1), keyed by external stage id, 4 spots of (x, y) per set. */
+static const struct {
+    u16 stkind;
+    float pos[2][4][2];
+} neutral_spawns[] = {
+    /* Final Destination */
+    { 0x20, {
+        { { -60.0F, 10.0F }, { 60.0F, 10.0F }, { -20.0F, 10.0F }, { 20.0F, 10.0F } },
+        { { -60.0F, 10.0F }, { -20.0F, 10.0F }, { 60.0F, 10.0F }, { 20.0F, 10.0F } }
+    } },
+    /* Battlefield */
+    { 0x1F, {
+        { { -38.7999992F, 35.2000008F }, { 38.7999992F, 35.2000008F }, { 0.0F, 8.0F }, { 0.0F, 62.4000015F } },
+        { { -38.7999992F, 35.2000008F }, { -38.7999992F, 5.0F }, { 38.7999992F, 35.2000008F }, { 38.7999992F, 5.0F } }
+    } },
+    /* Yoshi's Story */
+    { 0x08, {
+        { { -42.0F, 26.6000004F }, { 42.0F, 28.0F }, { 0.0F, 46.9000015F }, { 0.0F, 4.9000001F } },
+        { { -42.0F, 26.6000004F }, { -42.0F, 5.0F }, { 42.0F, 28.0F }, { 42.0F, 5.0F } }
+    } },
+    /* Dream Land */
+    { 0x1C, {
+        { { -46.5999985F, 37.2000008F }, { 47.4000015F, 37.2999992F }, { 0.0F, 7.0F }, { 0.0F, 58.5F } },
+        { { -46.5999985F, 37.2000008F }, { -46.5999985F, 5.0F }, { 47.4000015F, 37.2999992F }, { 47.4000015F, 5.0F } }
+    } },
+    /* Fountain of Dreams */
+    { 0x02, {
+        { { -41.25F, 21.0F }, { 41.25F, 27.0F }, { 0.0F, 5.25F }, { 0.0F, 48.0F } },
+        { { -41.25F, 21.0F }, { -41.25F, 5.0F }, { 41.25F, 27.0F }, { 41.25F, 5.0F } }
+    } },
+    /* Pokemon Stadium */
+    { 0x03, {
+        { { -40.0F, 32.0F }, { 40.0F, 32.0F }, { 70.0F, 7.0F }, { -70.0F, 7.0F } },
+        { { -40.0F, 32.0F }, { -40.0F, 5.0F }, { 40.0F, 32.0F }, { 40.0F, 5.0F } }
+    } },
+};
+
+/* One line per (slot, stage) so a test can see where everyone was put. */
+static void neutralSpawnLog(int slot, int n, int stkind, const Vec3* v)
+{
+    static int seen_slot = -1;
+    static int seen_stage = -1;
+    static int seen_n = -1;
+    if (slot != seen_slot || stkind != seen_stage || n != seen_n) {
+        seen_slot = slot;
+        seen_stage = stkind;
+        seen_n = n;
+        pc_log_line("spawn: slot %d is player %d on stage %d at (%.1f, %.1f)", slot, n, stkind,
+                    v->x, v->y);
+    }
+}
+
+/* True with `v` filled when the Neutral Spawn rule decided where player i
+ * starts. Only online (pc_net_deterministic: netplay and replay record/play),
+ * only in VS, only when the match did not name a spawn point itself. */
+static bool neutralSpawn(int i, Vec3* v)
+{
+    VsSceneController* tmp = &controller;
+    size_t k;
+    int n = 0;
+    int j;
+    /* The asm leaves retail spawns in Training (mode 0x1C) and Target Test
+     * (0x0F); gm_IsCurrently1PMode covers the latter. */
+    if (!pc_is_slippi_fixes_enabled() || gm_IsCurrently1PMode() ||
+        gm_GetCurrentGameMode() == GM_TRAINING || i >= 5 ||
+        tmp->state.fighters[i].spawn_point != -1 || tmp->start.is_teams == true)
+    {
+        return false;
+    }
+    for (j = 0; j < i; j++) {
+        if (Player_GetPlayerSlotType(j) != Gm_PKind_NA) {
+            n++;
+        }
+    }
+    for (k = 0; k < ARRAY_SIZE(neutral_spawns); k++) {
+        if (neutral_spawns[k].stkind == tmp->start.stkind && n < 4) {
+            v->x = neutral_spawns[k].pos[0][n][0];
+            v->y = neutral_spawns[k].pos[0][n][1];
+            v->z = 0.0F;
+            neutralSpawnLog(i, n, tmp->start.stkind, v);
+            return true;
+        }
+    }
+    Stage_80224E64(n, v);
+    neutralSpawnLog(i, n, tmp->start.stkind, v);
+    return true;
+}
+#endif
+
 static inline void getSpawnPoint(int i, Vec3* v)
 {
     VsSceneController* tmp = &controller;
+#ifdef TARGET_PC
+    if (neutralSpawn(i, v)) {
+        return;
+    }
+#endif
     if (tmp->state.fighters[i].spawn_point == -1) {
         Stage_80224E64(i, v);
     } else {
@@ -2000,12 +2293,41 @@ bool fn_8016E5C0(StartMeleeData* arg0)
     return false;
 }
 
+#ifdef TARGET_PC
+extern bool pc_net_slippi_active(void);
+
+/* Slippi's SyncRNG (Online/Core/InitOnlinePlay.asm, installed as a process in
+ * p_link 7 at priority 0): every frame the seed becomes the scene frame
+ * counter rotated by 16 bits, plus the match's rngOffset. Draws before this
+ * process runs in a frame use the previous frame's value, so it has to sit in
+ * the same list slot as Slippi's to agree with a Dolphin peer draw for draw. */
+static void slippiSyncRng(UNUSED HSD_GObj* gobj)
+{
+    u32 f = gm_801A4BB8();
+    *HSD_RandSeedPtr = ((f << 16) | (f >> 16)) + pc_net_rng_offset();
+}
+
+/* InitOnlinePlay, at the top of the match setup: the seed starts as the
+ * rngOffset, and the SyncRNG process is installed. */
+static void slippiMatchInit(void)
+{
+    HSD_GObj* gobj;
+    if (!pc_net_active() || !pc_net_slippi_active()) {
+        return;
+    }
+    *HSD_RandSeedPtr = pc_net_rng_offset();
+    gobj = GObj_Create(4, 7, 0);
+    HSD_GObj_SetupProc(gobj, slippiSyncRng, 0);
+}
+#endif
+
 void fn_8016E730(StartMeleeData* arg0)
 {
     HSD_GObj* temp_r30;
     VsSceneController* r30;
 
 #ifdef TARGET_PC
+    slippiMatchInit(); /* Slippi's InitOnlinePlay precedes SendGameInfo */
     pc_slp_match_start(arg0); /* Slippi's SendGameInfo hooks here too */
 #endif
     db_Setup();
@@ -2065,6 +2387,9 @@ void fn_8016E730(StartMeleeData* arg0)
 void gm_Scene_Vs_OnEnter(void* arg0)
 {
     StartMeleeData* tmp = arg0;
+#ifdef TARGET_PC
+    softPauseReset();
+#endif
     fn_8016E730(tmp);
     if (tmp->rules.x1_2) {
         ifStatus_802F6EA4(8, -1, -1, 0, fn_8016B7B4, fn_8016B7F8);

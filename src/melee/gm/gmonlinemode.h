@@ -16,10 +16,46 @@ typedef enum OnlineKind {
     ONLINE_KIND_UNRANKED = 2,
     ONLINE_KIND_RANKED = 3,
     ONLINE_KIND_PROFILE = 4,
+    ONLINE_KIND_LOGIN = 5, /* Slippi sign-in: the keyboard screen, not a match */
+    ONLINE_KIND_PLACE = 6, /* XR: the stage-placement scene, then back to the menu */
 } OnlineKind;
 
 void gmOnline_SetKind(OnlineKind kind);
 OnlineKind gmOnline_GetKind(void);
+/* True while a Slippi account is signed in and the mode is Unranked or Direct:
+ * the CSS comes first and the search follows (see gmonlinemode.c). */
+bool gmOnline_SlippiFlow(void);
+/* After a placement scene started by Unranked or Direct on a launch with no
+ * placement yet, the mode goes on to that one instead of back to the menu. */
+void gmOnline_SetKindAfterPlace(OnlineKind kind);
+
+/* The online CSS's status text (src/melee/mn/mnonlinecss.c), drawn by the
+ * Slippi flow's state in gmonlinemode.c. */
+void mnOnlineCss_Create(int ctx);
+#define CSS_STEPS_MAX 3
+typedef struct OnlineCssStep {
+    char mark;      /* '-' done, '+' to do, 'x' in progress, '!' error */
+    char text[56];
+} OnlineCssStep;
+/* Direct shows the player's own connect code under the name; "" hides it. */
+void mnOnlineCss_SetCode(const char* code);
+/* "Playing: <name>" across the top while connected; "" hides it. */
+void mnOnlineCss_SetPlaying(const char* name);
+void mnOnlineCss_Update(const char* title, const char* user, const OnlineCssStep* steps, int n,
+                        const char* hint);
+void mnOnlineCss_Destroy(void);
+/* Called every CSS frame while the Slippi flow owns the screen; true when the
+ * match is agreed and the CSS should leave now. */
+bool gmOnline_SlippiCssFrame(void);
+/* START was pressed with a valid pick: true if the flow handled it (the CSS
+ * stays up and locks) rather than leaving the scene. */
+bool gmOnline_SlippiCssStart(int character, int color);
+/* True while the CSS must ignore the controller (a search is running). */
+bool gmOnline_SlippiCssLocked(void);
+
+/* Where a point (640 x 480 logical pixels, as the pointer reports it) lands on
+ * the lobby's key grid: the key's index, 100 + n for the nth button, or -1. */
+int mnOnlineLobby_KeyHit(float x, float y);
 
 void gm_Scene_OnlineLobby_OnFrame(void);
 void gm_Scene_OnlineLobby_OnEnter(void*);
@@ -51,7 +87,8 @@ typedef enum OnlineLobbyPhase {
 
 /* Direct connect's own screens, drawn in place of the player list. */
 #define ONLINE_LOBBY_MENU_ROWS 8
-#define ONLINE_LOBBY_KEY_ROWS 4
+#define ONLINE_LOBBY_KEY_ROWS 6
+#define ONLINE_LOBBY_KEY_BUTTONS 3
 #define ONLINE_LOBBY_KEY_COLS 8
 
 typedef enum OnlineLobbyScreen {
@@ -70,6 +107,10 @@ typedef struct OnlineLobbyView {
     int cursor;
     const char* keys; /* KEYS: ROWS*COLS characters, row-major */
     int key_cursor;
+    /* KEYS: buttons under the grid for what has no key (Shift, Show, Next), so
+     * a pointer can press them; a NULL label is not drawn. */
+    const char* key_buttons[ONLINE_LOBBY_KEY_BUTTONS];
+    int key_button_hot; /* the one the pointer is over, or -1 */
     const char* hint; /* the button line, or NULL for the default */
     OnlineLobbyPhase phase;
     OnlineLobbyPlayer players[ONLINE_LOBBY_MAX_PLAYERS];

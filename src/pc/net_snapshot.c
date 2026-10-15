@@ -333,6 +333,33 @@ uint32_t frame_checksum(const PADStatus* head) {
     return ck;
 }
 
+/* One fighter's hurtbox geometry: every capsule's world end points and its
+ * bone's world matrix. Hit detection reads exactly these and the checksum
+ * covers none of them; the state log prints one hash per fighter per frame
+ * (net: hurt) so two runs can be compared on them. */
+static uint32_t hurt_hash(const Fighter* fp) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < fp->hurt_capsules_len && i < 15; i++) {
+        const HurtCapsule* c = &fp->hurt_capsules[i].capsule;
+        h = fnv1a(h, &c->a_pos, sizeof c->a_pos);
+        h = fnv1a(h, &c->b_pos, sizeof c->b_pos);
+        if (c->bone != NULL) {
+            h = fnv1a(h, c->bone->mtx, sizeof c->bone->mtx);
+        }
+    }
+    return h;
+}
+
+static void hurt_hashes(uint32_t out[4]) {
+    for (int slot = 0; slot < 4; slot++) {
+        out[slot] = 0;
+        HSD_GObj* gobj = in_fight() ? Player_GetEntity(slot) : NULL;
+        if (gobj != NULL && gobj->classifier == HSD_GOBJ_CLASS_FIGHTER) {
+            out[slot] = hurt_hash(GET_FIGHTER(gobj));
+        }
+    }
+}
+
 /* MELEE_NET_RENDER_AUDIT=1: the render must not write what the simulation
  * reads. A rollback resim and a time-sync advance run ticks with no render
  * between them, so anything a draw callback writes into sim state is written
@@ -342,6 +369,50 @@ uint32_t frame_checksum(const PADStatus* head) {
  * frame whenever they differ. Pads are left out: the render does not read
  * them and a zeroed set keeps both sides comparable. Debug only; one line
  * per 60 hits so a callback that writes every frame cannot flood the log. */
+/* Slippi's wire desync checksum, gathered from the live game. This is a
+ * DIFFERENT value from frame_checksum above, on purpose: frame_checksum is our
+ * own stronger internal hash, while this one is the exact formula Dolphin
+ * computes (src/pc/slippi/slp_checksum.h) and is what a Slippi peer compares.
+ * The two must not be interchanged: Dolphin hard-aborts on a mismatch.
+ *
+ * Field mapping, from slippi-ssbm-asm StartEngineLoop.asm FN_COMPUTE_CHECKSUM:
+ *   action_state <- Fighter.motion_id          (CharacterData+0x10)
+ *   pos_x/pos_y  <- Fighter.cur_pos .x/.y      (CharacterData+0xB0/0xB4)
+ *   percent      <- Fighter.dmg.x1830_percent  (CharacterData+0x1830)
+ *   spawn_num    <- Fighter.x8_spawnNum        (CharacterData+0x8)
+ *   stocks       <- Player_GetStocks(slot)      (player static +0x8E)
+ * The two entity slots per player are primary + secondary (Sheik/Zelda,
+ * Ice Climbers' Nana). Like frame_checksum, only read while a fight is
+ * running: player slots hold dangling entity pointers between scenes. */
+uint32_t pc_slippi_wire_checksum(void) {
+    PcSlippiSlotState slots[PC_SLIPPI_SLOTS];
+    memset(slots, 0, sizeof slots);
+    if (!in_fight()) {
+        return pc_slippi_checksum(slots);
+    }
+    for (int slot = 0; slot < PC_SLIPPI_SLOTS; slot++) {
+        slots[slot].stocks = (uint8_t)Player_GetStocks(slot);
+        for (int idx = 0; idx < PC_SLIPPI_CHARS_PER_SLOT; idx++) {
+            HSD_GObj* gobj = Player_GetEntityAtIndex(slot, idx);
+            if (gobj == NULL || gobj->classifier != HSD_GOBJ_CLASS_FIGHTER) {
+                continue;
+            }
+            const Fighter* fp = GET_FIGHTER(gobj);
+            PcSlippiCharState* ch = &slots[slot].chars[idx];
+            ch->present = true;
+            ch->action_state = (uint32_t)fp->motion_id;
+            memcpy(&ch->pos_x_bits, &fp->cur_pos.x, 4);
+            memcpy(&ch->pos_y_bits, &fp->cur_pos.y, 4);
+            memcpy(&ch->percent_bits, &fp->dmg.x1830_percent, 4);
+            ch->spawn_num = (uint32_t)fp->x8_spawnNum;
+            ch->pos_x = fp->cur_pos.x;
+            ch->pos_y = fp->cur_pos.y;
+            ch->percent = fp->dmg.x1830_percent;
+        }
+    }
+    return pc_slippi_checksum(slots);
+}
+
 void pc_net_render_audit(bool after) {
     static int on = -1;
     static uint32_t before;
@@ -580,6 +651,10 @@ void record_state(const PADStatus* head, int32_t frame) {
         fprintf(s_state_log, "net: state %s\n", buf);
         log_state_bits(frame);
         det_trace_frame(frame);
+        uint32_t hurt[4];
+        hurt_hashes(hurt);
+        fprintf(s_state_log, "net: hurt f%d %08x %08x %08x %08x\n", frame, hurt[0], hurt[1], hurt[2],
+            hurt[3]);
         /* A harness SIGKILLs the run a moment after the divergence it was
          * waiting for, so the tail must already be on disc; every 8 frames
          * is one write syscall per 4 KB instead of four per frame. */

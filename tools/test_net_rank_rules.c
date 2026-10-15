@@ -36,6 +36,9 @@ int pc_net_peer_status(void) {
     return 0;
 }
 void pc_net_peer_status_clear(void) {}
+void pc_net_disconnect(void) {}
+void pc_net_match_stop(void) {}
+bool pc_net_match_slippi_ready(void) { return false; }
 unsigned pc_rank_session_stocks(void) {
     return tiebreak ? 1 : 4;
 }

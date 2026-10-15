@@ -170,6 +170,10 @@ uint32_t pc_net_seed(void) {
     return net.seed;
 }
 
+uint32_t pc_net_rng_offset(void) {
+    return net.rng_offset;
+}
+
 int pc_net_handshake_state(void) {
     return net.hs;
 }
@@ -300,6 +304,18 @@ static void unlock_restore(void) {
         pc_unlock_state_set(s_unlock_orig);
         pc_log_line("net: unlock state restored (%016llx)", (unsigned long long)s_unlock_orig);
     }
+}
+
+/* The Slippi CSS opens before any session (it is the lobby), and Slippi
+ * assumes everything is unlocked, so the flow pins the unlock surface while
+ * that screen is up and puts the player's own progress back when it leaves
+ * for the menu or a session disconnects (rules_restore also releases it). */
+void pc_net_unlock_pin(void) {
+    unlock_force();
+}
+
+void pc_net_unlock_release(void) {
+    unlock_restore();
 }
 
 /* Hash of the unlock state as read back out of the save data, not of the
@@ -719,9 +735,120 @@ static bool rules_ready(void) {
     return rules_values_invalid(&ru) == NULL;
 }
 
+/* Slippi direct-session setup: the host ships seed + start frame once the
+ * peer is connected, then marks its own handshake done; the guest waits for
+ * the setup callback (slp_setup_cb in net.c) to do the same. Rules validation
+ * is deliberately not repeated here -- both peers run the same build and the
+ * same unlocks -- so this is interim until M4's selections flow carries it. */
+/* Slippi's netplay ruleset. Its General Codes write these every frame
+ * (GALE01r2.ini: "Stock Mode", "4 Stocks", "8 Minutes", "No Items", "Singles
+ * Stages"; the output of tools/gecko_catalog.py), so whatever the player's own VS rules
+ * say, a Slippi peer plays stock mode, 4 stocks, 8 minutes, damage ratio 1.0,
+ * no handicap, no items and the singles stage set, with everything unlocked.
+ * Both peers apply the same constants, so no RULES message is needed and the
+ * local settings never reach the sim (a peer with 3 stocks would otherwise
+ * desync at the first KO). Restored with the rest at disconnect. */
+void pc_net_slippi_rules_force(bool frozen_stadium) {
+    const struct GamePrefs* p = gmMainLib_GetGamePrefs();
+    Rules ru;
+    memset(&ru, 0, sizeof ru);
+    ru.game = *gmMainLib_GetGameRules();
+    ru.game.force_main_menu = 0x00;
+    ru.game.bgm = 0x34;
+    ru.game.mode = 1;         /* stock */
+    ru.game.time_limit = 2;
+    ru.game.stock_count = 4;
+    ru.game.handicap = 0;
+    ru.game.damage_ratio = 10; /* 1.0x */
+    ru.game.stage_sel = 0;
+    ru.game.stock_time_limit = 8;
+    ru.game.friendly_fire = 1;
+    ru.game.pause = 1;
+    ru.game.score_display = 0;
+    ru.item_freq = 0xFF; /* items off */
+    ru.item_mask = p->item_mask;
+    ru.stage_mask = 0xE70000B0; /* Slippi's "Singles Stages" */
+    /* alt_stage_mode: Direct's Frozen Stadium toggle, else 0 (Stadium transforms). */
+    ru.frozen_stadium = frozen_stadium ? 1 : 0;
+    unlock_force();
+    rules_apply(&ru, true);
+}
+
+static void slp_direct(void) {
+    if (net.hs == HS_IDLE) {
+        if (!rules_ready()) {
+            /* Same wait as the custom path: the game has not filled its own
+             * rules in yet, so a host seed taken now could differ from the
+             * one the match actually runs with. */
+            uint64_t now = SDL_GetTicksNS();
+            if (s_direct_idle_ns == 0) {
+                s_direct_idle_ns = now;
+            } else if (now - s_direct_idle_ns > HS_TIMEOUT_MS * 1000000ull) {
+                net.hs = HS_FAILED;
+                pc_log_line("net: Slippi setup never started; the local rules never filled in");
+            }
+            return;
+        }
+        s_direct_idle_ns = 0;
+        if (!s_rules_on) {
+            pc_net_slippi_rules_force(false);
+        }
+        if (pc_net_slippi_setup_host()) {
+            net.hs_host = true;
+            net.hs = HS_PENDING;
+            s_hs_t0 = SDL_GetTicksNS();
+            net.seed = net.seed != 0 ? net.seed : *HSD_RandSeedPtr;
+            net.rng_offset = net.seed; /* until the selections flow supplies the decider's */
+            seed_apply();
+            net.start_frame = net.tick_frame + hs_lead();
+            if (pc_net_slippi_send_setup(net.seed, net.start_frame)) {
+                pc_log_line("net: Slippi setup sent seed=%u start_frame=%d", net.seed,
+                    net.start_frame);
+                /* The host needs no reply: ENet's reliable channel guarantees
+                 * delivery, and the guest applies the same seed/start. Done as
+                 * soon as it is queued. */
+                net.hs = HS_DONE;
+                net.ck_from = net.start_frame;
+                net.desync_reported = false;
+            }
+        } else {
+            net.hs_host = false;
+            net.hs = HS_PENDING;
+            s_hs_t0 = SDL_GetTicksNS();
+        }
+        return;
+    }
+    /* Pending: keep pumping (which delivers the setup) and time out if it
+     * never comes. A connected host that has not finished its own setup yet
+     * retries the send; ENet would resend anyway, but this covers the window
+     * before the peer connected. */
+    if (net.hs == HS_PENDING) {
+        if (net.hs_host && pc_net_slippi_conn_state() == 1) {
+            if (pc_net_slippi_send_setup(net.seed, net.start_frame)) {
+                net.hs = HS_DONE;
+                net.ck_from = net.start_frame;
+                net.desync_reported = false;
+            }
+        }
+        if (net.hs == HS_PENDING && SDL_GetTicksNS() - s_hs_t0 > HS_TIMEOUT_MS * 1000000ull) {
+            net.hs = HS_FAILED;
+            pc_log_line("net: Slippi setup timed out, no %s", net.hs_host ? "peer" : "setup");
+        }
+    }
+}
+
 void handshake_direct(void) {
     if (!net.direct || !net.active || net.hs == HS_DONE || net.hs == HS_FAILED) {
         s_direct_idle_ns = 0;
+        return;
+    }
+    /* Slippi transport: the custom RULES/READY rides the custom socket and
+     * cannot run here. Until M4's selections flow, a melee-pc direct session
+     * agrees the match with a small setup message (seed + start frame) on
+     * ENet's reliable channel. The host sends it; the guest's on_setup marks
+     * the handshake done. */
+    if (pc_net_slippi_active()) {
+        slp_direct();
         return;
     }
     if (net.hs == HS_IDLE) {

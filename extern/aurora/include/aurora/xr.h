@@ -68,6 +68,14 @@ void aurora_xr_set_placing(int mode);
  * Any thread. */
 void aurora_xr_reset_stage(void);
 
+/* Takes the current stage's placement as where every stage starts from now
+ * on (its own size applied), and forgets the per-stage placements made so
+ * far. A reset then returns a stage there instead of in front of the head.
+ * Any thread. */
+void aurora_xr_adopt_stage(void);
+/* Whether aurora_xr_adopt_stage has been called. Any thread. */
+bool aurora_xr_stage_adopted(void);
+
 /* The pictures shown while placing (aurora_xr_set_placing): 0 the how-to
  * cards, 1 the button legend, for Touch controllers; 2 and 3 the same for
  * tracked hands, shown instead while a hand is tracked. `rgba` is width x height straight-alpha

@@ -6,6 +6,9 @@
 #include "net_lan.h"
 #include "net_rank_session.h"
 #include "pc.h"
+#include "pc/slippi/slp_match.h"
+#include "pc/slippi/slp_msg.h"
+#include "pc/slippi/slp_user.h"
 #include <SDL3/SDL_clipboard.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_timer.h>
@@ -27,6 +30,7 @@ typedef int MatchSocket;
 
 extern const char* pc_get_net_name(void);
 extern int pc_get_net_port(void);
+extern int pc_match_local_port(void);
 extern const char* pc_lan_disc_id(void);
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((weak)) void pc_log_line(const char* fmt, ...) {
@@ -100,6 +104,32 @@ static uint64_t publication_deadline;
 static const char* publication_reason;
 static bool publication_record;
 static uint8_t publication_wire[PC_RANK_RECORD_BYTES];
+
+/* ---- Slippi matchmaking backend (M4) ----------------------------------
+ * Unranked and Direct are served by slp_match (ENet + JSON to mm.slippi.gg),
+ * not the DHT. The two backends share the pc_net_match_* surface: a search
+ * produces a peer, then pc_net_connect_slippi brings up the same game session
+ * the DHT path does. LAN never comes through here (gmonlinemode calls
+ * pc_lan_start directly). The Slippi backend is inert until
+ * pc_net_match_start is asked for Unranked/Direct, so the direct-dial path
+ * (pc_net_init) keeps whatever transport it chose. */
+static bool s_slippi_match;         /* this search is the Slippi backend */
+static PcSlippiMatch* s_slippi_search; /* the running search, else NULL */
+static PcSlippiTicket s_slippi_ticket;
+static char s_slippi_code[PC_SLIPPI_CONNECT_CODE_MAX]; /* our connect code, for the lobby */
+static uint32_t s_slippi_seed;
+static uint8_t s_pick_char, s_pick_color; /* the CSS pick, set before the search */
+static bool s_pick_set;
+static bool s_sel_sent;
+/* Direct's lobby: a game was played on this link and it stayed up, so the
+ * next game's selections wait for the player to lock in (Slippi sends them
+ * from the CSS, not at connect). */
+static bool s_direct_lobby;
+static bool s_my_stage_selected; /* what our last selections said */
+static uint8_t s_my_alt;
+static uint64_t s_link_started_ms;
+static PcNetSlippiMatch s_slippi_built;
+#define SLIPPI_CONNECT_TIMEOUT_MS 20000       /* seed for the Slippi game session */
 static int64_t public_sequence(const uint8_t* p) {
     return (int64_t)((uint32_t)p[16] << 24 | (uint32_t)p[17] << 16 | (uint32_t)p[18] << 8 | p[19]);
 }
@@ -387,7 +417,109 @@ static void contacts_note(const char* code) {
         pc_log_line("match: could not save %s", path);
 }
 
+/* ---- Slippi side: the signed-in account and the codes it has played ---- */
+
+/* The Online menu asks about the account every frame it draws, and loading it
+ * reads a file, so look again at most once a second. */
+static PcSlippiAccount s_account_cached;
+static uint64_t s_account_at;
+
+void pc_net_match_slippi_refresh(void) {
+    s_account_at = 0; /* the account just changed: look again now */
+}
+
+static bool slp_account_cached(PcSlippiAccount* out) {
+    uint64_t now = SDL_GetTicks();
+    if (s_account_at == 0 || now - s_account_at > 1000) {
+        memset(&s_account_cached, 0, sizeof s_account_cached);
+        pc_slippi_account_load(&s_account_cached, true);
+        s_account_at = now ? now : 1;
+    }
+    *out = s_account_cached;
+    return s_account_cached.logged_in;
+}
+
+bool pc_net_match_slippi_ready(void) {
+    PcSlippiAccount a;
+    return slp_account_cached(&a);
+}
+
+const char* pc_net_match_slippi_code(void) {
+    static char code[PC_SLIPPI_CONNECT_CODE_MAX];
+    PcSlippiAccount a;
+    snprintf(code, sizeof code, "%s", slp_account_cached(&a) ? a.connect_code : "");
+    return code;
+}
+
+const char* pc_net_match_slippi_name(void) {
+    static char name[PC_SLIPPI_DISPLAY_NAME_MAX];
+    PcSlippiAccount a;
+    snprintf(name, sizeof name, "%s", slp_account_cached(&a) ? a.display_name : "");
+    return name;
+}
+
+static PcNetContact s_slippi_contacts[PC_NET_CONTACTS_MAX];
+static int s_slippi_contact_count = -1; /* -1: not loaded */
+
+static void slippi_contacts_path(char* out, size_t n) {
+    snprintf(out, n, "%s/contacts.txt", pc_slippi_user_dir());
+}
+
+static void slippi_contacts_load(void) {
+    if (s_slippi_contact_count >= 0)
+        return;
+    s_slippi_contact_count = 0;
+    char path[1300];
+    slippi_contacts_path(path, sizeof path);
+    FILE* f = fopen(path, "r");
+    if (!f)
+        return;
+    char line[128];
+    while (s_slippi_contact_count < PC_NET_CONTACTS_MAX && fgets(line, sizeof line, f)) {
+        PcNetContact c = {0};
+        long long when = 0;
+        if (sscanf(line, "%17s %lld", c.code, &when) != 2 || !pc_slippi_connect_code_valid(c.code))
+            continue;
+        c.last_played = (int64_t)when;
+        s_slippi_contacts[s_slippi_contact_count++] = c;
+    }
+    fclose(f);
+}
+
+static void slippi_contacts_note(const char* code) {
+    slippi_contacts_load();
+    if (!pc_slippi_connect_code_valid(code))
+        return;
+    int at = s_slippi_contact_count < PC_NET_CONTACTS_MAX ? s_slippi_contact_count
+                                                           : PC_NET_CONTACTS_MAX - 1;
+    for (int i = 0; i < s_slippi_contact_count; i++)
+        if (!strcmp(s_slippi_contacts[i].code, code)) {
+            at = i;
+            break;
+        }
+    if (at == s_slippi_contact_count)
+        s_slippi_contact_count++;
+    memmove(&s_slippi_contacts[1], &s_slippi_contacts[0], (size_t)at * sizeof s_slippi_contacts[0]);
+    snprintf(s_slippi_contacts[0].code, sizeof s_slippi_contacts[0].code, "%s", code);
+    s_slippi_contacts[0].last_played = (int64_t)time(NULL);
+    char path[1300];
+    slippi_contacts_path(path, sizeof path);
+    SDL_CreateDirectory(pc_slippi_user_dir());
+    FILE* f = fopen(path, "w");
+    if (!f)
+        return;
+    for (int i = 0; i < s_slippi_contact_count; i++)
+        fprintf(f, "%s %lld\n", s_slippi_contacts[i].code, (long long)s_slippi_contacts[i].last_played);
+    fclose(f);
+}
+
 int pc_net_match_contacts(PcNetContact* out, int max) {
+    if (pc_net_match_slippi_ready()) {
+        slippi_contacts_load();
+        int n = s_slippi_contact_count < max ? s_slippi_contact_count : max;
+        memcpy(out, s_slippi_contacts, (size_t)n * sizeof *out);
+        return n;
+    }
     contacts_load();
     int n = contact_count < 0 ? 0 : contact_count < max ? contact_count : max;
     memcpy(out, contacts, (size_t)n * sizeof *out);
@@ -399,6 +531,16 @@ int pc_net_match_contacts(PcNetContact* out, int max) {
 bool pc_net_match_clipboard_code(char out[18]) {
     if (!SDL_HasClipboardText())
         return false;
+    if (pc_net_match_slippi_ready()) {
+        char* clip = SDL_GetClipboardText();
+        char code[PC_SLIPPI_CONNECT_CODE_MAX];
+        bool good = clip && pc_slippi_connect_code_normalize(clip, code, sizeof code) &&
+                    strcmp(code, pc_net_match_slippi_code()) != 0;
+        SDL_free(clip);
+        if (good)
+            snprintf(out, 18, "%s", code);
+        return good;
+    }
     char* text = SDL_GetClipboardText();
     char suffix[9], name[9];
     bool ok = text && pc_identity_parse_code(text, suffix, name) &&
@@ -410,7 +552,8 @@ bool pc_net_match_clipboard_code(char out[18]) {
 }
 
 bool pc_net_match_copy_code(void) {
-    const char* code = pc_net_match_local_code();
+    const char* code = pc_net_match_slippi_ready() ? pc_net_match_slippi_code()
+                                                   : pc_net_match_local_code();
     return code[0] && SDL_SetClipboardText(code);
 }
 
@@ -421,12 +564,23 @@ void pc_net_match_progress(PcNetMatchProgress* p) {
     p->candidates = candidates_tried;
     p->found = have_peer || state == PC_MATCH_CONNECT || state == PC_MATCH_READY;
     p->calling = mode == PC_MATCH_DIRECT && target_suffix[0];
+    if (s_slippi_match) {
+        /* The Slippi search has no DHT to join: it is ready once the
+         * matchmaking server answers the login. */
+        p->slippi = true;
+        p->calling = mode == PC_MATCH_DIRECT;
+        p->network_ready = s_slippi_search == NULL ||
+                           pc_slippi_match_state(s_slippi_search) != PC_SLIPPI_MATCH_INITIALIZING;
+    }
 }
 
 static void ready(void) {
     state = PC_MATCH_READY;
     pc_net_set_datagram_handler(NULL);
-    contacts_note(opponent);
+    if (s_slippi_match)
+        slippi_contacts_note(opponent);
+    else
+        contacts_note(opponent);
 }
 
 static bool accept_ack(const MatchAck* a) {
@@ -602,10 +756,263 @@ static void receive(const void* data, size_t n, const struct pc_dht_endpoint* ep
         accept_ack(data);
 }
 
+/* ---- Slippi backend helpers ------------------------------------------ */
+
+/* True when this mode is served by Slippi rather than the DHT. Ranked is out
+ * of scope (plan §7). pc_slippi_match_start needs a signed-in account for
+ * both Unranked and Direct, so without one the search stays on the DHT. */
+static bool slp_mode(enum PcNetMatchMode m) {
+    if (m == PC_MATCH_RANKED)
+        return false;
+    PcSlippiAccount account;
+    return slp_account_cached(&account);
+}
+
+/* Parse "ip:port". False on anything else (no port, empty host). */
+static bool split_addr(const char* addr, char* ip, size_t ip_cap, uint16_t* port) {
+    const char* colon = addr ? strrchr(addr, ':') : NULL;
+    if (colon == NULL || colon == addr)
+        return false;
+    size_t n = (size_t)(colon - addr);
+    if (n >= ip_cap)
+        return false;
+    memcpy(ip, addr, n);
+    ip[n] = 0;
+    *port = (uint16_t)atoi(colon + 1);
+    return *port != 0;
+}
+
+/* Start the Slippi search. The account comes from our store (the launcher's
+ * auth surface loaded it). */
+static bool slp_start(enum PcNetMatchMode m, const char* code) {
+    PcSlippiAccount account;
+    memset(&account, 0, sizeof account);
+    pc_slippi_account_load(&account, true);
+    int mode = m == PC_MATCH_UNRANKED ? PC_SLIPPI_MODE_UNRANKED : PC_SLIPPI_MODE_DIRECT;
+    snprintf(s_slippi_code, sizeof s_slippi_code, "%s", account.connect_code);
+    s_slippi_search = pc_slippi_match_start(
+        &account, mode, code ? code : "", (uint16_t)pc_match_local_port());
+    if (s_slippi_search == NULL)
+        return false;
+    s_slippi_match = true;
+    s_slippi_seed = 0;
+    started_ms = SDL_GetTicks();
+    state = PC_MATCH_SEARCH;
+    return true;
+}
+
+/* Poll the Slippi search; once it yields a ticket, connect the game session
+ * and move to the connect phase. Called from pc_net_match_poll. */
+static void slp_poll(void) {
+    if (s_slippi_search == NULL)
+        return;
+    PcSlippiMatchState st = pc_slippi_match_state(s_slippi_search);
+    if (st == PC_SLIPPI_MATCH_SEARCHING || st == PC_SLIPPI_MATCH_INITIALIZING)
+        return;
+    if (st == PC_SLIPPI_MATCH_ERROR) {
+        fail(pc_slippi_match_error(s_slippi_search));
+        return;
+    }
+    if (st != PC_SLIPPI_MATCH_SUCCESS)
+        return;
+    if (!pc_slippi_match_result(s_slippi_search, &s_slippi_ticket)) {
+        fail("matchmaking returned no ticket");
+        return;
+    }
+    /* The ticket names one local and one remote for 1v1 (the only shape we
+     * play). local_player_index is the local port - 1; the remote is the
+     * other player. is_host is the decider, who sends the setup. */
+    if (s_slippi_ticket.player_count != 2 || s_slippi_ticket.remote_count != 1) {
+        fail("only 1v1 Slippi matches are supported");
+        return;
+    }
+    int local = s_slippi_ticket.local_player_index;
+    int remote = local == 0 ? 1 : 0;
+    host = s_slippi_ticket.is_host;
+    snprintf(target, sizeof target, "%.17s", s_slippi_ticket.players[local].connect_code);
+    snprintf(opponent, sizeof opponent, "%.17s", s_slippi_ticket.players[remote].connect_code);
+    char ip[PC_SLIPPI_ADDR_MAX];
+    uint16_t port = 0;
+    if (!split_addr(s_slippi_ticket.remote_addresses[0], ip, sizeof ip, &port)) {
+        fail("bad opponent address");
+        return;
+    }
+    pc_log_line("match: Slippi ticket %s: %s:%u, local port P%d, %s", s_slippi_ticket.match_id,
+        ip, port, local + 1, host ? "decider" : "guest");
+    /* Only the link opens here; the rollback engine starts with the match. */
+    if (!pc_net_slippi_link_open(ip, port, local, s_slippi_ticket.local_port)) {
+        fail("Slippi connect failed");
+        return;
+    }
+    s_sel_sent = false;
+    s_link_started_ms = SDL_GetTicks();
+    start_frame = -1;
+    state = PC_MATCH_CONNECT;
+}
+
+/* Our selections: the pick and a stage behaviour, Slippi's lock-in.
+ * PC_SLIPPI_STAGE_RANDOM rolls one of the ticket's stages (Unranked) or the
+ * standard six (Direct's first game): each client rolls and the lower port's
+ * wins. PC_SLIPPI_STAGE_NONE says no stage (Direct's winner takes the
+ * loser's); any other value is the external stage id picked. The first game
+ * locks in at connect, random, as Slippi's CSS does when the search starts. */
+static bool slp_send_selections_as(int stage, uint8_t alt) {
+    PcSlippiSelections s;
+    pc_slippi_selections_reset(&s);
+    s.player_idx = (uint8_t)s_slippi_ticket.local_player_index;
+    s.character_id = s_pick_char;
+    s.character_color = s_pick_color;
+    s.character_selected = true;
+    if (stage == PC_SLIPPI_STAGE_RANDOM) {
+        uint16_t ids[16];
+        int n = pc_net_match_slippi_stages(ids, 16);
+        static const uint16_t standard[] = {2, 3, 8, 28, 31, 32};
+        uint32_t r = (uint32_t)SDL_GetTicksNS();
+        r ^= r >> 13;
+        r *= 0x9E3779B1u;
+        s.stage_id = n > 0 ? ids[(r >> 8) % (uint32_t)n] : standard[(r >> 8) % 6];
+        s.stage_selected = true;
+    } else if (stage != PC_SLIPPI_STAGE_NONE) {
+        s.stage_id = (uint16_t)stage;
+        s.stage_selected = true;
+        s.alt_stage_mode = alt;
+    }
+    s.rng_offset = (uint32_t)(SDL_GetTicksNS() * 2654435761u >> 7) % 0xFFFFu;
+    if (!pc_net_slippi_link_send_selections(&s))
+        return false;
+    s_sel_sent = true;
+    s_my_stage_selected = s.stage_selected;
+    s_my_alt = s.alt_stage_mode;
+    s_slippi_seed = s.rng_offset; /* kept for the decider's choice below */
+    s_slippi_built.rng_offset = s.rng_offset;
+    s_slippi_built.stage = s.stage_id; /* ours, until theirs arrives */
+    pc_log_line("match: sent selections: char %u color %u stage %u%s alt %u rng %u",
+        s.character_id, s.character_color, s.stage_id, s.stage_selected ? "" : " (none)",
+        s.alt_stage_mode, s.rng_offset);
+    return true;
+}
+
+static void slp_send_selections(void) {
+    slp_send_selections_as(PC_SLIPPI_STAGE_RANDOM, 0);
+}
+
+/* Both sides' selections are in: build the match the same way on both. The
+ * stage is the first selected one by port, the seed offset is the decider's,
+ * the alt stage mode only counts in Direct. */
+static void slp_build_match(const PcSlippiSelections* theirs) {
+    int local = s_slippi_ticket.local_player_index;
+    int remote = local ? 0 : 1;
+    PcNetSlippiMatch* m = &s_slippi_built;
+    uint16_t my_stage = m->stage;
+    uint32_t my_rng = m->rng_offset;
+    memset(m, 0, sizeof *m);
+    m->local_player = local;
+    m->character[local] = s_pick_char;
+    m->color[local] = s_pick_color;
+    m->character[remote] = theirs->character_id;
+    m->color[remote] = theirs->character_color;
+    for (int port = 0; port < 2; port++) {
+        const char* src = s_slippi_ticket.players[port == local ? local : remote].display_name;
+        size_t n = 0;
+        for (; src[n] != '\0' && n < sizeof m->name[port] - 1; n++) {
+            unsigned char c = (unsigned char) src[n];
+            m->name[port][n] = c >= 0x20 && c < 0x7F ? (char) c : '?';
+        }
+        m->name[port][n] = '\0';
+    }
+    bool direct = mode == PC_MATCH_DIRECT;
+    uint16_t stage = 0x1F;
+    uint8_t alt = 0;
+    for (int port = 0; port < 2; port++) {
+        bool ours = port == local;
+        bool chosen = ours ? s_my_stage_selected : theirs->stage_selected;
+        if (chosen) {
+            stage = ours ? my_stage : theirs->stage_id;
+            alt = ours ? s_my_alt : theirs->alt_stage_mode;
+            break;
+        }
+    }
+    m->stage = stage;
+    m->alt_stage_mode = direct ? alt : 0;
+    m->decider = s_slippi_ticket.is_host;
+    m->rng_offset = m->decider ? my_rng : theirs->rng_offset;
+    if (theirs->character_id >= 26 || s_pick_char >= 26) {
+        fail("The character selected is not allowed in this mode");
+        return;
+    }
+    if (mode == PC_MATCH_UNRANKED) {
+        uint16_t ids[16];
+        int n = pc_net_match_slippi_stages(ids, 16);
+        bool ok = n == 0;
+        for (int i = 0; i < n; i++)
+            ok |= ids[i] == stage;
+        if (!ok) {
+            fail("The opponent chose a stage that is not allowed");
+            return;
+        }
+    }
+    pc_log_line("match: Slippi match P%d: chars %u/%u colors %u/%u stage %u alt %u rng %u (%s)",
+        local + 1, m->character[0], m->character[1], m->color[0], m->color[1], m->stage,
+        m->alt_stage_mode, m->rng_offset, m->decider ? "decider" : "guest");
+    ready();
+}
+
+bool pc_net_match_slippi_rearm(void) {
+    if (!s_slippi_match || mode != PC_MATCH_DIRECT || state != PC_MATCH_READY ||
+        !pc_net_slippi_unadopt())
+        return false;
+    s_direct_lobby = true;
+    s_sel_sent = false;
+    memset(&s_slippi_built, 0, sizeof s_slippi_built);
+    state = PC_MATCH_CONNECT;
+    pc_log_line("match: Direct lobby with %s: next game", opponent);
+    return true;
+}
+
+bool pc_net_match_slippi_lobby(void) {
+    return s_slippi_match && s_direct_lobby && state == PC_MATCH_CONNECT;
+}
+
+bool pc_net_match_slippi_lock_in(int stage, uint8_t alt) {
+    if (!pc_net_match_slippi_lobby() || s_sel_sent || pc_net_slippi_link_state() != 1)
+        return false;
+    return slp_send_selections_as(stage, alt);
+}
+
+bool pc_net_match_slippi_locked_in(void) {
+    return s_slippi_match && s_sel_sent;
+}
+
+bool pc_net_match_slippi_match(PcNetSlippiMatch* out) {
+    if (!s_slippi_match || state != PC_MATCH_READY)
+        return false;
+    *out = s_slippi_built;
+    return true;
+}
+
+void pc_net_match_set_slippi_pick(uint8_t character, uint8_t color) {
+    s_pick_char = character;
+    s_pick_color = color;
+    s_pick_set = true;
+}
+
 bool pc_net_match_start(enum PcNetMatchMode m, const char* code) {
     pc_net_match_stop();
     failure = NULL;
     mode = m;
+    if (slp_mode(m)) {
+        s_direct_lobby = false;
+        start_frame = -1;
+        seed = 0;
+        opponent[0] = 0;
+        have_peer = false;
+        handshake_done = false;
+        if (!slp_start(m, code)) {
+            fail("could not start Slippi matchmaking");
+            return false;
+        }
+        return true;
+    }
     start_frame = -1;
     seed = 0;
     opponent[0] = 0;
@@ -674,6 +1081,10 @@ bool pc_net_match_start(enum PcNetMatchMode m, const char* code) {
 void pc_net_match_poll(void) {
     uint64_t now = SDL_GetTicks();
     if (state == PC_MATCH_SEARCH) {
+        if (s_slippi_match) {
+            slp_poll();
+            return;
+        }
         pc_dht_poll();
         if (state != PC_MATCH_SEARCH)
             return;
@@ -744,6 +1155,26 @@ void pc_net_match_poll(void) {
                                                 "Could not connect to opponent. Searching again...";
         }
     } else if (state == PC_MATCH_CONNECT) {
+        if (s_slippi_match) {
+            /* The link is up or coming up; selections cross it and the match
+             * is built from both. The rollback engine is not running yet. */
+            pc_net_slippi_link_pump();
+            int link = pc_net_slippi_link_state();
+            if (link == 2) {
+                fail("Connection to the opponent was lost");
+            } else if (link == 0) {
+                if (SDL_GetTicks() - s_link_started_ms > SLIPPI_CONNECT_TIMEOUT_MS)
+                    fail("Could not connect to opponent");
+            } else {
+                if (!s_sel_sent && !s_direct_lobby)
+                    slp_send_selections();
+                PcSlippiSelections theirs;
+                if (s_sel_sent && pc_net_slippi_link_remote_selections(&theirs) &&
+                    theirs.character_selected)
+                    slp_build_match(&theirs);
+            }
+            return;
+        }
         pc_net_poll();
         if (!handshake_done)
             handshake_done = host ? pc_net_host_match(seed, &start_frame) :
@@ -795,6 +1226,13 @@ void pc_net_match_poll(void) {
     }
 }
 void pc_net_match_stop(void) {
+    if (s_slippi_search != NULL) {
+        pc_slippi_match_stop(s_slippi_search);
+        s_slippi_search = NULL;
+    }
+    pc_net_slippi_link_close();
+    s_slippi_match = false;
+    s_direct_lobby = false;
     pc_dht_stop();
     publication = 0;
     publication_reason = NULL;
@@ -820,7 +1258,21 @@ int32_t pc_net_match_start_frame(void) {
 uint32_t pc_net_match_seed(void) {
     return seed;
 }
+bool pc_net_match_is_slippi(void) {
+    return s_slippi_match;
+}
+int pc_net_match_slippi_stages(uint16_t* out, int max) {
+    /* Only Unranked takes the server's list: Direct players pick. */
+    if (!s_slippi_match || mode != PC_MATCH_UNRANKED || !s_slippi_ticket.ok)
+        return 0;
+    int n = s_slippi_ticket.stage_count < max ? s_slippi_ticket.stage_count : max;
+    for (int i = 0; i < n; i++)
+        out[i] = s_slippi_ticket.stages[i];
+    return n;
+}
 const char* pc_net_match_local_code(void) {
+    if (s_slippi_match && s_slippi_code[0])
+        return s_slippi_code;
     return load_identity() ? identity.code : "";
 }
 const char* pc_net_match_profile_error(void) {
@@ -835,6 +1287,20 @@ enum PcNetMatchMode pc_net_match_mode(void) {
 }
 const char* pc_net_match_opponent_code(void) {
     return opponent;
+}
+const char* pc_net_match_opponent_name(void) {
+    static char name[24];
+    if (!s_slippi_match || !s_slippi_ticket.ok || s_slippi_ticket.player_count != 2)
+        return opponent;
+    const char* src =
+        s_slippi_ticket.players[s_slippi_ticket.local_player_index ? 0 : 1].display_name;
+    size_t n = 0;
+    for (; src[n] != '\0' && n < sizeof name - 1; n++) {
+        unsigned char c = (unsigned char)src[n];
+        name[n] = c >= 0x20 && c < 0x7F ? (char)c : '?';
+    }
+    name[n] = '\0';
+    return n > 0 ? name : opponent;
 }
 const PcNetIdentity* pc_net_match_identity(void) {
     return &identity;

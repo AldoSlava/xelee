@@ -20,6 +20,49 @@
 #include "../src/pc/net.c"
 #include "../src/sysdolphin/baselib/rumble.c"
 
+/* net.c routes a Slippi session through the ENet driver and its adapter; the
+ * harness never opens one (net_slippi_active() stays false), so these are
+ * weak, inert stand-ins (the CMake build links the real driver, which wins) that keep the link closed over the real net.c. */
+__attribute__((weak)) bool pc_slippi_adapter_connected(const PcSlippiAdapter* a) { (void) a; return false; }
+__attribute__((weak)) void pc_slippi_adapter_init(PcSlippiAdapter* a, PcSlippiNet* n, PcSlippiFrameFn f,
+                            PcSlippiSetupFn s, void* u) { (void) a, (void) n, (void) f, (void) s, (void) u; }
+__attribute__((weak)) bool pc_slippi_adapter_pump(PcSlippiAdapter* a, uint64_t t) { (void) a, (void) t; return false; }
+__attribute__((weak)) bool pc_slippi_adapter_remote_checksum(const PcSlippiAdapter* a, int r, int32_t* f, uint32_t* v) {
+    (void) a, (void) r, (void) f, (void) v; return false;
+}
+__attribute__((weak)) bool pc_slippi_adapter_resend_local(PcSlippiAdapter* a) { (void) a; return false; }
+__attribute__((weak)) bool pc_slippi_adapter_send_local(PcSlippiAdapter* a, int32_t f, const void* w, uint64_t t) {
+    (void) a, (void) f, (void) w, (void) t; return false;
+}
+__attribute__((weak)) bool pc_slippi_adapter_send_setup(PcSlippiAdapter* a, uint32_t s, int32_t f) {
+    (void) a, (void) s, (void) f; return false;
+}
+__attribute__((weak)) void pc_slippi_adapter_set_checksum(PcSlippiAdapter* a, int32_t f, uint32_t c) { (void) a, (void) f, (void) c; }
+__attribute__((weak)) void pc_slippi_adapter_start_game(PcSlippiAdapter* a, uint64_t t) { (void) a, (void) t; }
+__attribute__((weak)) int32_t pc_slippi_adapter_time_offset_us(const PcSlippiAdapter* a) { (void) a; return 0; }
+__attribute__((weak)) int pc_slippi_adapter_status(const PcSlippiAdapter* a) { (void) a; return 0; }
+__attribute__((weak)) bool pc_slippi_checksum_is_hard_desync(uint32_t l, uint32_t r) { return l != r; }
+__attribute__((weak)) bool pc_slippi_net_connect(PcSlippiNet* n, const char* ip, uint16_t p) { (void) n, (void) ip, (void) p; return false; }
+__attribute__((weak)) PcSlippiNet* pc_slippi_net_create(const PcSlippiSessionConfig* c, uint16_t p, const PcSlippiNetCallbacks* cb) {
+    (void) c, (void) p, (void) cb; return NULL;
+}
+__attribute__((weak)) void pc_slippi_net_destroy(PcSlippiNet* n) { (void) n; }
+__attribute__((weak)) void pc_slippi_net_disconnect(PcSlippiNet* n, int r) { (void) n, (void) r; }
+__attribute__((weak)) bool pc_slippi_net_global_init(void) { return true; }
+__attribute__((weak)) void pc_slippi_net_listen(PcSlippiNet* n) { (void) n; }
+__attribute__((weak)) bool pc_slippi_net_send_rel(PcSlippiNet* n, uint8_t t, const void* p, int l) {
+    (void) n, (void) t, (void) p, (void) l; return false;
+}
+__attribute__((weak)) void pc_slippi_net_set_callbacks(PcSlippiNet* n, const PcSlippiNetCallbacks* cb) { (void) n, (void) cb; }
+__attribute__((weak)) void pc_slippi_net_stats(const PcSlippiNet* n, PcSlippiNetStats* o) { (void) n; memset(o, 0, sizeof *o); }
+__attribute__((weak)) bool pc_slippi_net_poll(PcSlippiNet* n, uint64_t t) { (void) n, (void) t; return false; }
+__attribute__((weak)) int pc_slippi_net_status(const PcSlippiNet* n) { (void) n; return 0; }
+__attribute__((weak)) bool pc_slippi_net_send_selections(PcSlippiNet* n, const PcSlippiSelections* s) { (void) n, (void) s; return false; }
+__attribute__((weak)) bool pc_slippi_net_remote_selections(const PcSlippiNet* n, int r, PcSlippiSelections* o) {
+    (void) n, (void) r, (void) o; return false;
+}
+__attribute__((weak)) void pc_slippi_selections_reset(PcSlippiSelections* s) { memset(s, 0, sizeof *s); }
+
 #include <stdarg.h>
 
 /* not <assert.h>: the decomp's debug.h owns __assert, and -DNDEBUG must not blind this */
@@ -234,6 +277,14 @@ void on_rel(const Rel* r, int n) {
 void on_rel_ack(const RelAck* k) {
     (void)k;
 }
+/* net.c's Slippi receive path calls rel_dispatch (net_reliable.c). This test
+ * drives the legacy transport, so a stub is enough. */
+bool rel_dispatch(uint8_t type, const void* payload, int len) {
+    (void)type;
+    (void)payload;
+    (void)len;
+    return true;
+}
 void rel_reset(void) {}
 
 /* net_handshake.c / net_sync.c */
@@ -333,6 +384,11 @@ uint32_t frame_checksum(const PADStatus* head) {
     (void)head;
     return 0;
 }
+/* net_snapshot.c: the Slippi wire checksum, referenced by net.c's Slippi
+ * send path. This test drives the legacy transport, so a stub is enough. */
+uint32_t pc_slippi_wire_checksum(void) {
+    return 0;
+}
 void record_state(const PADStatus* head, int32_t frame) {
     (void)head;
     (void)frame;
@@ -378,6 +434,12 @@ struct GameSceneInfo* gm_804D6720;
  * harness never runs a match, so a default-constructed one at speed 1.0 is
  * what the tests want. */
 StartMeleeData gmVsMelee_StartData = {.rules = {.game_speed = 1.0F}};
+/* net.c reads the match result to confirm a Slippi game over; no harness
+ * match ever ends. */
+static VsSceneState s_vs_state;
+VsSceneState* gmVs_GetSceneState(void) {
+    return &s_vs_state;
+}
 PadLibData HSD_PadLibData;
 static u32 s_seed_val;
 u32* HSD_RandSeedPtr = &s_seed_val;

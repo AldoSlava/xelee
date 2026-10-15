@@ -16,5 +16,8 @@ typedef enum {
 
 /* 3DD9A0 */ extern GameModeState gm_Mode_Vs_States[];
 /* 3DDA78 */ extern GameModeState gm_Mode_DebugVs_States[];
+#ifdef TARGET_PC
+void gmVsMode_PlaceDummyEnter(GameModeState*); /* the Slippi Place Stage scene */
+#endif
 
 #endif

@@ -81,6 +81,7 @@ src/melee/ft/ftmotionstates.c
 src/melee/ft/ftparts.c
 src/melee/ft/ftstarrodswing.c
 src/melee/ft/ftswing.c
+src/melee/ft/ftucf.c
 src/melee/ft/ftwaitanim.c
 src/melee/ft/ftwalkcommon.c
 src/melee/ft/ftwalljump.c
@@ -880,12 +881,14 @@ src/melee/mn/mnmainrule.c
 src/melee/mn/mnname.c
 src/melee/mn/mnnamenew.c
 src/melee/mn/mnonline.c
+src/melee/mn/mnonlinecss.c
 src/melee/mn/mnonlinelobby.c
 src/melee/mn/mnruleplus.c
 src/melee/mn/mnsnap.c
 src/melee/mn/mnsound.c
 src/melee/mn/mnsoundtest.c
 src/melee/mn/mnstagesel.c
+src/melee/mn/mnstagesel_slippi.c
 src/melee/mn/mnstagesw.c
 src/melee/mn/mnvibration.c
 src/melee/mp/mpcoll.c

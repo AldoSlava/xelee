@@ -37,8 +37,17 @@
 #include <sysdolphin/baselib/wobj.h>
 
 #ifdef TARGET_PC
+#include "pc/net_match.h"
+#include "pc/pc.h"
 #include "pc/widescreen.h"
 #include <stdlib.h>
+#endif
+
+#ifdef TARGET_PC
+/* Slippi's online VS splash is this scene with the stage text and the stage
+ * progress row hidden (its VSScreen patches); set by gmonlinemode.c. */
+bool gm_vs_splash_online;
+static HSD_JObj* gm_vs_splash_hud;
 #endif
 
 static struct {
@@ -387,6 +396,41 @@ void fn_80184AB8(HSD_GObj* arg0)
 
     jobj = arg0->hsd_obj;
     HSD_JObjAnimAll(jobj);
+#ifdef TARGET_PC
+    if (gm_vs_splash_online && getenv("MELEE_SPLASH_DUMP")) {
+        static bool dumped;
+        if (!dumped && lbl_804735A8.x38 == 5) {
+            int m, id;
+            HSD_JObj* roots[2] = { jobj, gm_vs_splash_hud };
+            dumped = true;
+            for (m = 0; m < 2; m++) {
+                for (id = 0; id < 60; id++) {
+                    HSD_JObj* j = NULL;
+                    lb_80011E24(roots[m], &j, id, -1);
+                    if (j != NULL) {
+                        Vec3 t;
+                        HSD_JObjGetTranslation(j, &t);
+                        pc_log_line("splashjoint m%d %3d x=%7.2f y=%7.2f z=%7.2f flags=%08x dobj=%d", m, id,
+                                    t.x, t.y, t.z, (unsigned) j->flags,
+                                    !(j->flags & (JOBJ_INSTANCE | JOBJ_SPLINE | JOBJ_PTCL)) &&
+                                        j->u.dobj != NULL);
+                    }
+                }
+            }
+        }
+    }
+    if (gm_vs_splash_online) {
+        /* HideStageText: the letters of "STAGE" and its number. */
+        static const u8 hidden[] = { 9, 10, 11, 12, 13, 0x12, 0x13 };
+        size_t k;
+        for (k = 0; k < sizeof hidden; k++) {
+            lb_80011E24(jobj, &sp110, hidden[k], -1);
+            if (sp110 != NULL) {
+                HSD_JObjSetFlagsAll(sp110, JOBJ_HIDDEN);
+            }
+        }
+    }
+#endif
 
     if (lbl_804735A8.x38 < 0x8CU) {
         lbl_804735A8.x38 = (u16) (lbl_804735A8.x38 + 1);
@@ -526,6 +570,19 @@ void fn_8018504C(void)
         lbl_804735A8.x4[4],
         (f32) (lbl_804735A8.x3A + ((lbl_8047368C.xEE * 0x32) - new_var)));
     HSD_JObjAnimAll(lbl_804735A8.x4[4]);
+#ifdef TARGET_PC
+    if (gm_vs_splash_online && gm_vs_splash_hud != NULL) {
+        /* HideStageDisplay: the whole stage progress row. */
+        int j;
+        for (j = 0; j < 0x1B; j++) {
+            HSD_JObj* part = NULL;
+            lb_80011E24(gm_vs_splash_hud, &part, j, -1);
+            if (part != NULL) {
+                HSD_JObjSetFlags(part, JOBJ_HIDDEN);
+            }
+        }
+    }
+#endif
     if ((lbl_804735A8.x38 == 0x2D) && (lbl_8047368C.model_scale_kind == 3)) {
         switch (lbl_8047368C.game_type) {
         case 1:
@@ -967,6 +1024,71 @@ void fn_80186080(void)
 
 static char lbl_804D40B0[] = "IrRdMap";
 
+#ifdef TARGET_PC
+/* Slippi's InitVsSplash: a coloured "P1" and the player's name in the top
+ * corners (the local player on the left), and the stage's name at the bottom.
+ * Positions are Slippi's, in the canvas's 640x480 units. */
+static void splashOnlineText(void)
+{
+    static const GXColor player_color[2] = { { 0xE5, 0x4C, 0x4C, 0xFF }, { 0x4B, 0x4C, 0xE5, 0xFF } };
+    static const GXColor white = { 0xFF, 0xFF, 0xFF, 0xFF };
+    static const struct {
+        int id;
+        const char* name;
+    } stages[] = {
+        /* External stage ids; Direct can play any of them. */
+        { 2, "Fountain of Dreams" }, { 3, "Pokemon Stadium" },    { 4, "Peach's Castle" },
+        { 5, "Kongo Jungle" },       { 6, "Brinstar" },           { 7, "Corneria" },
+        { 8, "Yoshi's Story" },      { 9, "Onett" },              { 10, "Mute City" },
+        { 11, "Rainbow Cruise" },    { 12, "Jungle Japes" },      { 13, "Great Bay" },
+        { 14, "Hyrule Temple" },     { 15, "Brinstar Depths" },   { 16, "Yoshi's Island" },
+        { 17, "Green Greens" },      { 18, "Fourside" },          { 19, "Mushroom Kingdom" },
+        { 20, "Mushroom Kingdom II" }, { 22, "Venom" },           { 23, "Poke Floats" },
+        { 24, "Big Blue" },          { 25, "Icicle Mountain" },   { 27, "Flat Zone" },
+        { 28, "Dream Land" },        { 29, "Yoshi's Island" },    { 30, "Kongo Jungle" },
+        { 31, "Battlefield" },       { 32, "Final Destination" },
+    };
+    PcNetSlippiMatch sm;
+    HSD_Text* text;
+    int port, k, e;
+    if (!pc_net_match_slippi_match(&sm)) {
+        return;
+    }
+    for (port = 0; port < 2; port++) {
+        const float x = port == sm.local_player ? 60.0f : 420.0f;
+        char label[4];
+        text = HSD_SisLib_803A6754(0, 0);
+        text->default_kerning = 1;
+        text->default_alignment = 0;
+        text->font_size.x = 1.0f;
+        text->font_size.y = 1.0f;
+        snprintf(label, sizeof label, "P%d", port + 1);
+        e = HSD_SisLib_803A6B98(text, x, 80.0f, "%s", label);
+        HSD_SisLib_803A7548(text, e, 0.5f, 0.5f);
+        HSD_SisLib_803A74F0(text, e, (GXColor*) &player_color[port]);
+        e = HSD_SisLib_803A6B98(text, x + 36.0f, 80.0f, "%s", sm.name[port]);
+        HSD_SisLib_803A7548(text, e, 0.5f, 0.5f);
+        HSD_SisLib_803A74F0(text, e, (GXColor*) &white);
+    }
+    for (k = 0; k < (int) (sizeof stages / sizeof stages[0]); k++) {
+        if (stages[k].id == sm.stage) {
+            text = HSD_SisLib_803A6754(0, 0);
+            text->default_kerning = 1;
+            text->default_alignment = 1;
+            text->font_size.x = 1.0f;
+            text->font_size.y = 1.0f;
+            /* Slippi's CheckAltStageName: Direct's Frozen Stadium says so. */
+            e = HSD_SisLib_803A6B98(text, 320.0f, 440.0f, "%s%s",
+                                    sm.stage == 3 && sm.alt_stage_mode ? "Frozen " : "",
+                                    stages[k].name);
+            HSD_SisLib_803A7548(text, e, 0.6f, 0.6f);
+            HSD_SisLib_803A74F0(text, e, (GXColor*) &white);
+            break;
+        }
+    }
+}
+#endif
+
 void fn_801861B8(void)
 {
     HSD_Text* text;
@@ -976,6 +1098,11 @@ void fn_801861B8(void)
 
     HSD_SisLib_803A611C(0, NULL, 9, 0x14, 0, 0xE, 0, 0x12);
     HSD_SisLib_803A62A0(0, "SdIntro.dat", "SIS_IntroData");
+#ifdef TARGET_PC
+    if (gm_vs_splash_online) {
+        splashOnlineText();
+    }
+#endif
 
     for (i = 0; i < (s32) lbl_8047368C.xEF; i++) {
         lbl_804735A8.x4[7 + i] = (HSD_JObj*) HSD_SisLib_803A6754(0, 0);
@@ -1095,6 +1222,9 @@ static inline void gm_80186634_SetupModel(void)
     HSD_GObjObject_80390A70(gobj, HSD_GObj_JObjKind, jobj);
     GObj_SetupGXLink(gobj, HSD_GObj_JObjCallback, 0xC, 0);
     HSD_GObj_SetupProc(gobj, (HSD_GObjEvent) (Event) fn_8018504C, 0x11);
+#ifdef TARGET_PC
+    gm_vs_splash_hud = jobj;
+#endif
     gm_8016895C(jobj, GM_SCENE_MODEL(lbl_804D6600, 0), 0);
     HSD_JObjReqAnimAll(jobj, (f32) ((lbl_8047368C.xEE - 1) * 0x32));
     HSD_JObjAnimAll(jobj);

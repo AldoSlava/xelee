@@ -107,6 +107,10 @@ void pc_frame_boundary(void) {
      * matcher owns them until both peers cross its READY barrier. */
     if (pc_net_match_state(NULL) == PC_MATCH_READY)
         pc_rank_session_poll();
+    /* A Slippi link outside a match (Direct's lobby: the stage select, the
+     * splash) is serviced every frame, whatever scene is up, so the peer
+     * never times it out. A no-op with no link. */
+    pc_net_slippi_link_pump();
 #ifdef __EMSCRIPTEN__
     extern void pc_audio_pump(void);
     pc_audio_pump();
