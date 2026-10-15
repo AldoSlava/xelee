@@ -322,10 +322,12 @@ static uint32_t pending_pipelines() {
 
 /* The platform, as a class on the launcher's <body>: launcher.rcss hides
  * what it has no use for (.no-quest, .no-mobile). The Quest panel only
- * launches the immersive game, which presents through OpenXR, so the window,
- * sync and backend settings never reach it; its eyes take their samples from
- * AURORA_XR_MSAA rather than the anti-aliasing preference; and the updater
- * knows only the phone APK, which would replace the Quest build. */
+ * launches the immersive game, which presents through OpenXR, so it keeps
+ * none of the flat-screen settings (window, sync, backend, resolution,
+ * aspect, HUD layout, post-processing, FPS counter, pause camera); its eyes
+ * take their samples from AURORA_XR_MSAA rather than the anti-aliasing
+ * preference; and the updater knows only the phone APK, which would replace
+ * the Quest build. pc_launcher_configure pins those to their defaults. */
 #if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
 constexpr const char* platform_class = "quest";
 constexpr bool has_updater = false;
@@ -371,6 +373,8 @@ class Launcher final : public Rml::EventListener {
     uint32_t last_pending = 0;
     // The settings row holding the focus, lit as Melee lights its options.
     Rml::Element* current_row = nullptr;
+    // Where the pointer last moved, so only a real move steers the cursor.
+    int pointer_x = -1, pointer_y = -1;
 
     Rml::Element* element(const char* id) {
         if (std::strcmp(id, "fullscreen") == 0) {
@@ -490,10 +494,20 @@ class Launcher final : public Rml::EventListener {
         } else if (const int i = tab_index(e->GetId()); i >= 0 && i != tab)
             select_tab(i);  // the cursor on a category opens it, as Melee previews
     }
-    /* A pointer resting on a control moves the cursor there, so the mouse,
-     * the Quest's laser and the pad share one highlight. Not while a text
-     * field holds the focus: that would pull it out from under the typing. */
-    void hover(Rml::Element* e) {
+    /* A pointer moving onto a control moves the cursor there, so the mouse,
+     * the Quest's laser and the pad share one highlight. Only a move: when the
+     * layout shifts under a resting pointer (a fullscreen toggle, a page
+     * change) RmlUi hovers whatever is now beneath it, and taking that as
+     * pointing pulled the focus away from the keys. Not while a text field
+     * holds the focus either: that would pull it out from under the typing. */
+    void hover(Rml::Event& event) {
+        const int x = event.GetParameter<int>("mouse_x", -1);
+        const int y = event.GetParameter<int>("mouse_y", -1);
+        if (x == pointer_x && y == pointer_y)
+            return;
+        pointer_x = x;
+        pointer_y = y;
+        auto* e = event.GetTargetElement();
         while (e && e != document && e->GetTagName() != "button" &&
                !(e->GetTagName() == "input" && is_slider(e->GetId())))
             e = e->GetParentNode();
@@ -998,7 +1012,7 @@ public:
         document->AddEventListener(Rml::EventId::Change, this);
         // Focus does not bubble; the capture pass still reaches the document.
         document->AddEventListener(Rml::EventId::Focus, this, true);
-        document->AddEventListener(Rml::EventId::Mouseover, this);
+        document->AddEventListener(Rml::EventId::Mousemove, this);
         /* MELEE_LAUNCHER_PLATFORM=desktop|mobile|quest lays the launcher out
          * as another platform does, to check a phone's or the Quest panel's
          * from a desktop. Only the layout follows it. */
@@ -1025,7 +1039,7 @@ public:
         document->RemoveEventListener(Rml::EventId::Keydown, this);
         document->RemoveEventListener(Rml::EventId::Change, this);
         document->RemoveEventListener(Rml::EventId::Focus, this, true);
-        document->RemoveEventListener(Rml::EventId::Mouseover, this);
+        document->RemoveEventListener(Rml::EventId::Mousemove, this);
         auto* context = document->GetContext();
         document->Close();
         context->Update();
@@ -1033,8 +1047,8 @@ public:
     void ProcessEvent(Rml::Event& event) override {
         if (event.GetId() == Rml::EventId::Focus) {
             describe(event.GetTargetElement());
-        } else if (event.GetId() == Rml::EventId::Mouseover) {
-            hover(event.GetTargetElement());
+        } else if (event.GetId() == Rml::EventId::Mousemove) {
+            hover(event);
         } else if (event.GetId() == Rml::EventId::Click) {
             auto* target = event.GetTargetElement();
             while (target && target != document) {
@@ -1352,6 +1366,24 @@ public:
 extern "C" void pc_launcher_configure(AuroraConfig* config) {
     config_path = std::filesystem::path(config->userPath ? config->userPath : ".") / "launcher.cfg";
     prefs = launcher::load_preferences(config_path);
+#if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
+    /* The Quest launcher hides these (platform_class, launcher.rml's
+     * no-quest rows), so a value saved before they were hidden could never be
+     * changed back: both the panel and the immersive game run with the
+     * defaults. */
+    const launcher::Preferences defaults;
+    prefs.fullscreen = defaults.fullscreen;
+    prefs.vsync = defaults.vsync;
+    prefs.backend = defaults.backend;
+    prefs.msaa = defaults.msaa;
+    prefs.render_scale = defaults.render_scale;
+    prefs.widescreen = defaults.widescreen;
+    prefs.hud_mode = defaults.hud_mode;
+    prefs.filter_mode = defaults.filter_mode;
+    prefs.fps = defaults.fps;
+    prefs.free_camera = defaults.free_camera;
+    prefs.check_updates = false;
+#endif
     pc_net_set_input_delay(prefs.net_delay);
     if (prefs.install_id == 0) {
         prefs.install_id = std::random_device{}() | uint64_t(std::random_device{}()) << 32 | 1;

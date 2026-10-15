@@ -190,9 +190,9 @@ def quest_layout(win, proc, config):
     without scrolling."""
     key(win, "Down")
     key(win, "Return")  # Graphics
-    key(win, "Right")   # first row shown: Internal resolution (no display mode or sync)
-    key(win, "Return")
-    assert "render_scale 1\n" in config.read_text(), "the first Quest row was not Internal resolution"
+    key(win, "Right")   # first row shown: Anisotropic filtering (the flat-screen rows are hidden)
+    key(win, "Return")  # 16x -> 1x
+    assert "anisotropy 1\n" in config.read_text(), "the first Quest row was not Anisotropic filtering"
     key(win, "Escape")
     key(win, "Down", 3)  # Audio -> Gameplay -> Online (Controls is hidden)
     screenshot(win, "quest-online")
