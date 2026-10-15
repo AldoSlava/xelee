@@ -20,7 +20,9 @@
 #pragma GCC diagnostic pop
 #include <xxhash.h>
 
+#include <SDL3/SDL_thread.h>
 #include <SDL3/SDL_timer.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,6 +79,63 @@ typedef struct FrameRecord {
 static FrameRecord s_rep_next; /* one record of lookahead: see the scene hold */
 static bool s_rep_next_ok;
 
+/* MELEE_NET_DET_TRACE=lo-hi (with MELEE_NET_STATE_LOG): for frames lo..hi,
+ * every RNG draw ("net: rnd f<N> <thread> <caller> <seed after>", the caller
+ * as an offset from HSD_Rand so two ASLR'd runs compare) and each fighter's
+ * whole Fighter struct as hex ("net: fdump f<N> p<slot> ..."). The run-to-run
+ * determinism hunt: two runs' draw sequences part at the first call site that
+ * reads something the recording does not pin. */
+extern void (*pc_rand_trace)(void* caller, u32 seed_after);
+static int32_t s_det_lo = -1, s_det_hi = -2;
+static int32_t s_det_frame;
+static SDL_ThreadID s_det_game_tid;
+
+static void det_rand_trace(void* caller, u32 seed_after) {
+    SDL_ThreadID t = SDL_GetCurrentThreadID();
+    fprintf(s_state_log, "net: rnd f%d %s %+lld %08x\n", s_det_frame, t == s_det_game_tid ? "g" : "X",
+        (long long)((intptr_t)caller - (intptr_t)&HSD_Rand), seed_after);
+}
+
+static void det_trace_open(void) {
+    const char* d = getenv("MELEE_NET_DET_TRACE");
+    if (d == NULL || s_state_log == NULL || sscanf(d, "%d-%d", &s_det_lo, &s_det_hi) != 2) {
+        s_det_lo = -1;
+        s_det_hi = -2;
+        return;
+    }
+    fprintf(s_state_log, "net: detlayout f-1 sizeof=%zu cpu=%zu input=%zu HSD_Rand=%p\n", sizeof(Fighter),
+        offsetof(Fighter, cpu), offsetof(Fighter, input), (void*)&HSD_Rand);
+    pc_log_line("net: determinism trace frames %d-%d", s_det_lo, s_det_hi);
+}
+
+static void det_trace_frame(int32_t frame) {
+    if (s_det_hi < s_det_lo) {
+        return;
+    }
+    s_det_frame = frame;
+    s_det_game_tid = SDL_GetCurrentThreadID();
+    bool on = frame >= s_det_lo && frame <= s_det_hi;
+    pc_rand_trace = on ? det_rand_trace : NULL;
+    if (!on) {
+        return;
+    }
+    static char hex[2 * sizeof(Fighter) + 1];
+    for (int slot = 0; in_fight() && slot < 4; slot++) {
+        HSD_GObj* gobj = Player_GetEntity(slot);
+        if (gobj == NULL || gobj->classifier != HSD_GOBJ_CLASS_FIGHTER) {
+            continue;
+        }
+        const unsigned char* b = (const unsigned char*)GET_FIGHTER(gobj);
+        static const char digits[] = "0123456789abcdef";
+        for (size_t i = 0; i < sizeof(Fighter); i++) {
+            hex[2 * i] = digits[b[i] >> 4];
+            hex[2 * i + 1] = digits[b[i] & 15];
+        }
+        hex[2 * sizeof(Fighter)] = '\0';
+        fprintf(s_state_log, "net: fdump f%d p%d %s\n", frame, slot, hex);
+    }
+}
+
 void record_open(void) {
     const char* rec = getenv("MELEE_NET_RECORD");
     const char* rep = getenv("MELEE_NET_REPLAY");
@@ -119,6 +178,7 @@ void record_open(void) {
         }
         pc_log_line("net: %s state log %s", s_state_log ? "writing" : "cannot open", sl);
     }
+    det_trace_open();
 }
 
 bool record_active(void) {
@@ -479,6 +539,7 @@ void record_state(const PADStatus* head, int32_t frame) {
     if (s_state_log != NULL) {
         fprintf(s_state_log, "net: state %s\n", buf);
         log_state_bits(frame);
+        det_trace_frame(frame);
         /* A harness SIGKILLs the run a moment after the divergence it was
          * waiting for, so the tail must already be on disc; every 8 frames
          * is one write syscall per 4 KB instead of four per frame. */
