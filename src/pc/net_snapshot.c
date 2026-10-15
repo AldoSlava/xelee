@@ -292,6 +292,33 @@ uint32_t frame_checksum(const PADStatus* head) {
     return ck;
 }
 
+/* One fighter's hurtbox geometry: every capsule's world end points and its
+ * bone's world matrix. Hit detection reads exactly these and the checksum
+ * covers none of them; the state log prints one hash per fighter per frame
+ * (net: hurt) so two runs can be compared on them. */
+static uint32_t hurt_hash(const Fighter* fp) {
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < fp->hurt_capsules_len && i < 15; i++) {
+        const HurtCapsule* c = &fp->hurt_capsules[i].capsule;
+        h = fnv1a(h, &c->a_pos, sizeof c->a_pos);
+        h = fnv1a(h, &c->b_pos, sizeof c->b_pos);
+        if (c->bone != NULL) {
+            h = fnv1a(h, c->bone->mtx, sizeof c->bone->mtx);
+        }
+    }
+    return h;
+}
+
+static void hurt_hashes(uint32_t out[4]) {
+    for (int slot = 0; slot < 4; slot++) {
+        out[slot] = 0;
+        HSD_GObj* gobj = in_fight() ? Player_GetEntity(slot) : NULL;
+        if (gobj != NULL && gobj->classifier == HSD_GOBJ_CLASS_FIGHTER) {
+            out[slot] = hurt_hash(GET_FIGHTER(gobj));
+        }
+    }
+}
+
 /* MELEE_NET_RENDER_AUDIT=1: the render must not write what the simulation
  * reads. A rollback resim and a time-sync advance run ticks with no render
  * between them, so anything a draw callback writes into sim state is written
@@ -520,6 +547,10 @@ void record_state(const PADStatus* head, int32_t frame) {
     if (s_state_log != NULL) {
         fprintf(s_state_log, "net: state %s\n", buf);
         log_state_bits(frame);
+        uint32_t hurt[4];
+        hurt_hashes(hurt);
+        fprintf(s_state_log, "net: hurt f%d %08x %08x %08x %08x\n", frame, hurt[0], hurt[1], hurt[2],
+            hurt[3]);
         /* A harness SIGKILLs the run a moment after the divergence it was
          * waiting for, so the tail must already be on disc; every 8 frames
          * is one write syscall per 4 KB instead of four per frame. */
