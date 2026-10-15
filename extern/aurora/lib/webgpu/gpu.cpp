@@ -833,9 +833,7 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
     dawnInstanceDescriptor.nextInChain = &instanceTogglesDescriptor;
     dawnInstanceDescriptor.backendValidationLevel = dawn::native::BackendValidationLevel::Disabled;
     dawnInstanceDescriptor.SetLoggingCallback(wgpu_log);
-#ifdef TRACY_ENABLE
     dawnInstanceDescriptor.platform = tracy_dawn_platform();
-#endif
     instanceDescriptor.nextInChain = &dawnInstanceDescriptor;
 #elif defined(WEBGPU_DAWN)
     // dawn::native::DawnInstanceDescriptor is unusable from MinGW against the MSVC-built prebuilt

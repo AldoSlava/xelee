@@ -1,5 +1,7 @@
 #include <cctype>
+#include <chrono>
 
+#include "../dawn/TracyPlatform.hpp"
 #include "../gfx/hash.hpp"
 #include "../gfx/types.hpp"
 
@@ -2816,8 +2818,13 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config, const gfx::RenderTar
   if (device != webgpu::g_device.Get()) { modules.clear(); device = webgpu::g_device.Get(); }
   if (auto it = modules.find(hash); it != modules.end()) return it->second;
 #endif
+  const auto genStart = std::chrono::steady_clock::now();
   const auto shaderSource = build_shader_source(config, normalAttachment, layout.viewCount, layout.xrSoftClip != 0,
                                                  layout.xrMotion, layout.xrBatch);
+  webgpu::record_compile_stat("aurora.BuildWGSL",
+                              static_cast<int>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                   std::chrono::steady_clock::now() - genStart)
+                                                   .count()));
   wgpu::ShaderSourceWGSL wgslDescriptor{};
   wgslDescriptor.code = shaderSource.c_str();
   const auto label = fmt::format("GX Shader {:x}", hash);

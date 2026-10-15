@@ -5,6 +5,7 @@ EM_JS(void, browser_graphics_progress, (unsigned done, unsigned total), {
   Module.onGraphicsPreparation?.(done, total);
 });
 #endif
+#include "../dawn/TracyPlatform.hpp"
 #include "pipeline_cache.hpp"
 
 #include "clear.hpp"
@@ -426,6 +427,9 @@ static std::atomic_uint32_t g_statCreated{0};
 static std::atomic_uint64_t g_statCreateNs{0};
 static std::atomic_uint64_t g_statCreateMaxNs{0};
 static absl::flat_hash_set<PipelineRef> g_demandedPipelines; // guarded by g_pipelineMutex
+// Every pipeline a draw asked for, built or not: what a cold cache must
+// compile before the scenes played so far run without skipped draws.
+static absl::flat_hash_set<PipelineRef> g_drawnPipelines; // guarded by g_pipelineMutex
 
 static wgpu::RenderPipeline create_timed(const NewPipelineCallback& create) {
 #if defined(__ANDROID__)
@@ -451,19 +455,22 @@ static wgpu::RenderPipeline create_timed(const NewPipelineCallback& create) {
 uint32_t pipelines_created() noexcept { return g_statCreated.load(std::memory_order_relaxed); }
 
 static void log_pipeline_stats() {
-  size_t demanded;
+  size_t demanded, drawn;
   {
     std::lock_guard lock{g_pipelineMutex};
     demanded = g_demandedPipelines.size();
+    drawn = g_drawnPipelines.size();
   }
   const uint32_t created = g_statCreated.load();
   const double totalMs = static_cast<double>(g_statCreateNs.load()) / 1e6;
   const auto dawn = webgpu::cache_stats();
-  Log.info("pipelines: {} created in {:.0f} ms (avg {:.1f} ms, max {:.1f} ms), {} needed by a draw before ready; "
+  Log.info("pipelines: {} created in {:.0f} ms (avg {:.1f} ms, max {:.1f} ms), {} needed by a draw before ready, {} drawn; "
            "Dawn cache: {} hits ({} KiB), {} misses, {} stores ({} KiB)",
            created, totalMs, created != 0 ? totalMs / created : 0.0,
-           static_cast<double>(g_statCreateMaxNs.load()) / 1e6, demanded, dawn.hits, dawn.hitBytes / 1024,
+           static_cast<double>(g_statCreateMaxNs.load()) / 1e6, demanded, drawn, dawn.hits, dawn.hitBytes / 1024,
            dawn.misses, dawn.stores, dawn.storeBytes / 1024);
+  if (const auto line = webgpu::compile_stats_line(); !line.empty())
+    Log.info("pipeline compile time: {}", line);
 }
 
 template <typename PipelineConfig>
@@ -594,8 +601,10 @@ static PipelineRef find_pipeline_impl(PipelineRef runtimeKey, NewPipelineCallbac
   {
     std::scoped_lock guard{g_pipelineMutex};
     auto pipelineIt = g_pipelines.find(runtimeKey);
-    if (pipelineIt == g_pipelines.end() && priority != PipelinePriority::Background) {
-      g_demandedPipelines.insert(runtimeKey);
+    if (priority != PipelinePriority::Background) {
+      g_drawnPipelines.insert(runtimeKey);
+      if (pipelineIt == g_pipelines.end())
+        g_demandedPipelines.insert(runtimeKey);
     }
     if (pipelineIt != g_pipelines.end()) {
       pipelineReady = true;
