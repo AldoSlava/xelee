@@ -8,12 +8,14 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor);
 wgpu::BindGroup find_bind_group(BindGroupRef id);
 wgpu::Sampler sampler_ref(const wgpu::SamplerDescriptor& descriptor);
 // A cached bind group's texture views and samplers by binding (bindless
-// batching: a draw's textures, from its texture bind group). Raw handles,
-// alive while the bind group is cached. False if it's not cached.
+// batching: a draw's textures, from its texture bind group). References: the
+// main thread can expire the bind group while the render worker still holds
+// a copy, and a view only that bind group kept would die under it. False if
+// it's not cached.
 constexpr uint32_t MaxBindGroupResources = 16;
 struct BindGroupResources {
-  WGPUTextureView views[MaxBindGroupResources] = {};
-  WGPUSampler samplers[MaxBindGroupResources] = {};
+  wgpu::TextureView views[MaxBindGroupResources];
+  wgpu::Sampler samplers[MaxBindGroupResources];
 };
 bool bind_group_resources(BindGroupRef id, BindGroupResources& out);
 

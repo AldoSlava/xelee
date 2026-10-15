@@ -95,8 +95,8 @@ BindGroupRef bind_group_ref(const WGPUBindGroupDescriptor& descriptor) {
     for (size_t i = 0; i < descriptor.entryCount; ++i) {
       const auto& e = descriptor.entries[i];
       if (e.binding < MaxBindGroupResources) {
-        entry.resources.views[e.binding] = e.textureView;
-        entry.resources.samplers[e.binding] = e.sampler;
+        entry.resources.views[e.binding] = wgpu::TextureView(e.textureView);
+        entry.resources.samplers[e.binding] = wgpu::Sampler(e.sampler);
       }
     }
     g_cachedBindGroups.emplace(id, std::move(entry));

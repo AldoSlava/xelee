@@ -369,8 +369,8 @@ bool bindless_slots(const DrawData& d, uint32_t* out) {
   if (!d.bindGroups.textureBindGroup || !gfx::bind_group_resources(d.bindGroups.textureBindGroup, res))
     res = {};
   for (uint32_t i = 0; i < 8; ++i) {
-    const WGPUTextureView view = res.views[i * 2] != nullptr ? res.views[i * 2] : empty_texture_view();
-    const WGPUSampler sampler = res.samplers[i * 2 + 1] != nullptr ? res.samplers[i * 2 + 1] : empty_sampler();
+    const WGPUTextureView view = res.views[i * 2] ? res.views[i * 2].Get() : empty_texture_view();
+    const WGPUSampler sampler = res.samplers[i * 2 + 1] ? res.samplers[i * 2 + 1].Get() : empty_sampler();
     out[i] = sBindless.slot(view, false);
     out[8 + i] = sBindless.slot(sampler, true);
     if (out[i] == UINT32_MAX || out[8 + i] == UINT32_MAX)
