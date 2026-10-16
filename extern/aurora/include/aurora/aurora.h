@@ -136,12 +136,6 @@ typedef struct {
    * it); AURORA_XR_RAYCAST and AURORA_XR_SURFACE_SHADOW override it.
    */
   bool xrNoStageShadow;
-  /*
-   * The room's colour grade toward the stage: its strength, or 0 for the
-   * default (1) and below 0 for none. AURORA_XR_GRADE and
-   * AURORA_XR_GRADE_STRENGTH override it.
-   */
-  float xrRoomGrade;
 } AuroraConfig;
 
 typedef struct {

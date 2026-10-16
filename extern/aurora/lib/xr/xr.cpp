@@ -622,6 +622,12 @@ float env_float(const char* name, float def) {
   return end != v ? f : def;
 }
 
+// The room's colour grade (T5) is off unless asked for, and has no launcher
+// setting: how dark a room should go depends on how lit it is, which it
+// doesn't know yet. AURORA_XR_GRADE=1 turns it on, as does the grade panel
+// (AURORA_XR_GRADE_PANEL=1), which is for tuning it.
+bool grade_wanted() { return env_flag("AURORA_XR_GRADE", env_flag("AURORA_XR_GRADE_PANEL", false)); }
+
 // How often the GPU timing and dynamic resolution lines are logged:
 // AURORA_XR_LOG_PERIOD seconds, 10 by default (1 lines them up with what
 // is on screen when profiling a stage).
@@ -762,7 +768,7 @@ bool create_instance() {
     exts.push_back(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
   // The room's grade by colour LUT; without it, brightness, contrast and
   // saturation (AURORA_XR_GRADE_LUT=0 forces those, AURORA_XR_GRADE=0 none).
-  B.hasColorLutExt &= B.hasPassthroughExt && env_flag("AURORA_XR_GRADE", g_config.xrRoomGrade >= 0.f) &&
+  B.hasColorLutExt &= B.hasPassthroughExt && grade_wanted() &&
                       env_float("AURORA_XR_GRADE_LUT", 16.f) >= 2.f;
   if (B.hasColorLutExt)
     exts.push_back(XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
@@ -4394,7 +4400,8 @@ uint32_t sanitize_layers(const XrCompositionLayerBaseHeader** layers, uint32_t c
 // builds the LUTs and sets the styles; the XR thread only says whether a
 // fight shows over the room.
 //
-// AURORA_XR_GRADE=0 turns it off; AURORA_XR_GRADE_STRENGTH (1) scales every
+// Off by default (grade_wanted): AURORA_XR_GRADE=1 turns it on;
+// AURORA_XR_GRADE_STRENGTH (1) scales every
 // grade's departure from none; AURORA_XR_GRADE_FADE (1 s) is the fade's
 // length; AURORA_XR_GRADE_LUT (16, up to 32 and the runtime's limit; 0:
 // brightness and saturation instead) the LUT's size; AURORA_XR_GRADE_LOG=1
@@ -4419,11 +4426,9 @@ struct GradeSettings {
 const GradeSettings& grade_settings() {
   static const GradeSettings s = [] {
     GradeSettings s;
-    // The launcher's Room color grade: Off (< 0), Subtle, Normal (0: 1) or Strong.
-    const float host = g_config.xrRoomGrade;
-    s.on = env_flag("AURORA_XR_GRADE", host >= 0.f);
+    s.on = grade_wanted();
     s.log = env_flag("AURORA_XR_GRADE_LOG", false);
-    s.strength = std::clamp(env_float("AURORA_XR_GRADE_STRENGTH", host > 0.f ? host : 1.f), 0.f, 3.f);
+    s.strength = std::clamp(env_float("AURORA_XR_GRADE_STRENGTH", 1.f), 0.f, 3.f);
     s.fade = std::max(env_float("AURORA_XR_GRADE_FADE", 1.f), 0.05f);
     // A power of two (the extension requires it), within its limit.
     const uint32_t want = static_cast<uint32_t>(std::clamp(env_float("AURORA_XR_GRADE_LUT", 16.f), 0.f, 32.f));

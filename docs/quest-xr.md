@@ -1550,8 +1550,9 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_SHADOW_ALPHA` | 0.7 | The shadow's opacity with the stage resting on the surface; it falls as R²/(R²+gap²) |
 | `AURORA_XR_SHADOW_SPREAD` | 0.5 | How much the shadow widens per footprint radius of gap |
 | `AURORA_XR_SURFACE_LOG` | 0 | 1 logs the surface casts once a second while they run (ray statuses, consensus height, spread, coverage, gap, shadow) and the rays' timing every 10 s |
-| `AURORA_XR_GRADE` | 1 | 0: no room grade (passthrough tinted toward the stage's palette during fights): blind A/B |
-| `AURORA_XR_GRADE_STRENGTH` | 1 | Scales every stage's grade away from none. Overrides the launcher's Room color grade (Subtle 0.5, Normal 1, Strong 1.5; Off is `AURORA_XR_GRADE=0`) |
+| `AURORA_XR_GRADE` | 0 | 1: the room grade (passthrough tinted toward the stage's palette during fights). Off by default and not in the launcher: how dark a room should go depends on how lit it already is, which nothing measures yet |
+| `AURORA_XR_GRADE_PANEL` | 0 | 1: the grade (as `AURORA_XR_GRADE=1`) and a panel in paused fights with HSL sliders for the stage's tint and the room's saturation (laser and trigger); each change is logged as an `s_grades` row |
+| `AURORA_XR_GRADE_STRENGTH` | 1 | Scales every stage's grade away from none |
 | `AURORA_XR_GRADE_FADE` | 1 | Seconds the grade takes to fade in (fight start, hold let go) and out (fight end) |
 | `AURORA_XR_GRADE_LUT` | 16 | Colour LUT size (power of two, up to 32 and the runtime's limit); 0 uses brightness and saturation instead (no tint) |
 | `AURORA_XR_GRADE_LOG` | 0 | 1 logs the grade's LUT builds and fades |

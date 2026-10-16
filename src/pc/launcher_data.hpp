@@ -51,10 +51,8 @@ struct Preferences {
     // size (80-130), or 0 for dynamic resolution; and Application SpaceWarp.
     int xr_resolution = 0;
     bool xr_spacewarp = true;
-    // Quest, mixed reality: the stage's contact shadow on the real surface
-    // and the room's colour grade (0 off, 1 subtle, 2 normal, 3 strong).
+    // Quest, mixed reality: the stage's contact shadow on the real surface.
     bool xr_shadow = true;
-    int xr_room_grade = 2;
     uint64_t install_id = 0;  // random once per install (LAN host election); 0 = not yet
 };
 DiscInfo inspect_disc(const std::string& path);
