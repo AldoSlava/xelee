@@ -2863,6 +2863,11 @@ struct Hand {
   float u = 0.f, v = 0.f;
   bool clicking = false;
   bool backing = false; // pressing the Back button
+  // The room grade panel (paused fights): the laser is on it, or this hand
+  // drags one of its sliders; then the arena isn't grabbed. Meters along the
+  // laser to the panel.
+  bool onPanel = false;
+  float panelHit = -1.f;
 };
 
 struct Grab {
@@ -3233,7 +3238,7 @@ void update_grab(Target target, bool active) {
     end_grab();
     return;
   }
-  const auto pressed = [](const Hand& h) { return h.valid && h.held && !h.wasHeld; };
+  const auto pressed = [](const Hand& h) { return h.valid && h.held && !h.wasHeld && !h.onPanel; };
   for (Hand& hand : G.hands)
     hand.engaged &= hand.valid && hand.held;
   // A press inside the box or with the laser on the arena takes hold of it;
@@ -3606,7 +3611,7 @@ void build_pointer_layers(PointerLayers& out, bool onTargetOnly = false) {
     // screen's picture a smaller one, smaller still while it clicks.
     const XrVector3f dz = vnorm(B.head - end);
     const XrVector3f dx = vnorm(vcross({0.f, 1.f, 0.f}, dz));
-    const float size = hand.on != Hand::On::Picture ? 0.02f : hand.clicking ? 0.01f : 0.014f;
+    const float size = hand.onPanel ? 0.01f : hand.on != Hand::On::Picture ? 0.02f : hand.clicking ? 0.01f : 0.014f;
     if (vlen(dx) > 0.5f)
       add_pointer_quad(out, B.dotSwapchain, kDotSize, kDotSize, end, quat_from_axes(dx, vcross(dz, dx), dz),
                        {size, size}, color);
@@ -4432,11 +4437,24 @@ const GradeSettings& grade_settings() {
 struct GradeShared {
   std::mutex mutex;
   std::condition_variable cv;
-  RoomGrade grade;   // the current stage's (aurora_xr_set_room_grade)
+  RoomGrade grade;   // the current stage's: the game's, or the panel's in its place
   uint64_t seq = 0;  // bumped with every new grade
   bool on = false;   // a fight shows over the room
   bool stop = false;
+  RoomGrade game;    // the game's for the current stage (aurora_xr_set_room_grade)
+  int stage = -1;    // aurora_xr_set_stage's
+  std::unordered_map<int, RoomGrade> panel; // set on the grade panel, by stage
 } g_grade;
+
+// The grade shown from now on. g_grade.mutex held.
+void set_grade_locked(const RoomGrade& grade) {
+  if (grade.r == g_grade.grade.r && grade.g == g_grade.grade.g && grade.b == g_grade.grade.b &&
+      grade.saturation == g_grade.grade.saturation)
+    return;
+  g_grade.grade = grade;
+  ++g_grade.seq;
+  g_grade.cv.notify_one();
+}
 std::thread g_gradeThread;
 // The passthrough's start, pause and styles, from the XR thread and the worker.
 std::mutex g_passthroughMutex;
@@ -4813,6 +4831,374 @@ void build_placing_layers(PlacingLayers& out, int mode) {
   }
 }
 
+// ---------------------------------------------------------------- XR thread: the room grade panel
+//
+// For tuning a stage's room grade by eye (AURORA_XR_GRADE_PANEL=1, a debug
+// aid): while a fight is paused in mixed reality, a panel floats to the
+// right of where the head looked as the pause began. Its sliders are the
+// tint as a colour in HSL (hue, tint: its saturation, light: its lightness;
+// that colour is the gains per channel) and the room's own saturation. A
+// laser on the panel and the trigger (a pinch for a tracked hand) drag a
+// slider, and the room follows within about 100 ms. What it sets replaces
+// the game's grade for that stage until the app quits; Reset gives the
+// game's back. Each change is logged as a row for s_grades
+// (src/pc/xr_scene.c). AURORA_XR_GRADE_PANEL_POS "dx,dy,dz,width"
+// (0.3,-0.15,-0.55,0.36): where it floats against the head, in meters.
+
+struct Hsl {
+  float h = 0.f, s = 0.f, l = 1.f; // hue in degrees
+};
+
+// Gains of 0 to 1 as HSL. A grey keeps `hue`, so the hue slider stays put.
+Hsl rgb_to_hsl(float r, float g, float b, float hue) {
+  r = std::clamp(r, 0.f, 1.f);
+  g = std::clamp(g, 0.f, 1.f);
+  b = std::clamp(b, 0.f, 1.f);
+  const float mx = std::max({r, g, b}), mn = std::min({r, g, b}), d = mx - mn;
+  Hsl c{hue, 0.f, (mx + mn) * 0.5f};
+  if (d < 1e-4f)
+    return c;
+  c.s = std::min(d / (1.f - std::fabs(2.f * c.l - 1.f)), 1.f);
+  c.h = mx == r ? 60.f * std::fmod((g - b) / d + 6.f, 6.f) : mx == g ? 60.f * ((b - r) / d + 2.f)
+                                                                   : 60.f * ((r - g) / d + 4.f);
+  return c;
+}
+
+std::array<float, 3> hsl_to_rgb(const Hsl& c) {
+  const float k = (1.f - std::fabs(2.f * c.l - 1.f)) * c.s;
+  const float hp = std::fmod(std::max(c.h, 0.f), 360.f) / 60.f;
+  const float x = k * (1.f - std::fabs(std::fmod(hp, 2.f) - 1.f));
+  const float m = c.l - k * 0.5f;
+  switch (static_cast<int>(hp)) {
+  case 0:
+    return {k + m, x + m, m};
+  case 1:
+    return {x + m, k + m, m};
+  case 2:
+    return {m, k + m, x + m};
+  case 3:
+    return {m, x + m, k + m};
+  case 4:
+    return {x + m, m, k + m};
+  default:
+    return {k + m, m, x + m};
+  }
+}
+
+// A 5x7 pixel font for the panel's labels, rows top to bottom.
+struct Glyph {
+  char c;
+  const char* rows;
+};
+constexpr Glyph kGlyphs[] = {
+    {'0', ".###.#...##..###.#.###..##...#.###."}, {'1', "..#...##....#....#....#....#...###."},
+    {'2', ".###.#...#....#...#...#...#...#####"}, {'3', "#####...#...#.....#....##...#.###."},
+    {'4', "...#...##..#.#.#..#.#####...#....#."}, {'5', "######....####.....#....##...#.###."},
+    {'6', "..##..#...#....####.#...##...#.###."}, {'7', "#####....#...#...#...#....#....#..."},
+    {'8', ".###.#...##...#.###.#...##...#.###."}, {'9', ".###.#...##...#.####....#...#..##.."},
+    {'A', ".###.#...##...#######...##...##...#"}, {'B', "####.#...##...#####.#...##...#####."},
+    {'C', ".###.#...##....#....#....#...#.###."}, {'D', "###..#..#.#...##...##...##..#.###.."},
+    {'E', "######....#....####.#....#....#####"}, {'F', "######....#....####.#....#....#...."},
+    {'G', ".###.#...##....#.####...##...#.####"}, {'H', "#...##...##...#######...##...##...#"},
+    {'I', ".###...#....#....#....#....#...###."}, {'J', "..###...#....#....#....#.#..#..##.."},
+    {'K', "#...##..#.#.#..##...#.#..#..#.#...#"}, {'L', "#....#....#....#....#....#....#####"},
+    {'M', "#...###.###.#.##.#.##...##...##...#"}, {'N', "#...##...###..##.#.##..###...##...#"},
+    {'O', ".###.#...##...##...##...##...#.###."}, {'P', "####.#...##...#####.#....#....#...."},
+    {'Q', ".###.#...##...##...##.#.##..#..##.#"}, {'R', "####.#...##...#####.#.#..#..#.#...#"},
+    {'S', ".#####....#.....###.....#....#####."}, {'T', "#####..#....#....#....#....#....#.."},
+    {'U', "#...##...##...##...##...##...#.###."}, {'V', "#...##...##...##...##...#.#.#...#.."},
+    {'W', "#...##...##...##.#.##.#.##.#.#.#.#."}, {'X', "#...##...#.#.#...#...#.#.#...##...#"},
+    {'Y', "#...##...#.#.#...#....#....#....#.."}, {'Z', "#####....#...#...#...#...#....#####"},
+    {'.', ".........................##...##..."}, {'-', "...............#####..............."},
+    {'x', "..........#...#.#.#...#...#.#.#...#"}, {':', "......##...##.......##...##........"},
+};
+
+using Rgba = std::array<uint8_t, 4>;
+
+struct Canvas {
+  int w, h;
+  std::vector<uint8_t> px; // straight alpha, sRGB
+
+  Canvas(int width, int height) : w(width), h(height), px(static_cast<size_t>(width) * height * 4, 0) {}
+  void fill(int x0, int y0, int x1, int y1, Rgba c) {
+    for (int y = std::max(y0, 0); y < std::min(y1, h); ++y)
+      for (int x = std::max(x0, 0); x < std::min(x1, w); ++x)
+        std::memcpy(&px[(static_cast<size_t>(y) * w + x) * 4], c.data(), 4);
+  }
+  // Text at `scale` pixels per font pixel; returns where it ends.
+  int text(int x, int y, int scale, std::string_view s, Rgba c) {
+    for (char ch : s) {
+      for (const Glyph& g : kGlyphs) {
+        if (g.c != ch)
+          continue;
+        for (int r = 0; r < 7; ++r)
+          for (int col = 0; col < 5; ++col)
+            if (g.rows[r * 5 + col] == '#')
+              fill(x + col * scale, y + r * scale, x + (col + 1) * scale, y + (r + 1) * scale, c);
+      }
+      x += (ch == '.' ? 3 : 6) * scale; // a narrow point
+    }
+    return x;
+  }
+};
+
+Rgba linear_rgba(float r, float g, float b) {
+  return {static_cast<uint8_t>(std::lround(srgb_encode(r) * 255.f)),
+          static_cast<uint8_t>(std::lround(srgb_encode(g) * 255.f)),
+          static_cast<uint8_t>(std::lround(srgb_encode(b) * 255.f)), 255};
+}
+
+constexpr int kPanelW = 768, kPanelH = 456;
+constexpr int kTrackX0 = 170, kTrackX1 = 590, kTrackH = 30;
+constexpr int kRowY0 = 76, kRowStep = 86;
+constexpr int kResetX0 = 604, kResetX1 = 750, kResetY0 = 10, kResetY1 = 52;
+enum { kHue, kTint, kLight, kSat, kSliders };
+constexpr std::array<const char*, kSliders> kSliderNames{"HUE", "TINT", "LIGHT", "SAT"};
+constexpr std::array<float, kSliders> kSliderMax{360.f, 1.f, 1.f, 1.5f};
+
+struct GradePanel {
+  bool shown = false;
+  XrPosef pose{{0.f, 0.f, 0.f, 1.f}, {}};
+  float width = 0.36f;
+  int stage = -1;
+  std::array<float, kSliders> value{0.f, 0.f, 1.f, 1.f};
+  int hover = -1;      // a slider, or kSliders for Reset
+  int active = -1;     // the slider being dragged
+  int activeHand = -1; // the hand dragging it
+  bool dirty = true;   // the picture needs drawing
+  std::chrono::steady_clock::time_point drawn{};
+  PlacingImage image;
+  std::deque<std::pair<XrSwapchain, std::chrono::steady_clock::time_point>> retired;
+} P;
+
+RoomGrade panel_grade() {
+  const auto rgb = hsl_to_rgb({P.value[kHue], P.value[kTint], P.value[kLight]});
+  return {rgb[0], rgb[1], rgb[2], P.value[kSat]};
+}
+
+void panel_from_grade(const RoomGrade& g) {
+  const Hsl c = rgb_to_hsl(g.r, g.g, g.b, P.value[kHue]);
+  P.value = {c.h, c.s, c.l, std::clamp(g.saturation, 0.f, kSliderMax[kSat])};
+  P.dirty = true;
+}
+
+void panel_log(const char* what) {
+  const RoomGrade g = panel_grade();
+  const float strength = grade_settings().strength;
+  Log.info("Room grade panel: {} stage 0x{:02X}: {{0x{:02X}, {:.2f}f, {:.2f}f, {:.2f}f, {:.2f}f}} (hue {:.0f}, tint "
+           "{:.2f}, light {:.2f}){}",
+           what, P.stage, P.stage, g.r, g.g, g.b, g.saturation, P.value[kHue], P.value[kTint], P.value[kLight],
+           strength != 1.f ? fmt::format(", shown at strength x{:.2f}", strength) : std::string{});
+}
+
+void draw_panel(Canvas& c) {
+  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255}, lit{120, 200, 255, 255};
+  c.fill(0, 0, kPanelW, kPanelH, {18, 20, 26, 225});
+  c.fill(0, 0, kPanelW, 3, {90, 96, 110, 255});
+  const int end = c.text(18, 18, 3, "ROOM TINT", text);
+  c.text(end + 24, 18, 3, fmt::format("STAGE 0x{:02X}", P.stage), dim);
+  c.fill(kResetX0, kResetY0, kResetX1, kResetY1, P.hover == kSliders ? Rgba{70, 110, 150, 255} : Rgba{52, 56, 68, 255});
+  c.text(kResetX0 + (kResetX1 - kResetX0 - 87) / 2, kResetY0 + 11, 3, "RESET", text);
+  const Hsl tint{P.value[kHue], P.value[kTint], P.value[kLight]};
+  for (int i = 0; i < kSliders; ++i) {
+    const int y = kRowY0 + i * kRowStep;
+    c.text(18, y + 4, 3, kSliderNames[i], i == P.active ? lit : i == P.hover ? text : dim);
+    for (int x = kTrackX0; x < kTrackX1; ++x) {
+      const float t = static_cast<float>(x - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0 - 1);
+      std::array<float, 3> rgb;
+      if (i == kHue) {
+        rgb = hsl_to_rgb({t * 360.f, 1.f, 0.5f});
+      } else if (i == kTint) {
+        rgb = hsl_to_rgb({tint.h, t, 0.5f});
+      } else if (i == kLight) {
+        rgb = hsl_to_rgb({tint.h, tint.s, t});
+      } else {
+        // The tint's hue at full strength, desaturated toward its luminance.
+        const auto full = hsl_to_rgb({tint.h, 1.f, 0.5f});
+        const float y = 0.2126f * full[0] + 0.7152f * full[1] + 0.0722f * full[2];
+        const float k = t * kSliderMax[kSat];
+        for (int ch = 0; ch < 3; ++ch)
+          rgb[ch] = std::clamp(y + (full[ch] - y) * k, 0.f, 1.f);
+      }
+      c.fill(x, y, x + 1, y + kTrackH, linear_rgba(rgb[0], rgb[1], rgb[2]));
+    }
+    const int kx = kTrackX0 + static_cast<int>(std::lround(P.value[i] / kSliderMax[i] * (kTrackX1 - kTrackX0)));
+    c.fill(kx - 6, y - 9, kx + 6, y + kTrackH + 9, {10, 10, 12, 255});
+    c.fill(kx - 3, y - 6, kx + 3, y + kTrackH + 6, i == P.active ? lit : Rgba{250, 250, 250, 255});
+    c.text(kTrackX1 + 22, y + 4, 3, i == kHue ? fmt::format("{:.0f}", P.value[i]) : fmt::format("{:.2f}", P.value[i]),
+           text);
+  }
+  const RoomGrade g = panel_grade();
+  c.text(18, kPanelH - 44, 3, fmt::format("R {:.2f}  G {:.2f}  B {:.2f}", g.r, g.g, g.b), dim);
+  c.fill(kTrackX1 + 16, kPanelH - 56, kResetX1, kPanelH - 14, linear_rgba(g.r, g.g, g.b));
+}
+
+// Where a laser meets the panel's plane: meters along it, and the point in
+// the panel's pixels (outside 0..kPanelW, 0..kPanelH when it misses the
+// panel itself). False when it points away from the panel.
+bool panel_ray(const Hand& hand, float& t, float& px, float& py) {
+  const XrQuaternionf& q = P.pose.orientation;
+  const XrVector3f n = qrot(q, {0.f, 0.f, 1.f});
+  const float facing = vdot(hand.dir, n);
+  if (facing > -1e-3f)
+    return false;
+  t = vdot(P.pose.position - hand.origin, n) / facing;
+  if (t <= 0.f)
+    return false;
+  const XrVector3f d = hand.origin + hand.dir * t - P.pose.position;
+  const float height = P.width * kPanelH / kPanelW;
+  px = (vdot(d, qrot(q, {1.f, 0.f, 0.f})) / P.width + 0.5f) * kPanelW;
+  py = (0.5f - vdot(d, qrot(q, {0.f, 1.f, 0.f})) / height) * kPanelH;
+  return true;
+}
+
+// What's at a point on the panel: a slider's row, kSliders for Reset, or -1.
+int panel_target(float px, float py) {
+  if (px >= kResetX0 && px < kResetX1 && py >= kResetY0 && py < kResetY1)
+    return kSliders;
+  for (int i = 0; i < kSliders; ++i) {
+    const float y = static_cast<float>(kRowY0 + i * kRowStep);
+    if (px >= kTrackX0 - 24 && px < kTrackX1 + 24 && py >= y - 22 && py < y + kTrackH + 22)
+      return i;
+  }
+  return -1;
+}
+
+bool panel_holding(const Hand& h) { return h.valid && (h.tracked ? h.held : h.sel); }
+bool panel_pressed(const Hand& h) { return h.valid && (h.tracked ? h.held && !h.wasHeld : h.sel && !h.wasSel); }
+
+// Each display frame, before the arena's grab: shows the panel while `show`,
+// and points, presses and drags on it. Marks the hands on it (Hand::onPanel).
+void update_grade_panel(bool show) {
+  for (Hand& hand : G.hands) {
+    hand.onPanel = false;
+    hand.panelHit = -1.f;
+  }
+  if (show && !P.shown) {
+    // Opened: to the right of where the head looks, facing it.
+    const XrVector3f fwd = qrot(B.headOrientation, {0.f, 0.f, -1.f});
+    XrVector3f offset{0.3f, -0.15f, -0.55f};
+    P.width = 0.36f;
+    if (const char* v = std::getenv("AURORA_XR_GRADE_PANEL_POS"))
+      std::sscanf(v, "%f,%f,%f,%f", &offset.x, &offset.y, &offset.z, &P.width);
+    P.pose.position = B.head + rot_y(offset, std::atan2(-fwd.x, -fwd.z));
+    P.pose.orientation = facing(P.pose.position, B.head);
+    std::lock_guard lock{g_grade.mutex};
+    P.stage = g_grade.stage;
+    panel_from_grade(g_grade.grade);
+  }
+  if (!show && P.active >= 0)
+    panel_log("set");
+  if (!show)
+    P.active = P.activeHand = -1;
+  P.shown = show;
+  if (!show)
+    return;
+  const ArenaPose a = arena_pose();
+  int hover = -1;
+  for (int h = 0; h < 2; ++h) {
+    Hand& hand = G.hands[h];
+    float t, px, py;
+    if (!panel_ray(hand, t, px, py))
+      continue;
+    const bool dragging = P.activeHand == h;
+    const bool on = px >= 0.f && px < kPanelW && py >= 0.f && py < kPanelH;
+    // The arena wins where it's nearer along the laser, or the hand is in it.
+    const float arena = hit_arena(a, hand.origin, hand.dir);
+    if (!dragging && (!hand.valid || !on || in_grab_box(a, hand.touch) || (arena >= 0.f && arena < t)))
+      continue;
+    hand.onPanel = true;
+    hand.panelHit = t;
+    const int target = dragging ? P.active : panel_target(px, py);
+    hover = target;
+    if (dragging) {
+      const float v = std::clamp((px - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0), 0.f, 1.f) *
+                      kSliderMax[P.active];
+      if (v != P.value[P.active]) {
+        P.value[P.active] = v;
+        P.dirty = true;
+        std::lock_guard lock{g_grade.mutex};
+        g_grade.panel[P.stage] = panel_grade();
+        set_grade_locked(g_grade.panel[P.stage]);
+      }
+    } else if (panel_pressed(hand) && target == kSliders) {
+      std::lock_guard lock{g_grade.mutex};
+      g_grade.panel.erase(P.stage);
+      set_grade_locked(g_grade.game);
+      panel_from_grade(g_grade.game);
+      Log.info("Room grade panel: stage 0x{:02X} back to the game's grade", P.stage);
+    } else if (panel_pressed(hand) && target >= 0 && P.active < 0) {
+      P.active = target;
+      P.activeHand = h;
+      P.dirty = true;
+      --h; // again, dragging from where it pressed
+      continue;
+    }
+  }
+  if (P.activeHand >= 0 && !panel_holding(G.hands[P.activeHand])) {
+    panel_log("set");
+    P.active = P.activeHand = -1;
+    P.dirty = true;
+  }
+  if (hover != P.hover) {
+    P.hover = hover;
+    P.dirty = true;
+  }
+}
+
+// The panel's layer, drawn again (a new static swapchain) when it changed,
+// at most 20 times a second. Old swapchains go once their upload is surely
+// done.
+bool build_grade_panel_layer(XrCompositionLayerQuad& q) {
+  const auto now = std::chrono::steady_clock::now();
+  while (!P.retired.empty() && now - P.retired.front().second > std::chrono::milliseconds(500)) {
+    xrDestroySwapchain(P.retired.front().first);
+    P.retired.pop_front();
+  }
+  if (!P.shown)
+    return false;
+  if (P.dirty && now - P.drawn >= std::chrono::milliseconds(50)) {
+    Canvas c{kPanelW, kPanelH};
+    draw_panel(c);
+    if (P.image.swapchain)
+      P.retired.emplace_back(P.image.swapchain, now);
+    P.image.swapchain = XR_NULL_HANDLE;
+    P.image.rgba = std::move(c.px);
+    P.image.width = kPanelW;
+    P.image.height = kPanelH;
+    if (!upload_placing_image(P.image)) {
+      static bool warned = false;
+      if (!warned)
+        Log.warn("Room grade panel: picture not uploaded");
+      warned = true;
+    }
+    P.dirty = false;
+    P.drawn = now;
+  }
+  if (!P.image.swapchain)
+    return false;
+  q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+  q.space = B.space;
+  q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  q.subImage.swapchain = P.image.swapchain;
+  q.subImage.imageRect = {{0, 0}, {kPanelW, kPanelH}};
+  q.pose = P.pose;
+  q.size = {P.width, P.width * kPanelH / kPanelW};
+  return true;
+}
+
+void destroy_grade_panel() {
+  for (auto& r : P.retired)
+    xrDestroySwapchain(r.first);
+  P.retired.clear();
+  if (P.image.swapchain)
+    xrDestroySwapchain(P.image.swapchain);
+  P.image.swapchain = XR_NULL_HANDLE;
+  P.shown = false;
+  P.active = P.activeHand = -1;
+}
+
 // Full VR stops passthrough outright (the cameras stop, not just the layer),
 // mixed reality starts it again.
 void sync_passthrough() {
@@ -5110,13 +5496,25 @@ bool render_xr_frame() {
   const bool pointing = fight && held && B.focused;
   const bool screenPointing = screenShown && B.focused;
   locate_hands(fs.predictedDisplayTime);
+  // The room grade panel, in a paused fight over the room.
+  static const bool gradePanel = env_flag("AURORA_XR_GRADE_PANEL", false);
+  const bool roomWanted = B.passthroughLayer && B.passthroughRunning && g_passthroughWanted;
+  update_grade_panel(gradePanel && pointing && g_fightPaused && placing == 0 && roomWanted);
   update_grab(fight ? Target::Arena : Target::Screen, pointing || screenPointing);
+  bool onPanel = false;
+  for (Hand& hand : G.hands) {
+    if (hand.onPanel) {
+      hand.hit = hand.panelHit; // the laser ends on the panel
+      onPanel = true;
+    }
+  }
   // On the screen the grips stay Z unless a laser is on it.
   const bool onScreen = screenPointing && std::any_of(G.hands.begin(), G.hands.end(), [](const Hand& h) {
                           return h.engaged || h.clicking || h.inside || h.hit >= 0.f;
                         });
   B.pointerMode = pointing || onScreen;
-  B.triggersClick = onScreen;
+  // The triggers click the screen or the panel instead of pressing L and R.
+  B.triggersClick = onScreen || onPanel;
   // The surface under the stage is measured while it's being placed: the
   // hold before a fight, or a grab in a pause.
   surface_frame(fight, fight && (placing > 0 || (G.target == Target::Arena && (G.oneHand >= 0 || G.twoHands))),
@@ -5124,7 +5522,7 @@ bool render_xr_frame() {
 
   // The passthrough, the shadow, the HUD and the 3D view, the HUD on top in
   // full VR, then the placing cards and the lasers.
-  std::array<const XrCompositionLayerBaseHeader*, 4 + kMaxPlacingLayers + kMaxPointerLayers> layers{};
+  std::array<const XrCompositionLayerBaseHeader*, 5 + kMaxPlacingLayers + kMaxPointerLayers> layers{};
   uint32_t layerCount = 0;
   XrCompositionLayerPassthroughFB ptLayer{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
   sync_passthrough();
@@ -5148,6 +5546,8 @@ bool render_xr_frame() {
   XrCompositionLayerQuad screenQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
   PointerLayers pointers;
   PlacingLayers placingLayers;
+  XrCompositionLayerQuad panelQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  const bool panel = build_grade_panel_layer(panelQuad);
   if (fs.shouldRender && fight) {
     // Premultiplied alpha (no UNPREMULTIPLIED bit): the arena's coverage
     // hides the room, effects outside it add light over passthrough.
@@ -5250,6 +5650,8 @@ bool render_xr_frame() {
       for (uint32_t i = 0; i < placingLayers.count; ++i)
         layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&placingLayers.quads[i]);
     }
+    if (panel)
+      layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&panelQuad);
     if (pointing) {
       build_pointer_layers(pointers);
       for (uint32_t i = 0; i < pointers.count; ++i)
@@ -5532,6 +5934,7 @@ void teardown() {
       xrDestroySwapchain(*sc);
     *sc = XR_NULL_HANDLE;
   }
+  destroy_grade_panel();
   {
     std::lock_guard lock{g_placingMutex};
     for (auto& clip : g_placingClips) {
@@ -8054,18 +8457,19 @@ extern "C" void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin
 extern "C" void aurora_xr_set_room_grade(float r, float g, float b, float saturation) {
   using namespace aurora::xr;
   std::lock_guard lock{g_grade.mutex};
-  const RoomGrade grade{std::max(r, 0.f), std::max(g, 0.f), std::max(b, 0.f), std::max(saturation, 0.f)};
-  if (grade.r == g_grade.grade.r && grade.g == g_grade.grade.g && grade.b == g_grade.grade.b &&
-      grade.saturation == g_grade.grade.saturation)
-    return;
-  g_grade.grade = grade;
-  ++g_grade.seq;
-  g_grade.cv.notify_one();
+  g_grade.game = {std::max(r, 0.f), std::max(g, 0.f), std::max(b, 0.f), std::max(saturation, 0.f)};
+  // The grade panel's, while it has one for this stage.
+  const auto it = g_grade.panel.find(g_grade.stage);
+  set_grade_locked(it != g_grade.panel.end() ? it->second : g_grade.game);
 }
 
 extern "C" void aurora_xr_set_stage(int stage, float x, float y, float z, float scale) {
   using namespace aurora::xr;
   surface_request(0, true); // another stage: what was under the last one isn't under it
+  {
+    std::lock_guard lock{g_grade.mutex};
+    g_grade.stage = stage;
+  }
   aurora_xr_set_room_grade(1.f, 1.f, 1.f, 1.f);
   std::lock_guard lock{g_arenaMutex};
   g_stage = stage;
