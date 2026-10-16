@@ -21,6 +21,7 @@
 #include <melee/pl/player.h>
 #include <melee/cm/camera.h>
 #include <sysdolphin/baselib/dobj.h>
+#include <sysdolphin/baselib/generator.h>
 #include <sysdolphin/baselib/jobj.h>
 #include <sysdolphin/baselib/lobj.h>
 
@@ -1588,6 +1589,13 @@ static const ParticleRule s_particles[] = {
      * and streaks, ~3600 behind the stage (MELEE_XR_PTCL_LOG). */
     {0x24, 30, -1, -1},
     {0x25, 30, -1, -1},
+    /* Corneria: the sea's spray, thrown up along two lines under the Great
+     * Fox for part of its flight (its zako generators, effects 30000 and
+     * 30004: texture groups 0 and 1, y -24..38). The sea isn't shown, and
+     * while it lasts the spray draws over ten times a KO's particles by
+     * summed size squared (a flat desktop tally). */
+    {0x0E, 30, -1, 0},
+    {0x0E, 30, -1, 1},
     /* Fountain of Dreams: the falling stars and their trails (texture group
      * 1, y -178..299; MELEE_XR_PTCL_STATS). The fountain's water is groups 0,
      * 2 and 3 of the same bank and stays. */
@@ -1700,6 +1708,46 @@ static void particle_stats(int bank, int tex_group, float size, const float pos[
     }
 }
 
+/* A launched fighter's knockback smoke (efAsync 0x408: a puff every few
+ * frames while it flies, ftCo_Damage.c) stays out of the 3D view, VR too,
+ * like a KO's own particles: the trail of a hard launch, most of all on its
+ * way to a KO, took frames with the explosion's (the player's report).
+ * MELEE_XR_KB_SMOKE_SHOW=1 keeps it. Only the trail's: its puffs are told
+ * from other dust by their generator's instance number (HSD_Particle
+ * idnum), noted as each puff starts. A number is forgotten once 2048 generators
+ * have been made since (a puff lives about a second; numbers come around
+ * after 65280), and no sooner during a pause, which makes none. */
+#define KB_SMOKE_SLOTS 128 /* about two seconds of four fighters' trails */
+static unsigned short s_kb_smoke[KB_SMOKE_SLOTS];
+static int s_kb_smoke_next, s_kb_smoke_count;
+
+void pc_xr_kb_smoke(unsigned idnum) {
+    s_kb_smoke[s_kb_smoke_next] = (unsigned short)idnum;
+    s_kb_smoke_next = (s_kb_smoke_next + 1) % KB_SMOKE_SLOTS;
+    if (s_kb_smoke_count < KB_SMOKE_SLOTS) {
+        s_kb_smoke_count++;
+    }
+}
+
+/* How many generators were made from `idnum`'s up to `now`, both counting
+ * 256 to 65535 and around. */
+static unsigned generator_age(unsigned idnum, unsigned now) {
+    return now >= idnum ? now - idnum : now + (65536u - 256u) - idnum;
+}
+
+static bool kb_smoke(int idnum) {
+    if (s_kb_smoke_count == 0) {
+        return false;
+    }
+    const unsigned now = pc_ps_generator_serial();
+    for (int i = 0; i < s_kb_smoke_count; i++) {
+        if (s_kb_smoke[i] == (unsigned)idnum && generator_age((unsigned)idnum, now) < 2048) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const float pos[3]) {
     if (s_category != AURORA_XR_WORLD || s_center_grkind <= 0) {
         return false;
@@ -1732,6 +1780,14 @@ bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const flo
         ko_show = getenv("MELEE_XR_KO_PTCL_SHOW") != NULL;
     }
     if (!ko_show && bank == 0 && tex_group >= 23 && tex_group <= 25) {
+        aurora_xr_camera(AURORA_XR_HIDDEN, NULL);
+        return true;
+    }
+    static int smoke_show = -1;
+    if (smoke_show < 0) {
+        smoke_show = getenv("MELEE_XR_KB_SMOKE_SHOW") != NULL;
+    }
+    if (!smoke_show && bank == 0 && kb_smoke(id)) {
         aurora_xr_camera(AURORA_XR_HIDDEN, NULL);
         return true;
     }

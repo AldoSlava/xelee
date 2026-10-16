@@ -2,6 +2,7 @@
 
 #ifdef TARGET_PC
 #include <pc/net.h>
+#include <pc/xr_scene.h>
 #endif
 
 #include <math.h>
@@ -314,6 +315,9 @@ void* efAsync_Dispatch(s32 gfx_id, HSD_GObj* gobj, va_list vlist)
 
         result = efLib_CreateGenerator_AddAppSRT(0x3E);
         if (result != NULL) {
+#ifdef TARGET_PC
+            pc_xr_kb_smoke(result->idnum);
+#endif
             va_vec3 = va_arg(vlist, Vec3*);
             psAppSRT = result->appsrt;
             psAppSRT->translate = *va_vec3;

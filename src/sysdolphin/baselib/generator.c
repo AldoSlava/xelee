@@ -35,6 +35,13 @@ u16 hsd_8039D1EC(void)
     return lbl_804D6368;
 }
 
+#ifdef TARGET_PC
+u16 pc_ps_generator_serial(void)
+{
+    return lbl_804D6368;
+}
+#endif
+
 void hsd_8039D214(HSD_Generator* gen)
 {
     HSD_JObj* jobj;

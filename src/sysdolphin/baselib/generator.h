@@ -15,6 +15,11 @@ struct hsd_804D0F60_t {
 /* 39D0A0 */ void hsd_8039D0A0(HSD_Generator*);
 /* 39D1E4 */ void hsd_8039D1E4(HSD_Generator*, void*);
 /* 39D1EC */ u16 hsd_8039D1EC(void);
+#ifdef TARGET_PC
+/* The instance number the last generator took (hsd_8039D1EC), read only:
+ * it counts up as generators are made, 256 to 65535 and around again. */
+u16 pc_ps_generator_serial(void);
+#endif
 /* 39D214 */ void hsd_8039D214(HSD_Generator*);
 /* 39D354 */ void hsd_8039D354(u32);
 /* 39D3AC */ HSD_Generator* hsd_8039D3AC(HSD_Generator*, HSD_Generator*);

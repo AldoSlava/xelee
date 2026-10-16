@@ -74,6 +74,10 @@ void pc_xr_particle_end(bool hidden);
 /* A KO: its explosion is about to draw (ft_0D31.c), so dynamic resolution
  * drops ahead of it (aurora_xr_heavy_effect). */
 void pc_xr_heavy_effect(void);
+/* A puff of a launched fighter's knockback smoke starts (efAsync 0x408,
+ * ftCo_Damage.c): its generator's instance number, which its particles
+ * carry. They stay out of the 3D view (pc_xr_particle_begin). */
+void pc_xr_kb_smoke(unsigned idnum);
 /* Around a KO explosion model's draw (eflib.c): in the 3D view it is cut to
  * the blast zones' box. Its ring and beam are sized for the TV camera at the
  * blast zone and filled a large part of both eyes. */
@@ -135,6 +139,7 @@ static inline bool pc_xr_particle_begin(int bank, int id, int tex_group, float s
 }
 static inline void pc_xr_particle_end(bool hidden) { (void)hidden; }
 static inline void pc_xr_heavy_effect(void) {}
+static inline void pc_xr_kb_smoke(unsigned idnum) { (void)idnum; }
 static inline int pc_xr_blast_clip_begin(void) { return 0; }
 static inline void pc_xr_blast_clip_end(int began) { (void)began; }
 static inline bool pc_xr_fighter_offscreen_begin(void) { return false; }
