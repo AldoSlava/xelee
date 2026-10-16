@@ -36,6 +36,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#ifdef __ANDROID__
+#include "renderdoc_app.h"
+#endif
 #include <bit>
 #include <cmath>
 #include <limits>
@@ -6260,10 +6263,78 @@ bool early_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& frame
   return drawn;
 }
 
+#ifdef __ANDROID__
+// AURORA_XR_RENDERDOC_FRAME=N: with RenderDoc's Vulkan layer injected (the
+// GPU debug layer settings, docs/quest-xr.md), the Nth early-eyes submit
+// (eye and motion passes) is captured; RenderDoc can't find frames in an
+// OpenXR app, which never presents. AURORA_XR_RENDERDOC_SPIKE=1: the first
+// submit after a GPU frame spike instead (a KO's explosion, say).
+RENDERDOC_API_1_6_0* renderdoc_api() {
+  static RENDERDOC_API_1_6_0* api = []() -> RENDERDOC_API_1_6_0* {
+    void* mod = dlopen("libVkLayer_GLES_RenderDoc.so", RTLD_NOW | RTLD_NOLOAD);
+    if (mod == nullptr) {
+      Log.warn("RenderDoc capture asked for, but its layer isn't loaded");
+      return nullptr;
+    }
+    auto get = reinterpret_cast<pRENDERDOC_GetAPI>(dlsym(mod, "RENDERDOC_GetAPI"));
+    RENDERDOC_API_1_6_0* a = nullptr;
+    if (get == nullptr || get(eRENDERDOC_API_Version_1_6_0, reinterpret_cast<void**>(&a)) != 1)
+      return nullptr;
+    return a;
+  }();
+  return api;
+}
+
+void renderdoc_around_submit(bool before) {
+  static const int frame = [] {
+    const char* v = std::getenv("AURORA_XR_RENDERDOC_FRAME");
+    return v != nullptr ? std::atoi(v) : 0;
+  }();
+  static const bool onSpike = env_flag("AURORA_XR_RENDERDOC_SPIKE", false);
+  static int count = 0;
+  static bool capturing = false;
+  static bool spikeTaken = false;
+  if (frame <= 0 && !onSpike)
+    return;
+  if (before) {
+    ++count;
+    if (onSpike ? spikeTaken || !g_spikeSeen.load() : count != frame)
+      return;
+    spikeTaken = true;
+    if (auto* api = renderdoc_api()) {
+      api->StartFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(B.vkInstance), nullptr);
+      capturing = true;
+    }
+  } else if (capturing) {
+    capturing = false;
+    auto* api = renderdoc_api();
+    const bool ok = api->EndFrameCapture(RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(B.vkInstance), nullptr) == 1;
+    char path[512] = {};
+    uint32_t len = sizeof path;
+    if (ok && api->GetNumCaptures() > 0)
+      api->GetCapture(api->GetNumCaptures() - 1, path, &len, nullptr);
+    Log.info("RenderDoc capture of early eyes {}: {}", count, ok ? path : "failed");
+  }
+}
+#endif
+
 // Around the early eyes' submit: with their image taken before it was
 // waited (g_deferEyes), Dawn translates them with its flush held, and the
 // flush goes once the XR thread has waited the image.
 void early_around_submit(bool before) {
+#ifdef __ANDROID__
+  struct Capture {
+    bool before;
+    Capture(bool b) : before(b) {
+      if (before)
+        renderdoc_around_submit(true);
+    }
+    ~Capture() {
+      if (!before)
+        renderdoc_around_submit(false);
+    }
+  } capture{before};
+#endif
   if (!g_streams[kStereo].unwaited && !g_streams[kMotion].unwaited && !g_streams[kMotionDepth].unwaited)
     return;
   if (before) {
