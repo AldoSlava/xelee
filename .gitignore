@@ -17,6 +17,8 @@ docs/*
 !docs/quest-xr.md
 !docs/xr-3d-plan.md
 !docs/xr-frame-rate-plan.md
+!docs/xr-stage-grounding-report.md
+!docs/xr-stage-placement-ux.md
 !docs/browser-mobile-findings.md
 !docs/site/
 
