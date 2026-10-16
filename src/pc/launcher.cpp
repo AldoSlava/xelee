@@ -9,6 +9,7 @@
 #include "net_match.h"
 #include "net.h"
 #include "pc.h"
+#include "spatial_audio.h"
 #include "slippi/slp_user.h"
 #include <RmlUi/Core/Elements/ElementFormControl.h>
 #include <aurora/dvd.h>
@@ -28,6 +29,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <random>
 #include <cstdlib>
 #include <future>
@@ -329,7 +331,9 @@ static uint32_t pending_pipelines() {
  * aspect, HUD layout, post-processing, FPS counter, pause camera); its eyes
  * take their samples from AURORA_XR_MSAA rather than the anti-aliasing
  * preference; and the updater knows only the phone APK, which would replace
- * the Quest build. pc_launcher_configure pins those to their defaults. */
+ * the Quest build. pc_launcher_configure pins those to their defaults. Its
+ * own rows (.quest-only) are the eyes' resolution and SpaceWarp, which
+ * pc_launcher_configure hands the immersive game's XR session. */
 #if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
 constexpr const char* platform_class = "quest";
 constexpr bool has_updater = false;
@@ -441,17 +445,20 @@ class Launcher final : public Rml::EventListener {
     std::vector<std::string> page_focus() const {
         switch (tab) {
         case 0:
-            return {"display", "sync", "resolution", "aspect", "hud-mode", "aa", "filter",
-                "filter-mode", "fps", "custom-textures", "backend", "performance"};
+            return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "aspect",
+                "hud-mode", "aa", "filter", "filter-mode", "fps", "custom-textures", "backend",
+                "performance", "defaults-graphics"};
         case 1:
-            return {"volume", "music-volume", "sfx-volume", "mute", "reverb"};
+            return {"volume", "music-volume", "sfx-volume", "mute", "reverb", "spatial-audio",
+                "defaults-audio"};
         case 2:
-            return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes"};
+            return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes",
+                "defaults-cheats"};
         case 4:
             return {"auth-sign-in", "auth-sign-out", "auth-email", "auth-password", "net-name",
                 "net-delay"};
         case 5:
-            return {"scale", "check-updates", "check-now"};
+            return {"scale", "check-updates", "check-now", "defaults-launcher"};
         default:
             return {};
         }
@@ -675,7 +682,17 @@ class Launcher final : public Rml::EventListener {
     }
     static bool is_slider(const Rml::String& id) {
         return id == "volume" || id == "resolution" || id == "scale" || id == "music-volume" ||
-               id == "sfx-volume";
+               id == "sfx-volume" || id == "xr-resolution";
+    }
+    /* The Quest's resolution slider: 80-130%, then Dynamic at its right end
+     * (the preference keeps Dynamic as 0). */
+    static int xr_resolution_slider(int pref) { return pref == 0 ? 140 : pref; }
+    static int xr_resolution_pref(float slider) {
+        const int value = std::clamp(int(std::lround(slider / 10.0f)) * 10, 80, 140);
+        return value >= 140 ? 0 : value;
+    }
+    static std::string xr_resolution_name(int pref) {
+        return pref == 0 ? "Dynamic" : std::to_string(pref) + "%";
     }
     // Writing a slider's value fires Change; `quiet` keeps that from looping
     // back into another save.
@@ -691,6 +708,9 @@ class Launcher final : public Rml::EventListener {
             std::string(effective_vsync ? "On" : "Off") + (override ? " (environment)" : ""));
         slider("resolution", prefs.render_scale);
         text("resolution-val", resolution_name(prefs.render_scale));
+        slider("xr-resolution", float(xr_resolution_slider(prefs.xr_resolution)));
+        text("xr-resolution-val", xr_resolution_name(prefs.xr_resolution));
+        text("spacewarp", prefs.xr_spacewarp ? "On" : "Off");
         text("aspect", prefs.widescreen == 0 ? "Original (73:60)" :
                        prefs.widescreen == 1 ? "Widescreen 16:9" :
                                                "Auto (window aspect)");
@@ -714,6 +734,9 @@ class Launcher final : public Rml::EventListener {
         text("sfx-volume-val", std::to_string(int(prefs.sfx_volume * 100 + 0.5f)) + "%");
         text("mute", prefs.mute ? "On" : "Off");
         text("reverb", prefs.reverb ? "On" : "Off");
+        text("spatial-audio", std::getenv("MELEE_SPATIAL_AUDIO") ? "Environment override" :
+                              prefs.spatial_audio                ? "On" :
+                                                                   "Off");
         text("fps", prefs.fps ? "On" : "Off");
         slider("scale", prefs.scale * 100.0f);
         text("scale-val", std::to_string(int(prefs.scale * 100 + 0.5f)) + "%");
@@ -770,6 +793,9 @@ class Launcher final : public Rml::EventListener {
             prefs.sfx_volume = std::clamp(prefs.sfx_volume + direction * 0.05f, 0.0f, 1.0f);
         else if (id == "resolution")
             prefs.render_scale = std::clamp(prefs.render_scale + direction, 0.0f, 10.0f);
+        else if (id == "xr-resolution")
+            prefs.xr_resolution = xr_resolution_pref(
+                float(xr_resolution_slider(prefs.xr_resolution) + direction * 10));
         else if (id == "scale") {
             prefs.scale = std::clamp(prefs.scale + direction * 0.25f, 0.75f, 1.5f);
             aurora::rmlui::set_ui_scale(prefs.scale);
@@ -777,6 +803,61 @@ class Launcher final : public Rml::EventListener {
             return;
         refresh_settings();
         save();
+    }
+    /* A page's Defaults row: its settings as a new install has them. */
+    void restore_defaults(const std::string& id) {
+        const launcher::Preferences d;
+        std::string message;
+        if (id == "defaults-graphics") {
+            if (prefs.fullscreen != d.fullscreen && SDL_SetWindowFullscreen(window, d.fullscreen))
+                prefs.fullscreen = d.fullscreen;
+            if (!std::getenv("MELEE_VSYNC") && prefs.vsync != d.vsync) {
+                prefs.vsync = d.vsync;
+                aurora_enable_vsync(prefs.vsync);
+            }
+            const bool restart = prefs.msaa != d.msaa || prefs.anisotropy != d.anisotropy ||
+                                 prefs.backend != d.backend;
+            prefs.render_scale = d.render_scale;
+            prefs.widescreen = d.widescreen;
+            prefs.hud_mode = d.hud_mode;
+            prefs.msaa = d.msaa;
+            prefs.anisotropy = d.anisotropy;
+            prefs.filter_mode = d.filter_mode;
+            aurora_set_resampler(static_cast<AuroraSampler>(prefs.filter_mode));
+            prefs.fps = d.fps;
+            prefs.custom_textures = d.custom_textures;
+            prefs.backend = d.backend;
+            prefs.xr_resolution = d.xr_resolution;
+            prefs.xr_spacewarp = d.xr_spacewarp;
+            message = "Graphics settings are back to their defaults.";
+            if (restart)
+                message += " Anti-aliasing, filtering and the backend apply after a restart.";
+        } else if (id == "defaults-audio") {
+            prefs.volume = d.volume;
+            prefs.music_volume = d.music_volume;
+            prefs.sfx_volume = d.sfx_volume;
+            prefs.mute = d.mute;
+            prefs.reverb = d.reverb;
+            prefs.spatial_audio = d.spatial_audio;
+            message = "Audio settings are back to their defaults.";
+        } else if (id == "defaults-cheats") {
+            prefs.unlock_all = d.unlock_all;
+            prefs.frozen_stadium = d.frozen_stadium;
+            prefs.free_camera = d.free_camera;
+            prefs.ucf = d.ucf;
+            prefs.slippi_fixes = d.slippi_fixes;
+            message = "Gameplay settings are back to their defaults.";
+        } else if (id == "defaults-launcher") {
+            prefs.scale = d.scale;
+            aurora::rmlui::set_ui_scale(prefs.scale);
+            if (has_updater)
+                prefs.check_updates = d.check_updates;
+            message = "Launcher settings are back to their defaults.";
+        } else
+            return;
+        save();
+        refresh_settings();
+        note(message);
     }
     /* Open the selected disc and leave for the game. False when the disc will
      * not open, in which case the status line says why and we stay here. */
@@ -979,6 +1060,25 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("reverb")->Focus();
+        } else if (id == "spatial-audio") {
+            prefs.spatial_audio = !prefs.spatial_audio;
+            save();
+            refresh_settings();
+            element("spatial-audio")->Focus();
+        } else if (id == "xr-resolution") {
+            const int next = xr_resolution_slider(prefs.xr_resolution) + 10;
+            prefs.xr_resolution = xr_resolution_pref(float(next > 140 ? 80 : next));
+            save();
+            refresh_settings();
+            element("xr-resolution")->Focus();
+        } else if (id == "spacewarp") {
+            prefs.xr_spacewarp = !prefs.xr_spacewarp;
+            save();
+            refresh_settings();
+            element("spacewarp")->Focus();
+        } else if (id.rfind("defaults-", 0) == 0) {
+            restore_defaults(id);
+            element(id.c_str())->Focus();
         } else if (id == "performance") {
             // The cheapest settings for a slow GPU or CPU, in one press.
             prefs.render_scale = 1;
@@ -1047,11 +1147,16 @@ public:
          * as another platform does, to check a phone's or the Quest panel's
          * from a desktop. Only the layout follows it. */
         const char* platform = std::getenv("MELEE_LAUNCHER_PLATFORM");
+        document->SetClass("desktop", false);  // launcher.rml's default
         document->SetClass(platform && *platform ? platform : platform_class, true);
         document->Show();
         text("app-version", pc::get_app_version());
         text("check-status", "Current version: " + pc::get_app_version());
         text("disc-note", disc_note);
+#ifndef MELEE_SPATIAL_AUDIO
+        if (auto* e = element("spatial-row"))  // built without Steam Audio
+            e->SetProperty("display", "none");
+#endif
         if (has_updater && prefs.check_updates) {
             pc::updater::check_for_updates_async(true);
         }
@@ -1118,6 +1223,9 @@ public:
                     float(int(event.GetParameter<float>("value", 0.0f) + 0.5f)), 0.0f, 10.0f);
                 text("resolution-val", resolution_name(prefs.render_scale));
                 notice();
+            } else if (id == "xr-resolution") {
+                prefs.xr_resolution = xr_resolution_pref(event.GetParameter<float>("value", 140.0f));
+                text("xr-resolution-val", xr_resolution_name(prefs.xr_resolution));
             } else if (id == "scale") {
                 prefs.scale =
                     std::clamp(event.GetParameter<float>("value", 100.0f) / 100.0f, 0.75f, 1.5f);
@@ -1478,6 +1586,8 @@ extern "C" void pc_launcher_configure(AuroraConfig* config) {
 #endif
     config->startFullscreen = prefs.fullscreen;
     config->msaa = prefs.msaa;
+    config->xrEyeScale = prefs.xr_resolution / 100.0f;
+    config->xrNoSpaceWarp = !prefs.xr_spacewarp;
     config->maxTextureAnisotropy = prefs.anisotropy;
     if (!std::getenv("MELEE_VSYNC"))
         config->vsync = prefs.vsync;
@@ -2174,6 +2284,7 @@ extern "C" void pc_menu_init(SDL_Window* window) {
     pc_audio_set_music_volume(prefs.music_volume);
     pc_audio_set_sfx_volume(prefs.sfx_volume);
     pc_audio_set_reverb(prefs.reverb);
+    pc_spatial_set_enabled(prefs.spatial_audio);
     auto* context = aurora::rmlui::get_context();
     if (!context) {
         SDL_Log("F1 menu: RmlUi context unavailable");

@@ -692,9 +692,10 @@ bool create_instance() {
   if (B.hasPerfMetricsExt)
     exts.push_back(XR_META_PERFORMANCE_METRICS_EXTENSION_NAME);
 #endif
-  // On wherever the runtime offers it (AURORA_XR_APPSW=0: off). Multiview is
-  // decided later (with Dawn's device): size_stereo_stream.
-  B.hasSpaceWarpExt &= env_flag("AURORA_XR_APPSW", true);
+  // On wherever the runtime offers it, unless the host turned it off
+  // (AuroraConfig::xrNoSpaceWarp; AURORA_XR_APPSW=0/1 overrides). Multiview
+  // is decided later (with Dawn's device): size_stereo_stream.
+  B.hasSpaceWarpExt &= env_flag("AURORA_XR_APPSW", !g_config.xrNoSpaceWarp);
   if (B.hasSpaceWarpExt)
     exts.push_back(XR_FB_SPACE_WARP_EXTENSION_NAME);
   // AURORA_XR_HANDS=0 leaves hand tracking off, for measuring what it costs.
@@ -999,14 +1000,18 @@ bool size_stereo_stream() {
     Log.error("Expected 2 stereo views, got {}", n);
     return false;
   }
-  const float scale = std::clamp(env_float("AURORA_XR_EYE_SCALE", 1.f), 0.25f, 2.f);
+  // A fixed eye resolution from the host (AuroraConfig::xrEyeScale) turns
+  // dynamic resolution off; AURORA_XR_EYE_SCALE and AURORA_XR_DYNRES override.
+  const bool hostFixed = g_config.xrEyeScale > 0.f;
+  const float scale =
+      std::clamp(env_float("AURORA_XR_EYE_SCALE", hostFixed ? g_config.xrEyeScale : 1.f), 0.25f, 2.f);
   const auto even = [](float v) { return (static_cast<uint32_t>(v + 0.5f) + 1u) & ~1u; };
   auto& dr = g_dynres;
   dr.recWidth = even(static_cast<float>(views[0].recommendedImageRectWidth) * scale);
   dr.recHeight = even(static_cast<float>(views[0].recommendedImageRectHeight) * scale);
   // Multiview only: the side-by-side path packs both eyes in one image.
 #ifdef __ANDROID__
-  dr.on = g_multiview && env_flag("AURORA_XR_DYNRES", true); // measured there
+  dr.on = g_multiview && env_flag("AURORA_XR_DYNRES", !hostFixed); // measured there
 #else
   dr.on = g_multiview && env_flag("AURORA_XR_DYNRES", false);
 #endif
@@ -1036,6 +1041,9 @@ bool size_stereo_stream() {
              dr.fixedTarget ? fmt::format("{:.1f}", dr.targetNs / 1.0e6)
                             : fmt::format("from the display, {:.1f} ms headroom", dr.headroomNs / 1.0e6),
              dr.bandNs / 1.0e6);
+  else
+    Log.info("Eye resolution: {}x{} per eye ({:.2f} of the recommended), dynamic resolution off", eyeW, eyeH,
+             scale);
   g_streams[kStereo].width = g_multiview ? eyeW : eyeW * 2;
   g_streams[kStereo].height = eyeH;
   g_streams[kStereo].layers = g_multiview ? 2 : 1;

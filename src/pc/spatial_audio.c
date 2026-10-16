@@ -53,11 +53,18 @@ void it_8026B294(HSD_GObj* gobj, Vec3* pos);
 #define SP_MAKEUP 1.15f
 
 static int s_on = -1;
+static bool s_pref = true; /* the launcher's Audio setting */
 
+void pc_spatial_set_enabled(bool on) {
+    s_pref = on;
+}
+
+/* MELEE_SPATIAL_AUDIO, when set, overrides the setting. Decided once, at the
+ * first sound (AXInit): the Steam Audio objects exist only if it was on. */
 static bool enabled(void) {
     if (s_on < 0) {
         const char* v = getenv("MELEE_SPATIAL_AUDIO");
-        s_on = v != NULL && v[0] != '\0' && v[0] != '0';
+        s_on = v != NULL && v[0] != '\0' ? v[0] != '0' : s_pref;
     }
     return s_on != 0;
 }

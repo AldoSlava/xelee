@@ -43,8 +43,13 @@ struct Preferences {
     bool free_camera = false;
     bool ucf = true;             // UCF 0.84 rules (dashback, shield drop, SDI, tumble, cardinals)
     bool slippi_fixes = true;    // Slippi's other gameplay rules: no wobbling, neutral spawns, freeze-glitch fix
-    float music_volume = 1.0f;
+    float music_volume = 0.8f;
     float sfx_volume = 1.0f;
+    bool spatial_audio = true;  // fighters' and items' sounds placed (src/pc/spatial_audio.h)
+    // Quest: the eyes' resolution in percent of the headset's recommended
+    // size (80-130), or 0 for dynamic resolution; and Application SpaceWarp.
+    int xr_resolution = 0;
+    bool xr_spacewarp = true;
     uint64_t install_id = 0;  // random once per install (LAN host election); 0 = not yet
 };
 DiscInfo inspect_disc(const std::string& path);

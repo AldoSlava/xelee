@@ -336,8 +336,8 @@ target_link_libraries(melee PRIVATE melee_game aurora::main melee_enet ${MELEE_C
 
 # Positional sound effects (src/pc/spatial_audio.h), with Valve's Steam Audio.
 # On by default where the SDK can be had (cmake/SteamAudio.cmake fetches it);
-# otherwise compiled out. Built in, it still stays off until
-# MELEE_SPATIAL_AUDIO=1 at run time.
+# otherwise compiled out. Built in, it follows the launcher's Audio setting
+# (on by default); MELEE_SPATIAL_AUDIO=0/1 overrides it at run time.
 option(MELEE_SPATIAL_AUDIO "Positional sound effects with Steam Audio (fetched; Linux x64, Android arm64)" ON)
 if (MELEE_SPATIAL_AUDIO)
     include(cmake/SteamAudio.cmake)

@@ -66,4 +66,4 @@ set_target_properties(melee_phonon PROPERTIES
 configure_file("${_sa_so}" "${CMAKE_BINARY_DIR}/libphonon.so" COPYONLY)
 set(MELEE_SPATIAL_AUDIO_READY ON)
 message(STATUS "melee: spatial audio built in (Steam Audio ${MELEE_STEAM_AUDIO_VERSION}, ${_sa_lib}); "
-        "enable at run time with MELEE_SPATIAL_AUDIO=1")
+        "the launcher's Audio setting turns it on or off")

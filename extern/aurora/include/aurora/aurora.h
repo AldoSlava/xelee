@@ -118,6 +118,18 @@ typedef struct {
    * This can be set to 0 to disable allocating this region.
    */
   uint32_t mem2Size;
+
+  /*
+   * OpenXR builds: the eyes' resolution, a fixed share of the runtime's
+   * recommended size (0.8-1.3), or 0 for dynamic resolution where it is
+   * available. AURORA_XR_EYE_SCALE and AURORA_XR_DYNRES override it.
+   */
+  float xrEyeScale;
+  /*
+   * OpenXR builds: leave Application SpaceWarp off even where the runtime
+   * offers it. AURORA_XR_APPSW overrides it.
+   */
+  bool xrNoSpaceWarp;
 } AuroraConfig;
 
 typedef struct {

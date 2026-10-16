@@ -427,6 +427,7 @@ input.range sliderbar {
 input.range:focus slidertrack, input.range:hover slidertrack { border-color: #ffcb00; }
 input.range sliderarrowdec, input.range sliderarrowinc { width: 0; height: 0; }
 .slider-value { width: 54dp; text-align: right; font-size: 17dp; font-weight: bold; color: #ffd84a; }
+#xr-resolution-val { width: 74dp; }  /* "Dynamic" */
 
 .info { padding: 10dp 12dp 14dp; }
 .info h3 { font-size: 20dp; font-weight: bold; color: #ffd84a; margin-bottom: 4dp; }
@@ -470,6 +471,7 @@ input.range sliderarrowdec, input.range sliderarrowinc { width: 0; height: 0; }
 /* ---- Platforms ---------------------------------------------------------- */
 
 .quest .no-quest, .mobile .no-mobile { display: none; }
+.desktop .quest-only, .mobile .quest-only { display: none; }
 /* Without Controls the Quest has five categories, pointing at Gameplay:
  * the margins above already stagger them evenly (Online's 4.5%, Launcher's
  * 9% mirror Audio's and Graphics'). */

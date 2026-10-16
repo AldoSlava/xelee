@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Positional sound effects (MELEE_SPATIAL_AUDIO=1 at run time; built with
- * the MELEE_SPATIAL_AUDIO CMake option, which needs the Steam Audio SDK).
+/* Positional sound effects (the launcher's Audio setting, on by default, or
+ * MELEE_SPATIAL_AUDIO=0/1 at run time; built with the MELEE_SPATIAL_AUDIO
+ * CMake option, which needs the Steam Audio SDK).
  *
  * A sound a fighter or an item starts is heard from where that fighter or
  * item is: in the XR build relative to the head, with the stage placed on
@@ -44,6 +45,10 @@ extern "C" {
 
 #ifdef MELEE_SPATIAL_AUDIO
 
+/* Before the game starts (the launcher's Audio setting, on by default);
+ * MELEE_SPATIAL_AUDIO=0/1 overrides it. */
+void pc_spatial_set_enabled(bool on);
+
 /* ---- game thread ---- */
 
 /* Around one GObj proc (HSD_GObj_RunProcs): a fighter or item becomes the
@@ -80,11 +85,12 @@ void pc_spatial_render(int voice, const float* mono);
  * `out` (160 frames). */
 void pc_spatial_frame_end(float* out);
 /* Main thread, from AXInit: creates the Steam Audio objects when
- * MELEE_SPATIAL_AUDIO=1. */
+ * spatial audio is on. */
 void pc_spatial_init(int rate, int frame);
 
 #else
 
+static inline void pc_spatial_set_enabled(bool on) { (void)on; }
 static inline void pc_spatial_proc(const void* gobj) { (void)gobj; }
 static inline bool pc_spatial_take_emitter(const void** gobj, float pos[3]) {
     (void)pos;

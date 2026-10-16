@@ -51,7 +51,7 @@
     <div id="preferences">
       <div id="categories">
         <button id="tab-graphics" class="plate small" data-desc="How the game looks."><span>Graphics</span></button>
-        <button id="tab-audio" class="plate small" data-desc="Volume and reverb."><span>Audio</span></button>
+        <button id="tab-audio" class="plate small" data-desc="Volume, reverb and spatial audio."><span>Audio</span></button>
         <button id="tab-cheats" class="plate small" data-desc="Unlocks, stage hazards and controller fixes."><span>Gameplay</span></button>
         <button id="tab-controls" class="plate small no-quest" data-desc="The keyboard layout and controller setup."><span>Controls</span></button>
         <button id="tab-online" class="plate small" data-desc="Your Slippi account and online play."><span>Online</span></button>
@@ -64,6 +64,9 @@
           <div class="row no-quest" data-desc="Synchronise presentation with your display."><span class="name">Vertical sync</span><button id="sync" class="value">VSync</button></div>
           <div class="row no-quest" data-desc="How sharp the game renders. Auto follows the window size."><span class="name">Internal resolution</span>
             <div class="slider-control"><input type="range" class="range" id="resolution" min="0" max="10" step="1" value="0" /><span id="resolution-val" class="slider-value">Auto</span></div></div>
+          <div class="row quest-only" data-desc="How sharp the headset renders, against its recommended size. Dynamic follows the load, between 80% and 130%. Applies to the next game."><span class="name">Resolution</span>
+            <div class="slider-control"><input type="range" class="range" id="xr-resolution" min="80" max="140" step="10" value="140" /><span id="xr-resolution-val" class="slider-value">Dynamic</span></div></div>
+          <div class="row quest-only" data-desc="Application SpaceWarp: the headset makes every other frame from the game's motion, so movement is smooth at 120 Hz. Off shows each frame twice. Applies to the next game."><span class="name">SpaceWarp (ASW)</span><button id="spacewarp" class="value">On</button></div>
           <div class="row no-quest" data-desc="Applies to fights. Menus and cutscenes keep the original aspect."><span class="name">Aspect ratio</span><button id="aspect" class="value">Original (73:60)</button></div>
           <div class="row no-quest" data-desc="Classic keeps 4:3 safe margins; Wide anchors damage and stocks to the 16:9 edges."><span class="name">HUD layout</span><button id="hud-mode" class="value">Classic (4:3)</button></div>
           <div class="row no-quest" data-desc="Smooth polygon edges with multisampling. Applies after a restart."><span class="name">Anti-aliasing <span class="badge">RESTART</span></span><button id="aa" class="value">Anti-aliasing</button></div>
@@ -73,6 +76,7 @@
           <div class="row" data-desc="Load replacement textures from the textures folder."><span class="name">Custom HD textures</span><button id="custom-textures" class="value">Enabled</button></div>
           <div class="row no-quest" data-desc="Auto, or a specific graphics API this platform provides. Applies after a restart."><span class="name">Graphics backend <span class="badge">RESTART</span></span><button id="backend" class="value">Auto</button></div>
           <div class="row no-quest" data-desc="For slow devices: 1x internal resolution, no anti-aliasing, 1x filtering and reverb off."><span class="name">Performance preset</span><button id="performance" class="value action">Apply</button></div>
+          <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-graphics" class="value action">Restore</button></div>
         </div>
         <div id="page-audio" class="page">
           <div class="row" data-desc="Everything the game plays. Left and right adjust it."><span class="name">Master volume</span>
@@ -83,6 +87,8 @@
             <div class="slider-control"><input type="range" class="range" id="sfx-volume" min="0" max="100" step="5" value="100" /><span id="sfx-volume-val" class="slider-value">100%</span></div></div>
           <div class="row" data-desc="Silence the game without changing the volumes."><span class="name">Mute</span><button id="mute" class="value">Mute</button></div>
           <div class="row" data-desc="Stage reverb and echo. Off saves audio CPU on slow devices."><span class="name">Reverb</span><button id="reverb" class="value">On</button></div>
+          <div class="row" id="spatial-row" data-desc="Fighters' and items' sounds come from where they are on the stage. Applies to the next game."><span class="name">Spatial audio</span><button id="spatial-audio" class="value">On</button></div>
+          <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-audio" class="value action">Restore</button></div>
         </div>
         <div id="page-cheats" class="page">
           <div class="row" data-desc="Unlock all 26 characters, the 11 secret stages and All-Star mode."><span class="name">Unlock everything</span><button id="unlock-all" class="value">Off</button></div>
@@ -90,6 +96,7 @@
           <div class="row no-quest" data-desc="Free the pause camera's rotation and zoom."><span class="name">Free camera</span><button id="free-camera" class="value">Normal</button></div>
           <div class="row" data-desc="UCF 0.84 as Slippi plays it: dashback, shield drop, SDI, tumble and 1.0 cardinals on any controller. MELEE_UCF overrides."><span class="name">Universal Controller Fix</span><button id="ucf" class="value">On</button></div>
           <div class="row" data-desc="Slippi's other rules offline: no wobbling, neutral spawns and the Ice Climbers freeze-glitch fix. Always on online. MELEE_SLIPPI_FIXES overrides."><span class="name">Slippi gameplay fixes</span><button id="slippi-fixes" class="value">On</button></div>
+          <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-cheats" class="value action">Restore</button></div>
         </div>
         <div id="page-controls" class="page">
           <div class="info no-mobile">
@@ -115,6 +122,7 @@
             <div class="slider-control"><input type="range" class="range" id="scale" min="75" max="150" step="25" value="100" /><span id="scale-val" class="slider-value">100%</span></div></div>
           <div class="row no-quest" data-desc="Look for a new release on GitHub at each start."><span class="name">Check for updates</span><button id="check-updates" class="value">On</button></div>
           <div class="row no-quest" id="check-row" data-desc="Look for a new release now."><span class="name">Updates <span id="check-status" class="detail">Melee-PC is up to date.</span></span><button id="check-now" class="value action">Check now</button></div>
+          <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-launcher" class="value action">Restore</button></div>
         </div>
         <p id="settings-status" style="display: none;"></p>
       </div>
