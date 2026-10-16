@@ -1546,19 +1546,19 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_DUMP` | unset | Directory to write each stream's image once (PPM, plus alpha as PGM) |
 | `AURORA_XR_RAYCAST` | 1 | 0 leaves `XR_META_environment_raycast` off: no surface measured under the stage (Quest 3/3S, spatial data permission) |
 | `AURORA_XR_LOCAL_FLOOR` | 1 | 0 leaves `XR_EXT_local_floor` off: the floor no longer stands in for the surface without raycast |
-| `AURORA_XR_SURFACE_SHADOW` | 1 | 0 hides the stage's shadow on the surface under it (still measured): blind A/B |
+| `AURORA_XR_SURFACE_SHADOW` | 1 | 0 hides the stage's shadow on the surface under it (still measured): blind A/B. Overrides the launcher's Stage shadow (Off also skips raycasting) |
 | `AURORA_XR_SHADOW_ALPHA` | 0.4 | The shadow's opacity with the stage resting on the surface; it falls as R²/(R²+gap²) |
 | `AURORA_XR_SHADOW_SPREAD` | 0.5 | How much the shadow widens per footprint radius of gap |
 | `AURORA_XR_SURFACE_LOG` | 0 | 1 logs the surface casts once a second while they run (ray statuses, consensus height, spread, coverage, gap, shadow) and the rays' timing every 10 s |
 | `AURORA_XR_GRADE` | 1 | 0: no room grade (passthrough tinted toward the stage's palette during fights): blind A/B |
-| `AURORA_XR_GRADE_STRENGTH` | 1 | Scales every stage's grade away from none |
+| `AURORA_XR_GRADE_STRENGTH` | 1 | Scales every stage's grade away from none. Overrides the launcher's Room color grade (Subtle 0.5, Normal 1, Strong 1.5; Off is `AURORA_XR_GRADE=0`) |
 | `AURORA_XR_GRADE_FADE` | 1 | Seconds the grade takes to fade in (fight start, hold let go) and out (fight end) |
 | `AURORA_XR_GRADE_LUT` | 16 | Colour LUT size (power of two, up to 32 and the runtime's limit); 0 uses brightness and saturation instead (no tint) |
 | `AURORA_XR_GRADE_LOG` | 0 | 1 logs the grade's LUT builds and fades |
 | `MELEE_XR_GRADE` | per stage | Room grade for the stage played: `r,g,b,saturation` (gains in linear light; `1,1,1,1` is none) |
 | `MELEE_XR_GRADE_DYNAMIC` | 0.6 | Stages whose lighting changes mid-fight (Venom's caves): how much of their lights' change from their brightest the room grade follows; 0 turns it off |
 | `MELEE_XR_LIGHT_LOG` | unset | Log those stages' summed light colours and the room grade's gains once a second |
-| `AURORA_XR_ROOM_LIGHT` | 1 | 0: the 3D view isn't matched to the room's light (blind A/B) |
+| `AURORA_XR_ROOM_LIGHT` | 1 | 0: the 3D view isn't matched to the room's light (blind A/B). Overrides the launcher's Match room lighting |
 | `AURORA_XR_ROOM_LIGHT_FIXED` | unset | `s` or `r,g,b`: a fixed colour scale on the 3D view instead (A/B of fixed scales) |
 | `AURORA_XR_ROOM_LIGHT_SOURCE` | any | `camera`, `sensor` or `normal` (no measurement: a normal room) |
 | `AURORA_XR_ROOM_LIGHT_LOG` | 0 | 1 logs a line a second (P, exposure, gain, white balance, scales) and, from the sampler (tag `MeleeLight`), every camera's characteristics, every sensor and each burst |

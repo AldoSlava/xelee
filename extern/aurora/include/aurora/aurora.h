@@ -130,6 +130,24 @@ typedef struct {
    * offers it. AURORA_XR_APPSW overrides it.
    */
   bool xrNoSpaceWarp;
+  /*
+   * OpenXR builds, mixed reality, for the room around the stage. No
+   * contact shadow on the surface under the stage (and no raycasting for
+   * it); AURORA_XR_RAYCAST and AURORA_XR_SURFACE_SHADOW override it.
+   */
+  bool xrNoStageShadow;
+  /*
+   * The room's colour grade toward the stage: its strength, or 0 for the
+   * default (1) and below 0 for none. AURORA_XR_GRADE and
+   * AURORA_XR_GRADE_STRENGTH override it.
+   */
+  float xrRoomGrade;
+  /*
+   * Leave the 3D view's brightness as it is, whatever the room's light (and
+   * never sample the passthrough camera for it). AURORA_XR_ROOM_LIGHT
+   * overrides it.
+   */
+  bool xrNoRoomLight;
 } AuroraConfig;
 
 typedef struct {

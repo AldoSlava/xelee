@@ -374,7 +374,8 @@ Preferences load_preferences(const std::filesystem::path& path) {
         } else if (key == "check_updates" || key == "custom_textures" || key == "unlock_all" ||
                    key == "frozen_stadium" || key == "free_camera" || key == "ucf" ||
                    key == "slippi_fixes" || key == "reverb" || key == "spatial_audio" ||
-                   key == "stage_sounds" || key == "xr_spacewarp")
+                   key == "stage_sounds" || key == "xr_spacewarp" ||
+                   key == "xr_shadow" || key == "xr_room_light")
         {
             int value;
             if (row >> value && (value == 0 || value == 1)) {
@@ -400,7 +401,15 @@ Preferences load_preferences(const std::filesystem::path& path) {
                     prefs.stage_sounds = value;
                 else if (key == "xr_spacewarp")
                     prefs.xr_spacewarp = value;
+                else if (key == "xr_shadow")
+                    prefs.xr_shadow = value;
+                else if (key == "xr_room_light")
+                    prefs.xr_room_light = value;
             }
+        } else if (key == "xr_room_grade") {
+            int value;
+            if (row >> value && value >= 0 && value <= 3)
+                prefs.xr_room_grade = value;
         } else if (key == "xr_resolution") {
             int value;
             if (row >> value && (value == 0 || (value >= 80 && value <= 130 && value % 10 == 0)))
@@ -448,7 +457,8 @@ bool save_preferences(
     text << "slippi_fixes " << prefs.slippi_fixes << '\n';
     text << "spatial_audio " << prefs.spatial_audio << "\nstage_sounds " << prefs.stage_sounds
          << "\nxr_resolution " << prefs.xr_resolution
-         << "\nxr_spacewarp " << prefs.xr_spacewarp << '\n';
+         << "\nxr_spacewarp " << prefs.xr_spacewarp << "\nxr_shadow " << prefs.xr_shadow
+         << "\nxr_room_grade " << prefs.xr_room_grade << "\nxr_room_light " << prefs.xr_room_light << '\n';
     auto data = text.str();
     size_t done = 0;
     bool ok = true;

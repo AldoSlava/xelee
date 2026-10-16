@@ -355,6 +355,10 @@ constexpr const char* disc_note = "Drop a disc image here, or use Choose Disc.";
 #endif
 /* Melee colours the menu frame after the entry under the cursor. */
 constexpr const char* themes[] = {"play", "choose", "verify", "settings", "quit"};
+// The Quest's Room color grade, and the strength each asks of the XR layer
+// (AuroraConfig::xrRoomGrade: below 0 none, 0 its default).
+constexpr const char* xr_room_grade_names[] = {"Off", "Subtle", "Normal", "Strong"};
+constexpr float xr_room_grade_strength[] = {-1.0f, 0.5f, 0.0f, 1.5f};
 
 /* The launcher's settings categories (launcher.rml); the F1 menu keeps its
  * own, above. */
@@ -446,7 +450,8 @@ class Launcher final : public Rml::EventListener {
     std::vector<std::string> page_focus() const {
         switch (tab) {
         case 0:
-            return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "aspect",
+            return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "xr-shadow",
+                "xr-room-grade", "xr-room-light", "aspect",
                 "hud-mode", "aa", "filter-mode", "fps", "custom-textures", "backend",
                 "performance", "defaults-graphics"};
         case 1:
@@ -670,6 +675,8 @@ class Launcher final : public Rml::EventListener {
             aurora_set_resampler(static_cast<AuroraSampler>(prefs.filter_mode));
         } else if (id == "net-delay")
             prefs.net_delay = wrap(prefs.net_delay + 1 + direction, 6) - 1;  // Auto, 0-4
+        else if (id == "xr-room-grade")
+            prefs.xr_room_grade = wrap(prefs.xr_room_grade + direction, 4);
         else
             return false;
         save();
@@ -712,6 +719,9 @@ class Launcher final : public Rml::EventListener {
         slider("xr-resolution", float(xr_resolution_slider(prefs.xr_resolution)));
         text("xr-resolution-val", xr_resolution_name(prefs.xr_resolution));
         text("spacewarp", prefs.xr_spacewarp ? "On" : "Off");
+        text("xr-shadow", prefs.xr_shadow ? "On" : "Off");
+        text("xr-room-grade", xr_room_grade_names[prefs.xr_room_grade & 3]);
+        text("xr-room-light", prefs.xr_room_light ? "On" : "Off");
         text("aspect", prefs.widescreen == 0 ? "Original (73:60)" :
                        prefs.widescreen == 1 ? "Widescreen 16:9" :
                                                "Auto (window aspect)");
@@ -841,6 +851,9 @@ class Launcher final : public Rml::EventListener {
             prefs.backend = d.backend;
             prefs.xr_resolution = d.xr_resolution;
             prefs.xr_spacewarp = d.xr_spacewarp;
+            prefs.xr_shadow = d.xr_shadow;
+            prefs.xr_room_grade = d.xr_room_grade;
+            prefs.xr_room_light = d.xr_room_light;
             message = "Graphics settings are back to their defaults.";
             if (restart)
                 message += " Anti-aliasing and the backend apply after a restart.";
@@ -911,7 +924,8 @@ class Launcher final : public Rml::EventListener {
             refresh_settings();
             return;
         }
-        if (id == "net-delay" || id == "aspect" || id == "filter" || id == "filter-mode") {
+        if (id == "net-delay" || id == "aspect" || id == "filter" || id == "filter-mode" ||
+            id == "xr-room-grade") {
             cycle(id, 1);
             return;
         }
@@ -1094,6 +1108,12 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("spacewarp")->Focus();
+        } else if (id == "xr-shadow" || id == "xr-room-light") {
+            bool& value = id == "xr-shadow" ? prefs.xr_shadow : prefs.xr_room_light;
+            value = !value;
+            save();
+            refresh_settings();
+            element(id.c_str())->Focus();
         } else if (id.rfind("defaults-", 0) == 0) {
             restore_defaults(id);
             element(id.c_str())->Focus();
@@ -1608,6 +1628,9 @@ extern "C" void pc_launcher_configure(AuroraConfig* config) {
     config->msaa = prefs.msaa;
     config->xrEyeScale = prefs.xr_resolution / 100.0f;
     config->xrNoSpaceWarp = !prefs.xr_spacewarp;
+    config->xrNoStageShadow = !prefs.xr_shadow;
+    config->xrRoomGrade = xr_room_grade_strength[prefs.xr_room_grade & 3];
+    config->xrNoRoomLight = !prefs.xr_room_light;
     config->maxTextureAnisotropy = prefs.anisotropy;
     if (!std::getenv("MELEE_VSYNC"))
         config->vsync = prefs.vsync;

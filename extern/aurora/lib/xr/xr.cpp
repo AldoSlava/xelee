@@ -752,7 +752,7 @@ bool create_instance() {
   // The surface under the stage, for its shadow. Raycast is offered only to
   // apps declaring USE_SCENE, on Quest 3 and 3S; AURORA_XR_RAYCAST=0 leaves
   // it off, AURORA_XR_LOCAL_FLOOR=0 the floor that stands in for it.
-  B.hasEnvRaycastExt &= B.hasFutureExt && env_flag("AURORA_XR_RAYCAST", true);
+  B.hasEnvRaycastExt &= B.hasFutureExt && env_flag("AURORA_XR_RAYCAST", !g_config.xrNoStageShadow);
   if (B.hasEnvRaycastExt) {
     exts.push_back(XR_EXT_FUTURE_EXTENSION_NAME);
     exts.push_back(XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME);
@@ -762,7 +762,7 @@ bool create_instance() {
     exts.push_back(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
   // The room's grade by colour LUT; without it, brightness, contrast and
   // saturation (AURORA_XR_GRADE_LUT=0 forces those, AURORA_XR_GRADE=0 none).
-  B.hasColorLutExt &= B.hasPassthroughExt && env_flag("AURORA_XR_GRADE", true) &&
+  B.hasColorLutExt &= B.hasPassthroughExt && env_flag("AURORA_XR_GRADE", g_config.xrRoomGrade >= 0.f) &&
                       env_float("AURORA_XR_GRADE_LUT", 16.f) >= 2.f;
   if (B.hasColorLutExt)
     exts.push_back(XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
@@ -3657,7 +3657,7 @@ struct SurfaceSettings {
 const SurfaceSettings& surface_settings() {
   static const SurfaceSettings s = [] {
     SurfaceSettings s;
-    s.shadow = env_flag("AURORA_XR_SURFACE_SHADOW", true);
+    s.shadow = env_flag("AURORA_XR_SURFACE_SHADOW", !g_config.xrNoStageShadow); // the launcher's Stage shadow
     s.log = env_flag("AURORA_XR_SURFACE_LOG", false);
     s.alpha = std::clamp(env_float("AURORA_XR_SHADOW_ALPHA", 0.4f), 0.f, 1.f);
     s.spread = std::max(env_float("AURORA_XR_SHADOW_SPREAD", 0.5f), 0.f);
@@ -4338,9 +4338,11 @@ struct GradeSettings {
 const GradeSettings& grade_settings() {
   static const GradeSettings s = [] {
     GradeSettings s;
-    s.on = env_flag("AURORA_XR_GRADE", true);
+    // The launcher's Room color grade: Off (< 0), Subtle, Normal (0: 1) or Strong.
+    const float host = g_config.xrRoomGrade;
+    s.on = env_flag("AURORA_XR_GRADE", host >= 0.f);
     s.log = env_flag("AURORA_XR_GRADE_LOG", false);
-    s.strength = std::clamp(env_float("AURORA_XR_GRADE_STRENGTH", 1.f), 0.f, 3.f);
+    s.strength = std::clamp(env_float("AURORA_XR_GRADE_STRENGTH", host > 0.f ? host : 1.f), 0.f, 3.f);
     s.fade = std::max(env_float("AURORA_XR_GRADE_FADE", 1.f), 0.05f);
     // A power of two (the extension requires it), within its limit.
     const uint32_t want = static_cast<uint32_t>(std::clamp(env_float("AURORA_XR_GRADE_LUT", 16.f), 0.f, 32.f));
@@ -4637,7 +4639,7 @@ struct RoomSettings {
 const RoomSettings& room_settings() {
   static const RoomSettings s = [] {
     RoomSettings s;
-    s.on = env_flag("AURORA_XR_ROOM_LIGHT", true);
+    s.on = env_flag("AURORA_XR_ROOM_LIGHT", !g_config.xrNoRoomLight); // the launcher's Match room lighting
     s.log = env_flag("AURORA_XR_ROOM_LIGHT_LOG", false);
     if (const char* v = std::getenv("AURORA_XR_ROOM_LIGHT_SOURCE")) {
       const std::string_view src{v};
