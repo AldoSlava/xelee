@@ -31,6 +31,7 @@ ItemKind itGetKind(HSD_GObj* gobj);
 #include <time.h>
 
 #define SP_VOICES 64       /* AX_VOICES */
+#define SP_PLACED 4        /* sounds made here, at points of the stage (pc_spatial_render_placed) */
 #define SP_EMITTERS 64     /* fighters and items published per frame */
 #define SP_HANDLES 256     /* netplay starts remembered by handle */
 #define SP_STALE_NS 250000000ull /* positions older than this: back to plain stereo */
@@ -580,7 +581,8 @@ typedef struct SpVoice {
     IPLDirectEffect dir;
 } SpVoice;
 
-static SpVoice s_v[SP_VOICES];
+/* AX's voices, then the placed sounds' slots. */
+static SpVoice s_v[SP_VOICES + SP_PLACED];
 static IPLContext s_ctx;
 static IPLHRTF s_hrtf;
 static IPLAudioSettings s_settings;
@@ -763,7 +765,7 @@ void pc_spatial_init(int rate, int frame) {
         pc_log_line("spatial: Steam Audio HRTF failed (%d); off", (int)err);
         return;
     }
-    for (int i = 0; i < SP_VOICES; i++) {
+    for (int i = 0; i < SP_VOICES + SP_PLACED; i++) {
         IPLBinauralEffectSettings bs = {s_hrtf};
         IPLDirectEffectSettings ds = {1};
         if (iplBinauralEffectCreate(s_ctx, &s_settings, &bs, &s_v[i].bin) != IPL_STATUS_SUCCESS ||
@@ -990,6 +992,17 @@ void pc_spatial_render(int voice, const float* mono) {
             st.sample_gain = gain;
         }
     }
+}
+
+bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono) {
+    if (!s_active || slot < 0 || slot >= SP_PLACED) {
+        return false;
+    }
+    SpVoice* v = &s_v[SP_VOICES + slot];
+    memcpy(v->pos, pos, sizeof(v->pos));
+    v->boost = 1.f;
+    pc_spatial_render(SP_VOICES + slot, mono);
+    return true;
 }
 
 /* A direction fixed to the stage's axes (x right, y up, +z toward the

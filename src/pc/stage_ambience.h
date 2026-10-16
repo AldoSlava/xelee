@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Stage ambience: sounds the stages lack, made here (docs: the expanded
- * stage sounds idea). Corneria's wind on the Great Fox's deck, for now.
+ * stage sounds idea). Corneria's wind on the Great Fox's deck, heard all
+ * around, and Kongo Jungle's waterfall, heard from where it falls.
  * Output only: nothing here is read back by the game, so netplay and
  * rollback never see it. MELEE_AMBIENCE_GAIN (dB) sets its level. */
 #pragma once
@@ -20,8 +21,9 @@ void pc_ambience_set_enabled(bool on);
  * ambience plays. Read only. */
 void pc_ambience_frame(void);
 
-/* Audio thread: the ambience for one AX frame of `frames` stereo samples,
- * added to `out` (interleaved, at the AX rate). */
+/* Audio thread: the ambience for one AX frame of `frames` stereo samples:
+ * what surrounds the listener added to `out` (interleaved, at the AX rate),
+ * what stands somewhere placed there (pc_spatial_render_placed). */
 void pc_ambience_mix(float* out, int frames, int rate);
 
 #ifdef __cplusplus
