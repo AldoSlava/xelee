@@ -541,6 +541,11 @@ static const RoomGrade s_grades[] = {
     {0x0C, 0.9f, 0.8f, 0.98f, 0.85f},   /* Fountain of Dreams: dusk violet */
     {0x24, 0.88f, 0.88f, 0.88f, 0.75f}, /* Battlefield: house lights down */
     {0x25, 0.88f, 0.88f, 0.88f, 0.75f}, /* Final Destination: house lights down */
+    /* Venom: a warm, dim canyon from the start; its lights then move it
+     * further as the Great Fox flies through the caves (dynamic, below).
+     * Without a base the room stayed as it was until the lights first
+     * dimmed, halfway through a fight. */
+    {0x0F, 0.95f, 0.86f, 0.8f, 0.9f},
 };
 #define GRADE_COUNT ((int)(sizeof s_grades / sizeof s_grades[0]))
 

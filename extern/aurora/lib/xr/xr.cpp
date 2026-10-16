@@ -4295,6 +4295,76 @@ bool build_shadow_layer(XrCompositionLayerQuad& q, XrCompositionLayerColorScaleB
   return true;
 }
 
+// A pose the runtime accepts: finite, its orientation a unit quaternion.
+// Fixed in place when it's only off length; false when it can't be.
+bool fix_pose(XrPosef& p, bool& fixed) {
+  const XrVector3f& v = p.position;
+  XrQuaternionf& q = p.orientation;
+  if (!std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z))
+    return false;
+  const float n2 = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+  if (!std::isfinite(n2) || n2 < 0.25f)
+    return false;
+  if (std::abs(n2 - 1.f) > 1e-4f) {
+    const float k = 1.f / std::sqrt(n2);
+    q = {q.x * k, q.y * k, q.z * k, q.w * k};
+    fixed = true;
+  }
+  return true;
+}
+
+// Before xrEndFrame: one bad pose fails the whole frame (XR_ERROR_POSE_INVALID),
+// which used to end the XR thread and leave the headset black. Each layer's
+// poses are checked; one only off length is normalized, a layer with one
+// that can't be fixed is left out, and the first few are logged with their
+// values to find where they came from. Returns the layers kept.
+uint32_t sanitize_layers(const XrCompositionLayerBaseHeader** layers, uint32_t count) {
+  static int logged = 0;
+  const auto report = [](uint32_t i, const char* what, const XrPosef& p, bool kept) {
+    if (logged++ >= 8)
+      return;
+    Log.warn("Composition layer {} ({}) had an invalid pose: position {},{},{}, orientation {},{},{},{}; {}", i, what,
+             p.position.x, p.position.y, p.position.z, p.orientation.x, p.orientation.y, p.orientation.z,
+             p.orientation.w, kept ? "normalized" : "left out");
+  };
+  uint32_t kept = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    auto* base = const_cast<XrCompositionLayerBaseHeader*>(layers[i]);
+    bool ok = true;
+    if (base->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
+      auto& q = *reinterpret_cast<XrCompositionLayerQuad*>(base);
+      const XrPosef before = q.pose;
+      bool fixed = false;
+      ok = fix_pose(q.pose, fixed) && std::isfinite(q.size.width) && std::isfinite(q.size.height) &&
+           q.size.width > 0.f && q.size.height > 0.f;
+      if (!ok || fixed)
+        report(i, "quad", before, ok);
+    } else if (base->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
+      auto& proj = *reinterpret_cast<XrCompositionLayerProjection*>(base);
+      for (uint32_t v = 0; v < proj.viewCount && ok; ++v) {
+        auto& view = const_cast<XrCompositionLayerProjectionView&>(proj.views[v]);
+        const XrPosef before = view.pose;
+        bool fixed = false;
+        ok = fix_pose(view.pose, fixed);
+        if (!ok || fixed)
+          report(i, "3D view", before, ok);
+        for (auto* n = reinterpret_cast<XrBaseOutStructure*>(const_cast<void*>(view.next)); n && ok; n = n->next)
+          if (n->type == XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB) {
+            auto& sw = *reinterpret_cast<XrCompositionLayerSpaceWarpInfoFB*>(n);
+            const XrPosef b2 = sw.appSpaceDeltaPose;
+            bool f2 = false;
+            ok = fix_pose(sw.appSpaceDeltaPose, f2);
+            if (!ok || f2)
+              report(i, "SpaceWarp delta", b2, ok);
+          }
+      }
+    }
+    if (ok)
+      layers[kept++] = layers[i];
+  }
+  return kept;
+}
+
 // ---------------------------------------------------------------- XR worker: the room's grade
 //
 // During a fight in mixed reality the room takes on a little of the stage's
@@ -4440,7 +4510,9 @@ void grade_main() {
     style.edgeColor = {0.f, 0.f, 0.f, 0.f};
     XrPassthroughColorMapInterpolatedLutMETA interp{XR_TYPE_PASSTHROUGH_COLOR_MAP_INTERPOLATED_LUT_META};
     XrPassthroughBrightnessContrastSaturationFB bcs{XR_TYPE_PASSTHROUGH_BRIGHTNESS_CONTRAST_SATURATION_FB};
-    if (w > 0.f && identity && target) {
+    if (identity && target) {
+      // Weight 0 too: the style stays a LUT for the session, only its
+      // weight moves (below).
       interp.sourceColorLut = identity;
       interp.targetColorLut = target;
       interp.weight = w;
@@ -4465,6 +4537,17 @@ void grade_main() {
       Log.warn("Passthrough style not set: XrResult {}", static_cast<int>(r));
     appliedWeight = w;
   };
+  // The LUT style goes on once, now, at weight 0 (an identity LUT both
+  // ways), and stays until the end: the compositor blacked passthrough out
+  // for a moment each time a style with a LUT replaced a plain one or the
+  // other way round, so a fight's grade fading in and out only moves the
+  // weight.
+  if (lutRes > 0) {
+    identity = create_lut({}, lutRes);
+    target = identity ? create_lut({}, lutRes) : XR_NULL_HANDLE;
+    if (target)
+      apply(0.f);
+  }
   for (;;) {
     RoomGrade grade;
     uint64_t seq;
@@ -4514,7 +4597,7 @@ void grade_main() {
                    built.saturation, lutRes > 0 ? fmt::format("{}^3 LUT {}", lutRes, how) : std::string{"no LUT"},
                    static_cast<double>(monotonic_ns() - t0) / 1e6);
         }
-        force = weight > 0.f;
+        force = true; // the style takes the new or rewritten LUT
       }
     }
     const float want = on && lookOn ? room : 0.f;
@@ -4533,8 +4616,13 @@ void grade_main() {
       force = false;
     }
   }
-  if (appliedWeight > 0.f)
-    apply(0.f);
+  // Plain again before the LUTs go (the session is ending).
+  if (target || appliedWeight > 0.f) {
+    XrPassthroughStyleFB plain{XR_TYPE_PASSTHROUGH_STYLE_FB};
+    plain.textureOpacityFactor = 1.f;
+    std::lock_guard lock{g_passthroughMutex};
+    B.setPassthroughStyle(B.passthroughLayer, &plain);
+  }
   if (target)
     B.destroyColorLut(target);
   if (identity)
@@ -5421,6 +5509,7 @@ bool render_xr_frame() {
     }
     layerCount = std::min(layerCount, B.maxLayers);
   }
+  layerCount = sanitize_layers(layers.data(), layerCount);
   XrFrameEndInfo fei{XR_TYPE_FRAME_END_INFO};
   fei.displayTime = fs.predictedDisplayTime;
   fei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
@@ -5435,7 +5524,16 @@ bool render_xr_frame() {
   }
   {
     TraceSection trace{"xrEndFrame"};
-    XR_TRY(xrEndFrame(B.session, &fei));
+    // A frame the runtime refuses (a layer it finds invalid) is ended again
+    // with the room alone, rather than ending the XR thread over it.
+    if (const XrResult r = xrEndFrame(B.session, &fei); XR_FAILED(r)) {
+      static int refused = 0;
+      if (refused++ < 5)
+        Log.error("xrEndFrame failed: XrResult {} ({} layers); this frame shows the room alone",
+                  static_cast<int>(r), layerCount);
+      fei.layerCount = roomShown ? 1 : 0;
+      XR_TRY(xrEndFrame(B.session, &fei));
+    }
   }
   section(8);
   if (monotonic_ns() - B.loopWaitNs > 4000000) {

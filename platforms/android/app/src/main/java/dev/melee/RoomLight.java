@@ -168,6 +168,17 @@ final class RoomLight {
         return null;
     }
 
+    /* A vendor tag's number: Meta's come as byte[1], not as a Number. -1: none. */
+    private static int tagInt(Object v) {
+        if (v instanceof Number) {
+            return ((Number) v).intValue();
+        }
+        if (v instanceof byte[] && ((byte[]) v).length > 0) {
+            return ((byte[]) v)[0];
+        }
+        return -1;
+    }
+
     private static String describe(Object v) {
         if (v == null) {
             return "null";
@@ -183,7 +194,8 @@ final class RoomLight {
     }
 
     /* The left passthrough camera (camera_source 0, position 0), else the
-     * first with YUV output; logs them all in log mode. */
+     * other one; logs them all in log mode. Never another camera: those need
+     * android.permission.CAMERA (camera 1 refused HEADSET_CAMERA). */
     private void pickCamera() {
         if (!granted("horizonos.permission.HEADSET_CAMERA") && !granted(android.Manifest.permission.CAMERA)) {
             Log.i(TAG, "no camera permission");
@@ -213,13 +225,13 @@ final class RoomLight {
                 if (sizes == null || sizes.length == 0) {
                     continue;
                 }
+                if (tagInt(characteristic(ch, "com.meta.extra_metadata.camera_source")) != 0) {
+                    continue; /* not a passthrough camera */
+                }
                 if (first == null) {
                     first = id;
                 }
-                Object source = characteristic(ch, "com.meta.extra_metadata.camera_source");
-                Object position = characteristic(ch, "com.meta.extra_metadata.position");
-                if (pick == null && source instanceof Number && ((Number) source).intValue() == 0
-                        && (!(position instanceof Number) || ((Number) position).intValue() == 0)) {
+                if (pick == null && tagInt(characteristic(ch, "com.meta.extra_metadata.position")) == 0) {
                     pick = id;
                 }
             }
