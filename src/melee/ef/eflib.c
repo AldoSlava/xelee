@@ -10,6 +10,7 @@
 #include <sysdolphin/baselib/dobj.h>
 #include <sysdolphin/baselib/mobj.h>
 #include <stdlib.h>
+#include <string.h>
 #include "eflib.h"
 
 #include <math.h>
@@ -28,6 +29,14 @@
 #include <sysdolphin/baselib/generator.h>
 #include <sysdolphin/baselib/gobjgxlink.h>
 #include <sysdolphin/baselib/gobjobject.h>
+
+#ifdef TARGET_PC
+#include "pc/pc.h"
+#include "pc/xr_scene.h"
+#include <sysdolphin/baselib/jobj.h>
+#include <sysdolphin/baselib/pobj.h>
+#include <sysdolphin/baselib/tobj.h>
+#endif
 #include <sysdolphin/baselib/gobjplink.h>
 #include <sysdolphin/baselib/gobjproc.h>
 #include <sysdolphin/baselib/gobjuserdata.h>
@@ -451,6 +460,124 @@ void efLib_Update(HSD_GObj* gobj)
     }
 }
 
+#ifdef TARGET_PC
+/* MELEE_EF_TREE=<gfx_id>: the effect model's joints (depth first) and their
+ * meshes, once, to pick parts out of it. */
+static void efLib_pc_dump_tree(HSD_JObj* jobj, int depth, int* index)
+{
+    for (; jobj != NULL; jobj = jobj->next) {
+        const int j = (*index)++;
+        int d = 0;
+        HSD_DObj* dobj;
+        for (dobj = (jobj->flags & (JOBJ_PTCL | JOBJ_SPLINE)) ? NULL : jobj->u.dobj; dobj != NULL;
+             dobj = dobj->next, d++)
+        {
+            HSD_MObj* m = dobj->mobj;
+            HSD_TObj* t = m != NULL ? m->tobj : NULL;
+            int bytes = 0;
+            HSD_PObj* p;
+            for (p = dobj->pobj; p != NULL; p = p->next) {
+                bytes += p->n_display * 32;
+            }
+            pc_log_line("ef tree: joint %d depth %d dobj %d rendermode %08x tex %ux%u display %d bytes", j, depth,
+                        d, m != NULL ? m->rendermode : 0u,
+                        t != NULL && t->imagedesc != NULL ? t->imagedesc->width : 0u,
+                        t != NULL && t->imagedesc != NULL ? t->imagedesc->height : 0u, bytes);
+        }
+        if (!(jobj->flags & JOBJ_INSTANCE)) {
+            efLib_pc_dump_tree(jobj->child, depth + 1, index);
+        }
+    }
+}
+
+/* The KO explosion's joints left out of the 3D view, depth first as
+ * MELEE_EF_TREE numbers them: 1 the beam, 2 the shockwave ring. Their fill
+ * took the eye pass from ~4.5 to 10-26 ms for half a second, and dynamic
+ * resolution had to drop to its floor to hide it; the star, the sparks and
+ * the burst stay. MELEE_XR_KO_HIDE="<j>,<j>..." picks others, "none" none. */
+static u32 efLib_pc_ko_hidden_joints(void)
+{
+    static u32 mask = 0xFFFFFFFFu;
+    if (mask == 0xFFFFFFFFu) {
+        const char* env = getenv("MELEE_XR_KO_HIDE");
+        mask = 0;
+        if (env == NULL) {
+            mask = (1u << 1) | (1u << 2);
+        } else {
+            while (*env != '\0') {
+                const int j = atoi(env);
+                if (*env >= '0' && *env <= '9' && j < 32) {
+                    mask |= 1u << j;
+                }
+                env = strchr(env, ',');
+                if (env == NULL) {
+                    break;
+                }
+                env++;
+            }
+        }
+    }
+    return mask;
+}
+
+/* Sets or clears DOBJ_HIDDEN on the masked joints' meshes; `saved` keeps
+ * each mesh's own flag to put back (one bit per joint: they have one). */
+static void efLib_pc_hide_joints(HSD_JObj* jobj, u32 mask, int* index, u32* saved, bool hide)
+{
+    for (; jobj != NULL; jobj = jobj->next) {
+        const int j = (*index)++;
+        if (j < 32 && (mask & (1u << j)) && !(jobj->flags & (JOBJ_PTCL | JOBJ_SPLINE))) {
+            HSD_DObj* dobj;
+            for (dobj = jobj->u.dobj; dobj != NULL; dobj = dobj->next) {
+                if (hide) {
+                    if (dobj->flags & DOBJ_HIDDEN) {
+                        *saved |= 1u << j;
+                    }
+                    dobj->flags |= DOBJ_HIDDEN;
+                } else if (!(*saved & (1u << j))) {
+                    dobj->flags &= ~DOBJ_HIDDEN;
+                }
+            }
+        }
+        if (!(jobj->flags & JOBJ_INSTANCE)) {
+            efLib_pc_hide_joints(jobj->child, mask, index, saved, hide);
+        }
+    }
+}
+
+static void efLib_pc_blast_render(HSD_GObj* gobj, intptr_t pass)
+{
+    static int dump = -2;
+    if (dump == -2) {
+        dump = getenv("MELEE_EF_TREE") != NULL ? 1 : 0;
+    }
+    if (dump == 1) {
+        int index = 0;
+        dump = 0;
+        efLib_pc_dump_tree(GET_JOBJ(gobj), 0, &index);
+    }
+    const int began = pc_xr_blast_clip_begin();
+    /* Only in the 3D view (pc_xr_blast_clip_begin is non-zero there). */
+    const u32 mask = began != 0 ? efLib_pc_ko_hidden_joints() : 0;
+    u32 saved = 0;
+    int index = 0;
+    if (mask != 0) {
+        static bool logged;
+        if (!logged) {
+            logged = true;
+            pc_log_line("xr: KO explosion drawn without joints %08x in the 3D view", (unsigned) mask);
+        }
+        efLib_pc_hide_joints(GET_JOBJ(gobj), mask, &index, &saved, true);
+    }
+    HSD_GObj_JObjCallback(gobj, pass);
+    if (mask != 0) {
+        index = 0;
+        efLib_pc_hide_joints(GET_JOBJ(gobj), mask, &index, &saved, false);
+    }
+    pc_xr_blast_clip_end(began);
+}
+#endif
+
 EF_Effect* efLib_Create(int gfx_id, HSD_GObj* parent_gobj)
 {
     EF_Effect* effect;
@@ -538,6 +665,13 @@ EF_Effect* efLib_Create(int gfx_id, HSD_GObj* parent_gobj)
             return NULL;
         }
     }
+#ifdef TARGET_PC
+    /* The KO explosion (efAsync 0x42B/0x42C): cut to the blast zones in the
+     * 3D view (src/pc/xr_scene.c). */
+    if (gfx_id == 0x19 || gfx_id == 0x1A) {
+        GObj_SetupGXLink(effect->gobj, efLib_pc_blast_render, 7, 1);
+    } else
+#endif
     GObj_SetupGXLink(effect->gobj, HSD_GObj_JObjCallback, 7, 1);
     GObj_InitUserData(effect->gobj, 8, efLib_remove_user_data, effect);
     {

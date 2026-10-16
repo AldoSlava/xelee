@@ -1914,7 +1914,7 @@ void psDispParticles(u32 target_link, u32 sw)
                 }
                 xr_hidden = false;
                 if (!(pp->size < FLT_EPSILON)) {
-                    xr_hidden = pc_xr_particle_begin(pp->bank, pp->idnum,
+                    xr_hidden = pc_xr_particle_begin(pp->bank, pp->idnum, pp->texGroup, pp->size,
                                                      &pp->pos.x);
                     if (needs_setup != 0) {
                         sp79C = NULL;

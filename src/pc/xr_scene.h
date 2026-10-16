@@ -66,8 +66,17 @@ int pc_xr_dobj_begin(struct HSD_JObj* jobj, int dobj_index);
 void pc_xr_jobj_end(int changed);
 /* Around one particle's draw (psDispParticles): leaves the stage's listed
  * particles out of the 3D view under mixed reality. `pos` is its position. */
-bool pc_xr_particle_begin(int bank, int id, const float pos[3]);
+bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const float pos[3]);
 void pc_xr_particle_end(bool hidden);
+/* A KO: its explosion is about to draw (ft_0D31.c), so dynamic resolution
+ * drops ahead of it (aurora_xr_heavy_effect). */
+void pc_xr_heavy_effect(void);
+/* Around a KO explosion model's draw (eflib.c): in the 3D view it is cut to
+ * the blast zones' box. Its ring and beam are sized for the TV camera at the
+ * blast zone and filled a large part of both eyes. */
+/* Returns 0 outside the 3D view, 1 in it unclipped, 2 clipped. */
+int pc_xr_blast_clip_begin(void);
+void pc_xr_blast_clip_end(int began);
 /* Around the draw of a fighter the flat camera can't see (ft/ftdrawcommon.c),
  * which the game skips: true when the 3D view draws it anyway, pulsing
  * translucent; then call pc_xr_fighter_offscreen_end after it. Its logic
@@ -112,13 +121,18 @@ static inline int pc_xr_dobj_begin(struct HSD_JObj* jobj, int dobj_index) {
     return 0;
 }
 static inline void pc_xr_jobj_end(int changed) { (void)changed; }
-static inline bool pc_xr_particle_begin(int bank, int id, const float pos[3]) {
+static inline bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const float pos[3]) {
     (void)bank;
     (void)id;
+    (void)tex_group;
+    (void)size;
     (void)pos;
     return false;
 }
 static inline void pc_xr_particle_end(bool hidden) { (void)hidden; }
+static inline void pc_xr_heavy_effect(void) {}
+static inline int pc_xr_blast_clip_begin(void) { return 0; }
+static inline void pc_xr_blast_clip_end(int began) { (void)began; }
 static inline bool pc_xr_fighter_offscreen_begin(void) { return false; }
 static inline bool pc_xr_fighter_offscreen_forced(void) { return false; }
 static inline void pc_xr_fighter_offscreen_end(void) {}

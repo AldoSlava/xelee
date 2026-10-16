@@ -26,6 +26,7 @@
 #include <sysdolphin/baselib/random.h>
 
 #include "pc/pc.h"
+#include "pc/xr_scene.h"
 
 const Quaternion lbl_803B7500 = { 0, 3.1415927f, 0, 0 };
 
@@ -223,6 +224,7 @@ static inline void enterDead(Fighter_GObj* gobj, FtMotionId msid)
                 : msid == ftCo_MS_DeadRight ? "right"
                 : msid == ftCo_MS_DeadDown  ? "down"
                                             : "up");
+    pc_xr_heavy_effect();
     ftCo_800D331C(gobj);
     fp->mv.co.unk_800D3680.x40 = p_ftCommonData->x500;
     Fighter_ChangeMotionState(gobj, msid, Ft_MF_None, 0.0F, 1.0F, 0.0F, NULL);

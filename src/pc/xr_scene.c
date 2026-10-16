@@ -1391,23 +1391,30 @@ void pc_xr_stage_part_end(bool hidden) {
 }
 
 /* Stage particles left out of the 3D view, by GrKind and the particle's
- * bank and id (HSD_Particle bank/idnum; id -1 is the whole bank, and ids
- * number instances, so most rules want that). Extend with MELEE_XR_PTCL
- * "<grkind>:<bank>:<id>,..."; MELEE_XR_PTCL_LOG lists each one drawn. */
+ * bank, id and texture group (HSD_Particle bank/idnum/texGroup; -1 is any:
+ * ids number instances, so most rules want -1 there, and a bank's texture
+ * groups tell its kinds apart). Extend with MELEE_XR_PTCL
+ * "<grkind>:<bank>:<id>[:<texgroup>],..."; MELEE_XR_PTCL_LOG lists each one
+ * drawn, MELEE_XR_PTCL_STATS=1 what each bank and texture group draws. */
 typedef struct {
     int grkind;
     int bank;
     int id;
+    int tex_group;
 } ParticleRule;
 
 static const ParticleRule s_particles[] = {
     /* Kongo Jungle: the river's splashes (bank 30 is the stage's own), left
      * floating once the river is hidden. */
-    {0x04, 30, -1},
+    {0x04, 30, -1, -1},
     /* Battlefield and Final Destination: the background's drifting sparks
      * and streaks, ~3600 behind the stage (MELEE_XR_PTCL_LOG). */
-    {0x24, 30, -1},
-    {0x25, 30, -1},
+    {0x24, 30, -1, -1},
+    {0x25, 30, -1, -1},
+    /* Fountain of Dreams: the falling stars and their trails (texture group
+     * 1, y -178..299; MELEE_XR_PTCL_STATS). The fountain's water is groups 0,
+     * 2 and 3 of the same bank and stays. */
+    {0x0C, 30, -1, 1},
 };
 #define PARTICLE_COUNT ((int)(sizeof s_particles / sizeof s_particles[0]))
 
@@ -1419,39 +1426,114 @@ static int s_env_particle_count = -1;
 static void load_particle_rules(void) {
     s_env_particle_count = 0;
     for (const char* q = getenv("MELEE_XR_PTCL"); q != NULL && *q != '\0';) {
-        int g, b, n;
-        if (sscanf(q, "%d:%d:%d", &g, &b, &n) == 3 && s_env_particle_count < PARTICLE_ENV_MAX) {
-            s_env_particles[s_env_particle_count++] = (ParticleRule){g, b, n};
+        int g, b, n, t = -1;
+        if (sscanf(q, "%d:%d:%d:%d", &g, &b, &n, &t) >= 3 && s_env_particle_count < PARTICLE_ENV_MAX) {
+            s_env_particles[s_env_particle_count++] = (ParticleRule){g, b, n, t};
         }
         q = strchr(q, ',');
         q = q != NULL ? q + 1 : NULL;
     }
 }
 
-static bool particle_rule(int grkind, int bank, int id) {
+static bool particle_rule(int grkind, int bank, int id, int tex_group) {
     if (s_env_particle_count < 0) {
         load_particle_rules();
     }
     for (int i = 0; i < PARTICLE_COUNT; i++) {
         const ParticleRule* r = &s_particles[i];
-        if (r->grkind == grkind && r->bank == bank && (r->id < 0 || r->id == id)) {
+        if (r->grkind == grkind && r->bank == bank && (r->id < 0 || r->id == id) &&
+            (r->tex_group < 0 || r->tex_group == tex_group)) {
             return true;
         }
     }
     for (int i = 0; i < s_env_particle_count; i++) {
         const ParticleRule* r = &s_env_particles[i];
-        if (r->grkind == grkind && r->bank == bank && (r->id < 0 || r->id == id)) {
+        if (r->grkind == grkind && r->bank == bank && (r->id < 0 || r->id == id) &&
+            (r->tex_group < 0 || r->tex_group == tex_group)) {
             return true;
         }
     }
     return false;
 }
 
-bool pc_xr_particle_begin(int bank, int id, const float pos[3]) {
+/* MELEE_XR_PTCL_STATS=1: every 10 s, the bank/texture groups the 3D view
+ * drew the most of, by count and by the sum of size squared (a stand-in for
+ * the pixels they cover), with a separate tally for the second after each
+ * KO (pc_xr_heavy_effect). */
+typedef struct {
+    unsigned count;
+    double area;
+    float y_min, y_max;
+} ParticleStat;
+static ParticleStat s_ptcl_stats[2][64][64];
+static Uint64 s_ptcl_stats_since, s_ko_window_until;
+
+typedef struct {
+    int bank, tex;
+    ParticleStat s;
+} ParticleTop;
+
+static int compare_particle_top(const void* a, const void* b) {
+    const double x = ((const ParticleTop*)a)->s.area, y = ((const ParticleTop*)b)->s.area;
+    return (x < y) - (x > y); /* largest first */
+}
+
+static void particle_stats_log(int which) {
+    static ParticleTop all[64 * 64];
+    int n = 0;
+    for (int b = 0; b < 64; b++) {
+        for (int t = 0; t < 64; t++) {
+            if (s_ptcl_stats[which][b][t].count != 0) {
+                all[n++] = (ParticleTop){b, t, s_ptcl_stats[which][b][t]};
+            }
+        }
+    }
+    qsort(all, (size_t)n, sizeof all[0], compare_particle_top);
+    for (int i = 0; i < n && i < 8; i++) {
+        pc_log_line("xr: particles%s stage %d bank %d tex %d: %u drawn, area %.0f, y %.0f..%.0f",
+            which ? " after KOs," : ",", s_center_grkind, all[i].bank, all[i].tex, all[i].s.count, all[i].s.area,
+            all[i].s.y_min, all[i].s.y_max);
+    }
+    memset(s_ptcl_stats[which], 0, sizeof s_ptcl_stats[which]);
+}
+
+static void particle_stats(int bank, int tex_group, float size, const float pos[3]) {
+    const Uint64 now = SDL_GetTicks();
+    if (s_ptcl_stats_since == 0) {
+        s_ptcl_stats_since = now;
+    }
+    for (int which = 0; which < 2; which++) {
+        if (which == 1 && now > s_ko_window_until) {
+            break;
+        }
+        ParticleStat* s = &s_ptcl_stats[which][bank & 63][tex_group & 63];
+        if (s->count == 0 || pos[1] < s->y_min) {
+            s->y_min = pos[1];
+        }
+        if (s->count == 0 || pos[1] > s->y_max) {
+            s->y_max = pos[1];
+        }
+        s->count++;
+        s->area += (double)size * size;
+    }
+    if (now - s_ptcl_stats_since >= 10000) {
+        s_ptcl_stats_since = now;
+        particle_stats_log(0);
+        particle_stats_log(1);
+    }
+}
+
+bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const float pos[3]) {
     if (s_category != AURORA_XR_WORLD || s_center_grkind <= 0) {
         return false;
     }
-    static int log = -1, hide_all = -1;
+    static int log = -1, hide_all = -1, stats = -1;
+    if (stats < 0) {
+        stats = getenv("MELEE_XR_PTCL_STATS") != NULL;
+    }
+    if (stats) {
+        particle_stats(bank, tex_group, size, pos);
+    }
     if (log < 0) {
         log = getenv("MELEE_XR_PTCL_LOG") != NULL;
         /* MELEE_XR_PTCL_TEST_HIDE=1: every particle out of 3D and the flat
@@ -1459,6 +1541,20 @@ bool pc_xr_particle_begin(int bank, int id, const float pos[3]) {
         hide_all = getenv("MELEE_XR_PTCL_TEST_HIDE") != NULL;
     }
     if (hide_all) {
+        aurora_xr_camera(AURORA_XR_HIDDEN, NULL);
+        return true;
+    }
+    /* A KO's own particles (the common bank's texture groups 23-25), on
+     * every stage and in VR too, as the explosion's ring and beam: after a
+     * KO they drew ~15x their usual area, 1.6M size^2 a second, and with
+     * the ring and beam gone they were what still took the eye pass to
+     * 10-18 ms (MELEE_XR_PTCL_STATS, four CPUs on Brinstar).
+     * MELEE_XR_KO_PTCL_SHOW=1 keeps them. */
+    static int ko_show = -1;
+    if (ko_show < 0) {
+        ko_show = getenv("MELEE_XR_KO_PTCL_SHOW") != NULL;
+    }
+    if (!ko_show && bank == 0 && tex_group >= 23 && tex_group <= 25) {
         aurora_xr_camera(AURORA_XR_HIDDEN, NULL);
         return true;
     }
@@ -1471,11 +1567,50 @@ bool pc_xr_particle_begin(int bank, int id, const float pos[3]) {
                         pos[2]);
         }
     }
-    if (!pc_xr_mixed_reality() || !particle_rule(s_center_grkind, bank, id)) {
+    if (!pc_xr_mixed_reality() || !particle_rule(s_center_grkind, bank, id, tex_group)) {
         return false;
     }
     aurora_xr_camera(AURORA_XR_HIDDEN, NULL);
     return true;
+}
+
+void pc_xr_heavy_effect(void) {
+    s_ko_window_until = SDL_GetTicks() + 1000; /* MELEE_XR_PTCL_STATS */
+    aurora_xr_heavy_effect();
+}
+
+int pc_xr_blast_clip_begin(void) {
+    static int off = -1;
+    if (off < 0) {
+        off = getenv("MELEE_XR_BLAST_CLIP_OFF") != NULL; /* the whole explosion, for comparison */
+    }
+    if (s_category != AURORA_XR_WORLD || s_center_grkind <= 0) {
+        return 0;
+    }
+    if (off) {
+        return 1;
+    }
+    float planes[AURORA_XR_MAX_CLIPS][4];
+    float fades[AURORA_XR_MAX_CLIPS] = {0.f};
+    int n = s_follow != NULL && s_follow_placed && pc_xr_mixed_reality() ? follow_planes(planes, fades) : 0;
+    const float box[4][4] = {
+        {1.f, 0.f, 0.f, -Stage_GetBlastZoneLeftOffset()},
+        {-1.f, 0.f, 0.f, Stage_GetBlastZoneRightOffset()},
+        {0.f, 1.f, 0.f, -Stage_GetBlastZoneBottomOffset()},
+        {0.f, -1.f, 0.f, Stage_GetBlastZoneTopOffset()},
+    };
+    for (int i = 0; i < 4 && n < AURORA_XR_MAX_CLIPS; i++) {
+        memcpy(planes[n], box[i], sizeof box[i]);
+        fades[n++] = 0.f;
+    }
+    aurora_xr_world_clips4((const float(*)[4])planes, fades, n);
+    return 2;
+}
+
+void pc_xr_blast_clip_end(int began) {
+    if (began == 2) {
+        base_clip();
+    }
 }
 
 void pc_xr_particle_end(bool hidden) {
