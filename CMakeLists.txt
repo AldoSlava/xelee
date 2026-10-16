@@ -183,6 +183,9 @@ include(cmake/GameSources.cmake)
 add_library(melee_game STATIC ${GAME_SOURCES})
 target_include_directories(melee_game PUBLIC extern/aurora/include src src/sdk_include)
 target_compile_definitions(melee_game PUBLIC TARGET_PC=1 MELEE_PC=1)
+# The game's own translation units, as against src/pc code that includes
+# compat.h too (see compat.h: Melee's expf and powf).
+target_compile_definitions(melee_game PRIVATE MELEE_GAME_TU=1)
 target_compile_options(melee_game PRIVATE
         -fpermissive
         -Wno-all -Wno-extra
