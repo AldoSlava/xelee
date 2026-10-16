@@ -19,6 +19,8 @@ docs/*
 !docs/xr-frame-rate-plan.md
 !docs/xr-stage-grounding-report.md
 !docs/xr-stage-placement-ux.md
+!docs/xr-raycast-surface-plan.md
+!docs/xr-auto-room-light.md
 !docs/browser-mobile-findings.md
 !docs/site/
 
