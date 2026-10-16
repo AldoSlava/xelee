@@ -26,6 +26,11 @@
          panel (MeleeActivity.setLauncherActive). -->
     <uses-permission android:name="horizonos.permission.USE_SCENE" />
     <uses-permission android:name="com.oculus.permission.USE_SCENE" />
+    <!-- Passthrough Camera API: short bursts from one passthrough camera
+         measure the room's light, to match the 3D view to it (dev.melee.RoomLight;
+         Quest 3 and 3S). Frames never leave the game. Asked for in the
+         launcher panel too. -->
+    <uses-permission android:name="horizonos.permission.HEADSET_CAMERA" />
 
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />

@@ -1556,6 +1556,19 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_GRADE_LUT` | 16 | Colour LUT size (power of two, up to 32 and the runtime's limit); 0 uses brightness and saturation instead (no tint) |
 | `AURORA_XR_GRADE_LOG` | 0 | 1 logs the grade's LUT builds and fades |
 | `MELEE_XR_GRADE` | per stage | Room grade for the stage played: `r,g,b,saturation` (gains in linear light; `1,1,1,1` is none) |
+| `AURORA_XR_ROOM_LIGHT` | 1 | 0: the 3D view isn't matched to the room's light (blind A/B) |
+| `AURORA_XR_ROOM_LIGHT_FIXED` | unset | `s` or `r,g,b`: a fixed colour scale on the 3D view instead (A/B of fixed scales) |
+| `AURORA_XR_ROOM_LIGHT_SOURCE` | any | `camera`, `sensor` or `normal` (no measurement: a normal room) |
+| `AURORA_XR_ROOM_LIGHT_LOG` | 0 | 1 logs a line a second (P, exposure, gain, white balance, scales) and, from the sampler (tag `MeleeLight`), every camera's characteristics, every sensor and each burst |
+| `AURORA_XR_ROOM_LIGHT_P0` | 0.16 | The camera's mean linear luminance in a room where the stage looks right as it is |
+| `AURORA_XR_ROOM_LIGHT_GAMMA` / `_MIN` / `_MAX` | 0.5 / 0.6 / 1.05 | The 3D view's scale: (P/P0)^gamma times the stage term, within min and max |
+| `AURORA_XR_ROOM_LIGHT_BETA` / `_MREF` | 0.15 / 0.15 | The stage term (MREF/M_stage)^beta, M_stage per stage (provisional table in `xr_scene.c`) |
+| `AURORA_XR_ROOM_LIGHT_TINT` / `_TINT_MAX` | 0.2 / 0.06 | How much of the room's colour the 3D view takes on, and at most per channel |
+| `AURORA_XR_ROOM_LIGHT_HUD_GAMMA` / `_HUD_MIN` | 0.25 / 0.85 | The HUD's own, gentler curve |
+| `AURORA_XR_ROOM_LIGHT_GRADE_GAMMA` / `_GRADE_MIN` | 1 / 0.3 | How much of the room grade a dim room keeps |
+| `AURORA_XR_ROOM_LIGHT_LUX0` | 50 | Light sensor fallback: the lux above which the room counts as normal |
+| `AURORA_XR_ROOM_LIGHT_TAU` / `_PERIOD` | 3 / 15 | Seconds of smoothing, and between measurements |
+| `MELEE_XR_STAGE_LUMINANCE` | per stage | The stage's mean linear luminance (M_stage) for the stage played; 0 leaves it out |
 | `MELEE_XR_STAGE_LAYERS` | `0xB` | Stage layers shown in 3D, as a bitmask |
 | `MELEE_XR_PARTS` | unset | Overrides, e.g. `16:1,-16:1/12,-16:2/2.27` (`stage:part[/joint[.mesh]]`, `-` hides) |
 | `MELEE_XR_STAGE_LOG` | unset | Log each stage part's id and layer once |
