@@ -287,9 +287,6 @@ void pc_frame_boundary(void) {
      * the simulation would run at 2x-4x speed. Pacing strictly to 60.000 Hz ensures physics,
      * hitboxes, and timers remain bit-identical. */
     static u64 next_sim_ns;
-#ifdef AURORA_ENABLE_OPENXR
-    bool xr_paced = false; /* this boundary waited for the XR tick */
-#endif
     const u64 sim_period = pc_sim_period_ns();
     u64 now = SDL_GetTicksNS();
     /* How far behind its schedule this boundary is, and how much of that to
@@ -306,7 +303,6 @@ void pc_frame_boundary(void) {
      * repeats frames unevenly). Netplay keeps its own clock. */
     if (!pc_net_active() && aurora_xr_pace()) {
         next_sim_ns = SDL_GetTicksNS();
-        xr_paced = true;
     } else
 #endif
     if (next_sim_ns == 0 || now > next_sim_ns) {
@@ -393,16 +389,19 @@ void pc_frame_boundary(void) {
     /* Age of the 1000 Hz sample the sim is about to consume, before the pad
      * alarms (fn_800195FC -> PADRead) fire from pc_os_run_alarms. */
     pc_input_latency_record();
-#ifdef AURORA_ENABLE_OPENXR
-    /* MELEE_XR_PAD_ALARM_FREE=1: the pad alarm keeps its own grid (as
-     * before), for comparison. */
+    /* Offline, every boundary hands the frame its pad sample (lb_0195.c):
+     * the boundary follows the headset's tick or a monitor's VBlank, or a
+     * timer a hitch has re-anchored, and the pad alarm's own 60 Hz grid
+     * drifts or stays offset against any of them, which every frame then
+     * slept through. Netplay pins the queue to one sample per boundary
+     * itself (pad_queue_pin, net_sync.c). MELEE_PAD_ALARM_FREE=1 keeps the
+     * alarm's own grid, for comparison. */
     static int pad_alarm_free = -1;
     if (pad_alarm_free < 0)
-        pad_alarm_free = getenv("MELEE_XR_PAD_ALARM_FREE") != NULL;
-    if (xr_paced && !pad_alarm_free) {
+        pad_alarm_free = getenv("MELEE_PAD_ALARM_FREE") != NULL;
+    if (!pc_net_active() && !pad_alarm_free) {
         lb_pc_pad_alarm_to_frame();
     }
-#endif
     u64 alarms_started = timing_debug ? SDL_GetTicksNS() : 0;
     pc_os_run_alarms();
     if (timing_debug) {

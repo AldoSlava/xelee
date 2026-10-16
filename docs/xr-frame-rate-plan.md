@@ -146,10 +146,12 @@ Per-thread CPU per frame (game ~3.4 ms, FIFO ~6.0, render ~5.3) and run
 queue waits (~0.5 ms at the 95th percentile) were the same in good and bad
 windows; an off-CPU profile showed the FIFO thread idle, waiting for the
 game thread. Each XR-paced boundary now hands the frame its pad sample and
-re-anchors the alarm (lb_pc_pad_alarm_to_frame; `MELEE_XR_PAD_ALARM_FREE=1`
-for the old way): 57.0 -> 58.2 frames a second, world recorded 8.2-9.0 ms at
-the 95th percentile in every window. Netplay keeps its own frame clock; a
-local two-instance match measured no pad waits. What is left on this
+re-anchors the alarm (lb_pc_pad_alarm_to_frame; `MELEE_PAD_ALARM_FREE=1`
+for the old way; since applied at every offline boundary, VBlank- and
+timer-paced too): 57.0 -> 58.2 frames a second, world recorded 8.2-9.0 ms at
+the 95th percentile in every window. Netplay pins the raw queue to one sample
+per boundary itself (pad_queue_pin: reusing the last sample when the alarm
+has not delivered; 41 reuses in a 1-minute local match, no pad waits). What is left on this
 benchmark is KOs (the explosion's fill).
 
 Where the CPU goes per frame (simpleperf, same benchmark): the FIFO thread

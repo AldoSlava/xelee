@@ -121,15 +121,16 @@ void lb_80019880(u64 arg0)
 }
 
 #ifdef TARGET_PC
-/* XR pacing: the frame boundary follows the headset, while the pad alarm
- * queues its samples on its own 60 Hz grid, and the frame loop waits for a
- * sample before it simulates (gm_801A4D34). The two drift apart, and while
- * the alarm trailed the boundary every frame slept up to 9 ms after it: on
- * four-CPU Brinstar the world then finished recording at 14 ms instead of
- * 8 at the 95th percentile, and 3D frames fell to 50 a second for minutes
- * at a time. Called at each XR-paced boundary: a sample is queued now if
- * none is, and the alarm's next one is a period from now, so a frame gets
- * one sample and never waits for it. */
+/* The frame boundary follows the headset's tick (XR), a monitor's VBlank or
+ * a timer, while the pad alarm queues its samples on its own 60 Hz grid,
+ * and the frame loop waits for a sample before it simulates (gm_801A4D34).
+ * The two drift or sit offset, and every frame sleeps the gap: in XR, while
+ * the alarm trailed the boundary, up to 9 ms after it, and on four-CPU
+ * Brinstar the world then finished recording at 14 ms instead of 8 at the
+ * 95th percentile, 3D frames at 50 a second for minutes at a time. Called
+ * at each offline boundary (vi.c): a sample is queued now if none is, and
+ * the alarm's next one is a period from now, so a frame gets one sample and
+ * never waits for it. */
 void lb_pc_pad_alarm_to_frame(void)
 {
     if (!lb_804329F0.x48) {
