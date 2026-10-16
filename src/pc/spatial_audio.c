@@ -17,6 +17,7 @@
 /* it/it_26B1.h, declared here: its header pulls in every fighter type. */
 void it_8026B294(HSD_GObj* gobj, Vec3* pos);
 #include <sysdolphin/baselib/gobj.h>
+#include <sysdolphin/baselib/jobj.h>
 
 #include <phonon.h>
 
@@ -161,7 +162,8 @@ static bool emitter_pos(const HSD_GObj* g, float pos[3]) {
 
 /* Stage sounds that no fighter or item starts, placed. A stereo one's left
  * and right voices each get a point (x[0] and x[1]); a mono one sits between
- * them. Read only, like the rest: the lava's height is the game's own. */
+ * them. Read only, like the rest: the lava's height is the game's own, and a
+ * point on a moving part goes where that joint was last drawn. */
 typedef struct StageSound {
     int grkind;
     int sfx[2];   /* the sounds placed so (0: unused) */
@@ -170,6 +172,8 @@ typedef struct StageSound {
     bool lava_y;  /* y follows the lava's surface (Ground_801C4368) */
     float y;      /* otherwise fixed */
     float gain;   /* over the game's own level */
+    int part;     /* > 0: the points are in this part's joint (map gobj) */
+    int joint;    /* depth first from the part's root, as pc/xr_scene.c counts */
 } StageSound;
 
 static const StageSound s_stage_sounds[] = {
@@ -182,9 +186,29 @@ static const StageSound s_stage_sounds[] = {
      * quieter by the distance gain alone. The rumble is quiet in the game's
      * own mix (-30 to -50 dB, about 2.5 s), and lost under the stage, so it
      * is played 6 dB up. */
-    {0x08, {0x61A80, 0x61A81}, {-120.f + 245.f / 3.f, -120.f + 245.f * 2.f / 3.f}, 0.f, true, 0.f, 2.f},
+    {0x08, {0x61A80, 0x61A81}, {-120.f + 245.f / 3.f, -120.f + 245.f * 2.f / 3.f}, 0.f, true, 0.f, 2.f, 0, 0},
+    /* Corneria: the Great Fox's engine hum, a stereo loop from the stage's
+     * start (grcorneria.c). Its right channel runs about 9 dB over its left,
+     * so heard as plain stereo it sat in the right ear. Both channels come
+     * from the engine at the ship's tail (part 3, joint 5's nozzle, x -200
+     * to -158 at rest), carried along as the ship drifts. */
+    {0x0E, {0x55737, 0}, {-180.f, -180.f}, 0.f, false, -19.f, 1.f, 3, 5},
 };
 #define SP_STAGE_SOUNDS ((int)(sizeof s_stage_sounds / sizeof s_stage_sounds[0]))
+
+/* A part's joint, counted as pc/xr_scene.c's nth_joint does. */
+static HSD_JObj* nth_joint(HSD_JObj* jobj, int* n) {
+    for (; jobj != NULL; jobj = jobj->next) {
+        if ((*n)-- == 0) {
+            return jobj;
+        }
+        HSD_JObj* found = nth_joint(jobj->child, n);
+        if (found != NULL) {
+            return found;
+        }
+    }
+    return NULL;
+}
 
 static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
     float y = r->y;
@@ -197,12 +221,30 @@ static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
         pos[c][1] = y;
         pos[c][2] = r->z;
     }
+    if (r->part > 0) {
+        HSD_GObj* g = Ground_GetMapGObj(r->part);
+        HSD_JObj* root = g != NULL ? g->hsd_obj : NULL;
+        int n = r->joint - 1;
+        HSD_JObj* j = root == NULL ? NULL : r->joint == 0 ? root : nth_joint(root->child, &n);
+        if (j == NULL) {
+            return; /* the part is gone: its rest position */
+        }
+        for (int c = 0; c < 2; c++) {
+            float p[3];
+            for (int k = 0; k < 3; k++) {
+                p[k] = j->mtx[k][0] * pos[c][0] + j->mtx[k][1] * pos[c][1] + j->mtx[k][2] * pos[c][2] + j->mtx[k][3];
+            }
+            if (isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2])) {
+                memcpy(pos[c], p, sizeof(p));
+            }
+        }
+    }
 }
 
 static const StageSound* stage_sound(int sound_id) {
     for (int i = 0; i < SP_STAGE_SOUNDS; i++) {
         const StageSound* r = &s_stage_sounds[i];
-        if (r->grkind == (int)stage_info.grkind && (r->sfx[0] == sound_id || r->sfx[1] == sound_id)) {
+        if (r->grkind == (int)stage_info.grkind && (r->sfx[0] == sound_id || (r->sfx[1] != 0 && r->sfx[1] == sound_id))) {
             return r;
         }
     }
