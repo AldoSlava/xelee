@@ -522,6 +522,41 @@ static const StageFootprint s_footprints[] = {
 };
 #define FOOTPRINT_COUNT ((int)(sizeof s_footprints / sizeof s_footprints[0]))
 
+/* The room's grade during a stage's fights in mixed reality
+ * (aurora_xr_set_room_grade): passthrough nudged toward the stage's
+ * palette, gains per channel in linear light and a saturation. Mild on
+ * purpose: the player holds a pad in a real room. Stages not listed leave
+ * the room as it is. MELEE_XR_GRADE="r,g,b,saturation" overrides for the
+ * stage played. */
+typedef struct {
+    int grkind;
+    float r, g, b, saturation;
+} RoomGrade;
+
+static const RoomGrade s_grades[] = {
+    {0x08, 1.f, 0.86f, 0.78f, 1.05f},   /* Brinstar: warm red, a little darker */
+    {0x16, 0.88f, 0.95f, 1.f, 0.92f},   /* Icicle Mountain: cool */
+    {0x13, 0.88f, 0.95f, 1.f, 0.92f},   /* Big Blue: cool */
+    {0x0C, 0.9f, 0.8f, 0.98f, 0.85f},   /* Fountain of Dreams: dusk violet */
+    {0x24, 0.88f, 0.88f, 0.88f, 0.75f}, /* Battlefield: house lights down */
+    {0x25, 0.88f, 0.88f, 0.88f, 0.75f}, /* Final Destination: house lights down */
+};
+#define GRADE_COUNT ((int)(sizeof s_grades / sizeof s_grades[0]))
+
+static void room_grade(int grkind) {
+    RoomGrade g = {grkind, 1.f, 1.f, 1.f, 1.f};
+    for (int i = 0; i < GRADE_COUNT; i++) {
+        if (s_grades[i].grkind == grkind) {
+            g = s_grades[i];
+        }
+    }
+    const char* env = getenv("MELEE_XR_GRADE");
+    if (env != NULL) {
+        sscanf(env, "%f,%f,%f,%f", &g.r, &g.g, &g.b, &g.saturation);
+    }
+    aurora_xr_set_room_grade(g.r, g.g, g.b, g.saturation);
+}
+
 static HSD_JObj* nth_joint(HSD_JObj* jobj, int* n) {
     for (; jobj != NULL; jobj = jobj->next) {
         if ((*n)-- == 0) {
@@ -1330,6 +1365,7 @@ bool pc_xr_stage_part_begin(int grkind, int map_id, int layer, HSD_JObj* root) {
             scale = (float) atof(env);
         }
         aurora_xr_set_stage(grkind, c[0], c[1], c[2], scale);
+        room_grade(grkind);
         s_top_grkind = -1;
         follow_stage(grkind);
     }

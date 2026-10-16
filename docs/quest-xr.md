@@ -1550,6 +1550,12 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_SHADOW_ALPHA` | 0.4 | The shadow's opacity with the stage resting on the surface; it falls as R²/(R²+gap²) |
 | `AURORA_XR_SHADOW_SPREAD` | 0.5 | How much the shadow widens per footprint radius of gap |
 | `AURORA_XR_SURFACE_LOG` | 0 | 1 logs the surface casts once a second while they run (ray statuses, consensus height, spread, coverage, gap, shadow) and the rays' timing every 10 s |
+| `AURORA_XR_GRADE` | 1 | 0: no room grade (passthrough tinted toward the stage's palette during fights): blind A/B |
+| `AURORA_XR_GRADE_STRENGTH` | 1 | Scales every stage's grade away from none |
+| `AURORA_XR_GRADE_FADE` | 1 | Seconds the grade takes to fade in (fight start, hold let go) and out (fight end) |
+| `AURORA_XR_GRADE_LUT` | 16 | Colour LUT size (power of two, up to 32 and the runtime's limit); 0 uses brightness and saturation instead (no tint) |
+| `AURORA_XR_GRADE_LOG` | 0 | 1 logs the grade's LUT builds and fades |
+| `MELEE_XR_GRADE` | per stage | Room grade for the stage played: `r,g,b,saturation` (gains in linear light; `1,1,1,1` is none) |
 | `MELEE_XR_STAGE_LAYERS` | `0xB` | Stage layers shown in 3D, as a bitmask |
 | `MELEE_XR_PARTS` | unset | Overrides, e.g. `16:1,-16:1/12,-16:2/2.27` (`stage:part[/joint[.mesh]]`, `-` hides) |
 | `MELEE_XR_STAGE_LOG` | unset | Log each stage part's id and layer once |

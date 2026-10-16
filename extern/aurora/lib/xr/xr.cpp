@@ -499,6 +499,13 @@ struct Bridge {
   PFN_xrPassthroughStartFB startPassthrough = nullptr;
   PFN_xrPassthroughPauseFB pausePassthrough = nullptr;
   bool passthroughRunning = false;
+  // The room's grade (XR worker: the room's grade): passthrough styles, and
+  // colour LUTs where XR_META_passthrough_color_lut is offered.
+  PFN_xrPassthroughLayerSetStyleFB setPassthroughStyle = nullptr;
+  bool hasColorLutExt = false;
+  uint32_t maxLutResolution = 0;
+  PFN_xrCreatePassthroughColorLutMETA createColorLut = nullptr;
+  PFN_xrDestroyPassthroughColorLutMETA destroyColorLut = nullptr;
   // The real surface under the stage (XR worker: the surface under the
   // stage): XR_META_environment_raycast, which needs XR_EXT_future, and
   // XR_EXT_local_floor's floor where there is no raycast.
@@ -706,6 +713,7 @@ bool create_instance() {
     B.hasFutureExt |= !std::strcmp(p.extensionName, XR_EXT_FUTURE_EXTENSION_NAME);
     B.hasEnvRaycastExt |= !std::strcmp(p.extensionName, XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME);
     B.hasLocalFloorExt |= !std::strcmp(p.extensionName, XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
+    B.hasColorLutExt |= !std::strcmp(p.extensionName, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
   }
   if (!hasVk2) {
     Log.error("OpenXR runtime lacks XR_KHR_vulkan_enable2");
@@ -751,6 +759,12 @@ bool create_instance() {
   B.hasLocalFloorExt &= env_flag("AURORA_XR_LOCAL_FLOOR", true);
   if (B.hasLocalFloorExt)
     exts.push_back(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
+  // The room's grade by colour LUT; without it, brightness, contrast and
+  // saturation (AURORA_XR_GRADE_LUT=0 forces those, AURORA_XR_GRADE=0 none).
+  B.hasColorLutExt &= B.hasPassthroughExt && env_flag("AURORA_XR_GRADE", true) &&
+                      env_float("AURORA_XR_GRADE_LUT", 16.f) >= 2.f;
+  if (B.hasColorLutExt)
+    exts.push_back(XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
   XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
 #ifdef __ANDROID__
   exts.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
@@ -778,16 +792,26 @@ bool create_instance() {
   {
     XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
     XrSystemEnvironmentRaycastPropertiesMETA raycast{XR_TYPE_SYSTEM_ENVIRONMENT_RAYCAST_PROPERTIES_META};
-    if (B.hasEnvRaycastExt)
+    XrSystemPassthroughColorLutPropertiesMETA lut{XR_TYPE_SYSTEM_PASSTHROUGH_COLOR_LUT_PROPERTIES_META};
+    if (B.hasEnvRaycastExt) {
+      raycast.next = sp.next;
       sp.next = &raycast;
+    }
+    if (B.hasColorLutExt) {
+      lut.next = sp.next;
+      sp.next = &lut;
+    }
     if (XR_SUCCEEDED(xrGetSystemProperties(B.instance, B.systemId, &sp))) {
       B.maxLayers = std::max<uint32_t>(sp.graphicsProperties.maxLayerCount, 1);
       B.envRaycast = B.hasEnvRaycastExt && raycast.supportsEnvironmentRaycast;
+      B.maxLutResolution = B.hasColorLutExt ? lut.maxColorLutResolution : 0;
     }
-    Log.info("System {}: at most {} composition layers a frame; environment raycast {}, local floor {}",
+    Log.info("System {}: at most {} composition layers a frame; environment raycast {}, local floor {}, "
+             "passthrough colour LUTs {}",
              sp.systemName, B.maxLayers,
              B.envRaycast ? "available" : B.hasEnvRaycastExt ? "offered but unsupported" : "not offered",
-             B.hasLocalFloorExt ? "available" : "not offered");
+             B.hasLocalFloorExt ? "available" : "not offered",
+             B.maxLutResolution > 0 ? fmt::format("up to {}^3", B.maxLutResolution) : std::string{"unavailable"});
   }
   if (B.hasSpaceWarpExt) {
     XrSystemSpaceWarpPropertiesFB sw{XR_TYPE_SYSTEM_SPACE_WARP_PROPERTIES_FB};
@@ -809,6 +833,13 @@ bool create_instance() {
     B.destroyPassthroughLayer = xr_proc<PFN_xrDestroyPassthroughLayerFB>("xrDestroyPassthroughLayerFB");
     B.startPassthrough = xr_proc<PFN_xrPassthroughStartFB>("xrPassthroughStartFB");
     B.pausePassthrough = xr_proc<PFN_xrPassthroughPauseFB>("xrPassthroughPauseFB");
+    B.setPassthroughStyle = xr_proc<PFN_xrPassthroughLayerSetStyleFB>("xrPassthroughLayerSetStyleFB");
+  }
+  if (B.hasColorLutExt) {
+    B.createColorLut = xr_proc<PFN_xrCreatePassthroughColorLutMETA>("xrCreatePassthroughColorLutMETA");
+    B.destroyColorLut = xr_proc<PFN_xrDestroyPassthroughColorLutMETA>("xrDestroyPassthroughColorLutMETA");
+    if (!B.createColorLut || !B.destroyColorLut)
+      B.maxLutResolution = 0;
   }
   if (B.hasRefreshRateExt) {
     B.enumerateRefreshRates = xr_proc<PFN_xrEnumerateDisplayRefreshRatesFB>("xrEnumerateDisplayRefreshRatesFB");
@@ -4262,6 +4293,253 @@ bool build_shadow_layer(XrCompositionLayerQuad& q, XrCompositionLayerColorScaleB
   return true;
 }
 
+// ---------------------------------------------------------------- XR worker: the room's grade
+//
+// During a fight in mixed reality the room takes on a little of the stage's
+// palette (docs/xr-stage-grounding-report.md, T5; Resolution Games' colour
+// tint on the video feed): Brinstar's warm red, Icicle Mountain's and Big
+// Blue's cool, Fountain of Dreams' dusk violet, the house lights down for
+// Battlefield and Final Destination. The game names each stage's grade
+// (aurora_xr_set_room_grade, src/pc/xr_scene.c). It's a passthrough style,
+// so the compositor applies it and the eye pass pays nothing. With
+// XR_META_passthrough_color_lut it's a colour LUT built for the stage and an
+// interpolated map from an identity LUT to it, whose weight fades in as the
+// fight starts (or its hold is let go) and out as it ends; without the
+// extension, brightness and saturation, which can't tint. A worker thread
+// builds the LUTs and sets the styles; the XR thread only says whether a
+// fight shows over the room.
+//
+// AURORA_XR_GRADE=0 turns it off; AURORA_XR_GRADE_STRENGTH (1) scales every
+// grade's departure from none; AURORA_XR_GRADE_FADE (1 s) is the fade's
+// length; AURORA_XR_GRADE_LUT (16, up to 32 and the runtime's limit; 0:
+// brightness and saturation instead) the LUT's size; AURORA_XR_GRADE_LOG=1
+// logs the builds and the fades.
+
+// Gains per channel (linear light) and a saturation; all 1 is none.
+struct RoomGrade {
+  float r = 1.f, g = 1.f, b = 1.f, saturation = 1.f;
+  bool none() const { return r == 1.f && g == 1.f && b == 1.f && saturation == 1.f; }
+  // Its departure from none scaled by k.
+  RoomGrade scaled(float k) const {
+    return {1.f + (r - 1.f) * k, 1.f + (g - 1.f) * k, 1.f + (b - 1.f) * k, 1.f + (saturation - 1.f) * k};
+  }
+};
+
+struct GradeSettings {
+  bool on = true, log = false;
+  float strength = 1.f, fade = 1.f;
+  uint32_t lut = 16; // 0: brightness and saturation
+};
+
+const GradeSettings& grade_settings() {
+  static const GradeSettings s = [] {
+    GradeSettings s;
+    s.on = env_flag("AURORA_XR_GRADE", true);
+    s.log = env_flag("AURORA_XR_GRADE_LOG", false);
+    s.strength = std::clamp(env_float("AURORA_XR_GRADE_STRENGTH", 1.f), 0.f, 3.f);
+    s.fade = std::max(env_float("AURORA_XR_GRADE_FADE", 1.f), 0.05f);
+    // A power of two (the extension requires it), within its limit.
+    const uint32_t want = static_cast<uint32_t>(std::clamp(env_float("AURORA_XR_GRADE_LUT", 16.f), 0.f, 32.f));
+    s.lut = want >= 2 && B.maxLutResolution >= 2 ? std::bit_floor(std::min(want, B.maxLutResolution)) : 0;
+    return s;
+  }();
+  return s;
+}
+
+// Between the game, the XR thread and the worker.
+struct GradeShared {
+  std::mutex mutex;
+  std::condition_variable cv;
+  RoomGrade grade;   // the current stage's (aurora_xr_set_room_grade)
+  uint64_t seq = 0;  // bumped with every new grade
+  bool on = false;   // a fight shows over the room
+  bool stop = false;
+} g_grade;
+std::thread g_gradeThread;
+// The passthrough's start, pause and styles, from the XR thread and the worker.
+std::mutex g_passthroughMutex;
+
+float srgb_decode(float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); }
+float srgb_encode(float l) {
+  l = std::clamp(l, 0.f, 1.f);
+  return l <= 0.0031308f ? l * 12.92f : 1.055f * std::pow(l, 1.f / 2.4f) - 0.055f;
+}
+
+// A res³ RGB LUT (sRGB in and out, red fastest): saturation about each
+// colour's luminance, then the gains, in linear light.
+std::vector<uint8_t> grade_lut(const RoomGrade& g, uint32_t res) {
+  std::vector<uint8_t> data(static_cast<size_t>(res) * res * res * 3);
+  std::vector<float> lin(res);
+  for (uint32_t i = 0; i < res; ++i)
+    lin[i] = srgb_decode(static_cast<float>(i) / static_cast<float>(res - 1));
+  size_t o = 0;
+  for (uint32_t bi = 0; bi < res; ++bi)
+    for (uint32_t gi = 0; gi < res; ++gi)
+      for (uint32_t ri = 0; ri < res; ++ri) {
+        const float r = lin[ri], gg = lin[gi], b = lin[bi];
+        const float y = 0.2126f * r + 0.7152f * gg + 0.0722f * b;
+        const float out[3] = {(y + (r - y) * g.saturation) * g.r, (y + (gg - y) * g.saturation) * g.g,
+                              (y + (b - y) * g.saturation) * g.b};
+        for (float c : out)
+          data[o++] = static_cast<uint8_t>(std::lround(srgb_encode(c) * 255.f));
+      }
+  return data;
+}
+
+XrPassthroughColorLutMETA create_lut(const RoomGrade& g, uint32_t res) {
+  const std::vector<uint8_t> data = grade_lut(g, res);
+  XrPassthroughColorLutCreateInfoMETA ci{XR_TYPE_PASSTHROUGH_COLOR_LUT_CREATE_INFO_META};
+  ci.channels = XR_PASSTHROUGH_COLOR_LUT_CHANNELS_RGB_META;
+  ci.resolution = res;
+  ci.data = {static_cast<uint32_t>(data.size()), data.data()};
+  XrPassthroughColorLutMETA lut = XR_NULL_HANDLE;
+  if (const XrResult r = B.createColorLut(B.passthrough, &ci, &lut); XR_FAILED(r)) {
+    Log.warn("Passthrough colour LUT ({}^3) not created: XrResult {}", res, static_cast<int>(r));
+    return XR_NULL_HANDLE;
+  }
+  return lut;
+}
+
+void grade_main() {
+  const GradeSettings& set = grade_settings();
+  uint32_t lutRes = set.lut;
+  XrPassthroughColorLutMETA identity = XR_NULL_HANDLE, target = XR_NULL_HANDLE;
+  RoomGrade built;               // the grade the target LUT (or the fallback) is for, strength applied
+  uint64_t builtSeq = UINT64_MAX;
+  float weight = 0.f;            // faded toward 1 while a fight shows, 0 otherwise
+  float appliedWeight = 0.f;     // in the style last set (0: a plain one)
+  bool force = false;
+  auto last = std::chrono::steady_clock::now();
+  // A style with the grade at weight w, or plain at 0.
+  const auto apply = [&](float w) {
+    XrPassthroughStyleFB style{XR_TYPE_PASSTHROUGH_STYLE_FB};
+    style.textureOpacityFactor = 1.f;
+    style.edgeColor = {0.f, 0.f, 0.f, 0.f};
+    XrPassthroughColorMapInterpolatedLutMETA interp{XR_TYPE_PASSTHROUGH_COLOR_MAP_INTERPOLATED_LUT_META};
+    XrPassthroughBrightnessContrastSaturationFB bcs{XR_TYPE_PASSTHROUGH_BRIGHTNESS_CONTRAST_SATURATION_FB};
+    if (w > 0.f && identity && target) {
+      interp.sourceColorLut = identity;
+      interp.targetColorLut = target;
+      interp.weight = w;
+      style.next = &interp;
+    } else if (w > 0.f) {
+      // Brightness is about L* (-100 to 100): the gains' luminance as a
+      // change of lightness. Saturation as is. No tint.
+      const RoomGrade g = built.scaled(w);
+      const float lum = 0.2126f * g.r + 0.7152f * g.g + 0.0722f * g.b;
+      bcs.brightness = std::clamp(100.f * (std::cbrt(lum) - 1.f), -100.f, 100.f);
+      bcs.contrast = 1.f;
+      bcs.saturation = std::max(g.saturation, 0.f);
+      style.next = &bcs;
+    }
+    XrResult r;
+    {
+      std::lock_guard lock{g_passthroughMutex};
+      r = B.setPassthroughStyle(B.passthroughLayer, &style);
+    }
+    static int warnings = 0;
+    if (XR_FAILED(r) && warnings++ < 3)
+      Log.warn("Passthrough style not set: XrResult {}", static_cast<int>(r));
+    appliedWeight = w;
+  };
+  for (;;) {
+    RoomGrade grade;
+    uint64_t seq;
+    bool on;
+    {
+      std::unique_lock lock{g_grade.mutex};
+      const bool fading = weight != (g_grade.on && !built.none() ? 1.f : 0.f);
+      if (!g_grade.stop && g_grade.seq == builtSeq)
+        g_grade.cv.wait_for(lock, fading ? std::chrono::milliseconds(33) : std::chrono::milliseconds(1000));
+      if (g_grade.stop)
+        break;
+      grade = g_grade.grade;
+      seq = g_grade.seq;
+      on = g_grade.on;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    const float dt = std::min(std::chrono::duration<float>(now - last).count(), 0.25f);
+    last = now;
+    if (seq != builtSeq) {
+      builtSeq = seq;
+      built = grade.scaled(set.strength);
+      if (target) {
+        B.destroyColorLut(target); // kept by the runtime while a style still uses it
+        target = XR_NULL_HANDLE;
+      }
+      if (lutRes > 0 && !built.none()) {
+        const int64_t t0 = monotonic_ns();
+        if (!identity)
+          identity = create_lut({}, lutRes);
+        target = identity ? create_lut(built, lutRes) : XR_NULL_HANDLE;
+        if (!target) {
+          lutRes = 0; // brightness and saturation from now on
+          Log.warn("Room grade: no colour LUTs, brightness and saturation instead");
+        } else if (set.log) {
+          Log.info("Room grade {:.2f},{:.2f},{:.2f} saturation {:.2f}: two {}^3 LUTs in {:.1f} ms", built.r,
+                   built.g, built.b, built.saturation, lutRes, static_cast<double>(monotonic_ns() - t0) / 1e6);
+        }
+      }
+      force = weight > 0.f;
+    }
+    const float want = on && !built.none() ? 1.f : 0.f;
+    if (weight != want) {
+      if (set.log && (weight == 0.f || weight == 1.f))
+        Log.info("Room grade fading {}", want > weight ? "in" : "out");
+      const float step = dt / set.fade;
+      weight = want > weight ? std::min(weight + step, want) : std::max(weight - step, want);
+    }
+    // Eased, so the fade starts and ends softly.
+    const float shown = smoothstep(0.f, 1.f, weight);
+    if (force || std::abs(shown - appliedWeight) >= 0.004f || (shown == 0.f) != (appliedWeight == 0.f)) {
+      apply(shown);
+      force = false;
+    }
+  }
+  if (appliedWeight > 0.f)
+    apply(0.f);
+  if (target)
+    B.destroyColorLut(target);
+  if (identity)
+    B.destroyColorLut(identity);
+}
+
+void start_grade_worker() {
+  if (g_gradeThread.joinable() || !grade_settings().on || !B.passthroughLayer || !B.setPassthroughStyle)
+    return;
+  {
+    std::lock_guard lock{g_grade.mutex};
+    g_grade.stop = false;
+  }
+  Log.info("Room grade: {}", grade_settings().lut > 0 ? fmt::format("colour LUTs, {}^3", grade_settings().lut)
+                                                      : std::string{"brightness and saturation"});
+  g_gradeThread = std::thread(grade_main);
+}
+
+// Before the passthrough layer goes.
+void stop_grade_worker() {
+  if (!g_gradeThread.joinable())
+    return;
+  {
+    std::lock_guard lock{g_grade.mutex};
+    g_grade.stop = true;
+  }
+  g_grade.cv.notify_one();
+  g_gradeThread.join();
+}
+
+// XR thread, every frame: whether a fight (not held for placing) shows over
+// the room.
+void grade_frame(bool on) {
+  static bool was = false;
+  if (on == was || !g_gradeThread.joinable())
+    return;
+  was = on;
+  std::lock_guard lock{g_grade.mutex};
+  g_grade.on = on;
+  g_grade.cv.notify_one();
+}
+
 // ---------------------------------------------------------------- XR thread: placing the stage
 //
 // While the game holds a fight before it starts (aurora_xr_set_placing), the
@@ -4416,7 +4694,11 @@ void sync_passthrough() {
   const auto fn = want ? B.startPassthrough : B.pausePassthrough;
   if (!fn)
     return;
-  const XrResult r = fn(B.passthrough);
+  XrResult r;
+  {
+    std::lock_guard lock{g_passthroughMutex};
+    r = fn(B.passthrough);
+  }
   if (XR_FAILED(r)) {
     Log.warn("Passthrough {} failed: XrResult {}", want ? "start" : "pause", static_cast<int>(r));
     return;
@@ -4728,6 +5010,8 @@ bool render_xr_frame() {
   XrCompositionLayerQuad shadowQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerColorScaleBiasKHR shadowTint{XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR};
   const bool shadow = build_shadow_layer(shadowQuad, shadowTint, fs.shouldRender && fight && roomShown);
+  // The room's grade, while a fight that isn't held for placing shows over it.
+  grade_frame(fight && placing == 0 && roomShown);
   int shadowIndex = -1;
   std::array<XrCompositionLayerProjectionView, 2> projViews{};
   std::array<XrCompositionLayerSpaceWarpInfoFB, 2> spaceWarp{};
@@ -5058,6 +5342,7 @@ bool setup() {
   if (!create_shadow_texture())
     Log.warn("The stage's shadow unavailable");
   start_surface_worker();
+  start_grade_worker();
   if (const char* dir = std::getenv("AURORA_XR_DUMP"); dir != nullptr && *dir != '\0')
     B.dumpDir = dir;
   // Not every exit path calls aurora::shutdown, so stop the XR thread from an
@@ -5072,6 +5357,7 @@ bool setup() {
 // device and instance; the OpenXR instance outlives them (release_instance).
 void teardown() {
   stop_surface_worker();
+  stop_grade_worker();
   // Only our queue: Dawn may be submitting on its own, and vkDeviceWaitIdle
   // would need every queue externally synchronized.
   if (B.queue)
@@ -7627,9 +7913,22 @@ extern "C" void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin
   surface_request(1000, false);
 }
 
+extern "C" void aurora_xr_set_room_grade(float r, float g, float b, float saturation) {
+  using namespace aurora::xr;
+  std::lock_guard lock{g_grade.mutex};
+  const RoomGrade grade{std::max(r, 0.f), std::max(g, 0.f), std::max(b, 0.f), std::max(saturation, 0.f)};
+  if (grade.r == g_grade.grade.r && grade.g == g_grade.grade.g && grade.b == g_grade.grade.b &&
+      grade.saturation == g_grade.grade.saturation)
+    return;
+  g_grade.grade = grade;
+  ++g_grade.seq;
+  g_grade.cv.notify_one();
+}
+
 extern "C" void aurora_xr_set_stage(int stage, float x, float y, float z, float scale) {
   using namespace aurora::xr;
   surface_request(0, true); // another stage: what was under the last one isn't under it
+  aurora_xr_set_room_grade(1.f, 1.f, 1.f, 1.f);
   std::lock_guard lock{g_arenaMutex};
   g_stage = stage;
   g_arenaCenter = {x, y, z};
