@@ -4335,10 +4335,13 @@ uint32_t sanitize_layers(const XrCompositionLayerBaseHeader** layers, uint32_t c
       auto& q = *reinterpret_cast<XrCompositionLayerQuad*>(base);
       const XrPosef before = q.pose;
       bool fixed = false;
-      ok = fix_pose(q.pose, fixed) && std::isfinite(q.size.width) && std::isfinite(q.size.height) &&
-           q.size.width > 0.f && q.size.height > 0.f;
+      ok = fix_pose(q.pose, fixed);
       if (!ok || fixed)
         report(i, "quad", before, ok);
+      // A quad of no size (a laser too short to see) shows nothing anyway:
+      // left out quietly.
+      ok = ok && std::isfinite(q.size.width) && std::isfinite(q.size.height) && q.size.width > 0.f &&
+           q.size.height > 0.f;
     } else if (base->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
       auto& proj = *reinterpret_cast<XrCompositionLayerProjection*>(base);
       for (uint32_t v = 0; v < proj.viewCount && ok; ++v) {

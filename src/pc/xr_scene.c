@@ -525,10 +525,11 @@ static const StageFootprint s_footprints[] = {
 
 /* The room's grade during a stage's fights in mixed reality
  * (aurora_xr_set_room_grade): passthrough nudged toward the stage's
- * palette, gains per channel in linear light and a saturation. Mild on
- * purpose: the player holds a pad in a real room. Stages not listed leave
- * the room as it is. MELEE_XR_GRADE="r,g,b,saturation" overrides for the
- * stage played. */
+ * palette, gains per channel in linear light and a saturation. The night
+ * and space stages (Battlefield, Final Destination, Fourside) take the
+ * room well down, the rest only tint it. Stages not listed leave the room
+ * as it is. MELEE_XR_GRADE="r,g,b,saturation" overrides for the stage
+ * played. */
 typedef struct {
     int grkind;
     float r, g, b, saturation;
@@ -539,8 +540,9 @@ static const RoomGrade s_grades[] = {
     {0x16, 0.88f, 0.95f, 1.f, 0.92f},   /* Icicle Mountain: cool */
     {0x13, 0.88f, 0.95f, 1.f, 0.92f},   /* Big Blue: cool */
     {0x0C, 0.9f, 0.8f, 0.98f, 0.85f},   /* Fountain of Dreams: dusk violet */
-    {0x24, 0.88f, 0.88f, 0.88f, 0.75f}, /* Battlefield: house lights down */
-    {0x25, 0.88f, 0.88f, 0.88f, 0.75f}, /* Final Destination: house lights down */
+    {0x24, 0.58f, 0.58f, 0.62f, 0.65f}, /* Battlefield: house lights well down, a little cool */
+    {0x25, 0.45f, 0.45f, 0.5f, 0.55f},  /* Final Destination: darker still, out in space */
+    {0x15, 0.5f, 0.56f, 0.72f, 0.7f},   /* Fourside: the city at night, dark and blue */
     /* Venom: a warm, dim canyon from the start; its lights then move it
      * further as the Great Fox flies through the caves (dynamic, below).
      * Without a base the room stayed as it was until the lights first
