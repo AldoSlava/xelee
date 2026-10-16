@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Sound effects under rollback; pc/net_sfx.h has the design. */
 #include "pc/net_sfx.h"
+#include "pc/spatial_audio.h"
 
 #include <string.h>
 
@@ -261,7 +262,11 @@ void net_sfx_rollback_done(void) {
         for (int i = 0; s != NULL && i < s->ncur; i++) {
             Entry* e = &s->cur[i];
             if (e->state == WAITING) {
+                /* Positional audio: the emitter noted for this handle
+                 * when the re-run started it (pc/spatial_audio.h). */
+                pc_spatial_handle_begin(handle_of(fr, i));
                 e->voice = net_sfx_engine_play(e->sound, e->volume, e->pan, e->track, e->channel);
+                pc_spatial_handle_end();
                 if (e->has_pitch && e->voice >= 0) {
                     net_sfx_engine_pitch(e->voice, e->pitch);
                 }

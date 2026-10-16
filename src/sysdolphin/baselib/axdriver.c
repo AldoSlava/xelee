@@ -14,6 +14,16 @@
 #ifdef TARGET_PC
 #include "pc/net.h"
 #include "pc/net_sfx.h"
+#include "pc/spatial_audio.h"
+
+/* Who started each sound machine record (pc/spatial_audio.h): the fighter
+ * or item, and where it was. Indexed like AXDriver_804C45A0. Audio output
+ * only; like every static in this file it is outside the netplay snapshot
+ * (src/pc/melee_state.ld). */
+static struct {
+    const void* gobj;
+    float pos[3];
+} pc_sm_emitter[0x60];
 #endif
 
 /* Cached once: the .sem interpreter below runs this guard for every opcode
@@ -248,6 +258,23 @@ void AXDriverExec(HSD_SM* v)
                     right_sqrt * left_inv_sqrt);
 
                 if (v->vID != -1) {
+#ifdef TARGET_PC
+                    {
+                        int sm = (int) (v - AXDriver_804C45A0);
+                        if (sm >= 0 && sm < 0x60 &&
+                            pc_sm_emitter[sm].gobj != NULL)
+                        {
+                            int voices[2];
+                            int n = HSD_SynthSFXVoices(v->vID, voices);
+                            int k;
+                            for (k = 0; k < n; k++) {
+                                pc_spatial_voice_tag(voices[k],
+                                                     pc_sm_emitter[sm].gobj,
+                                                     pc_sm_emitter[sm].pos);
+                            }
+                        }
+                    }
+#endif
                     AXDriver_804C5920[v->vID & 0x3F] = v;
                     v->flags &= 0xFFF4FF99;
                     if (v->flags & 0x40000) {
@@ -638,7 +665,10 @@ int HSD_AudioSFXStartParam(int sound_id, u8 volume, u8 pan, int track, int chann
 {
     int32_t j;
     if (pc_net_sfx_on()) {
-        return (int) net_sfx_start(sound_id, volume, pan, track, channel);
+        int32_t h = net_sfx_start(sound_id, volume, pan, track, channel);
+        /* Outside net_sfx.c: for a start it defers past a rollback. */
+        pc_spatial_note_handle(h);
+        return (int) h;
     }
     /* MELEE_NET_SFX_LOG=off: the engine's id, journalled per frame. */
     if (pc_net_audio_replay(&j)) {
@@ -732,6 +762,15 @@ int HSD_AudioSFXStartParam(int sound_id, u8 volume, u8 pan, int track,
     }
 
     sm_reject(0, sound_id); /* 0 = accepted */
+#ifdef TARGET_PC
+    {
+        int sm = (int) (v - AXDriver_804C45A0);
+        if (sm >= 0 && sm < 0x60) {
+            pc_spatial_take_emitter(&pc_sm_emitter[sm].gobj,
+                                    pc_sm_emitter[sm].pos);
+        }
+    }
+#endif
     v->x16 = sound_id;
     v->cmd_stream = DP(DiscU32, AXDriver_804D77BC[sample_idx].v);
     v->x1A = 0xFF;

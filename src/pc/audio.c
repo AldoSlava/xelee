@@ -20,6 +20,7 @@
 #include <dolphin/ai.h>
 #include "pc/pc.h"
 #include "pc/music_stream.h"
+#include "pc/spatial_audio.h"
 #include <dolphin/ar.h>
 #include <dolphin/ax.h>
 #include <dolphin/axfx.h>
@@ -300,7 +301,11 @@ static bool is_music_stream(Voice* v) {
     return false;
 }
 
-static void mix_voice(Voice* v, float* out) {
+/* `mono`: the dry mix goes to both sides at one level, the voice's L/R pan
+ * folded to its equal-power level, sqrt((vL^2 + vR^2) / 2) -- a center-panned
+ * voice keeps its per-side level. The aux sends are untouched. For
+ * pc/spatial_audio.c, which places the voice itself. */
+static void mix_voice(Voice* v, float* out, bool mono) {
     AXPB* pb = &v->vpb.pb;
     if (!pb->state) {
         return;
@@ -317,6 +322,9 @@ static void mix_voice(Voice* v, float* out) {
 
     float vl = (pb->mix.vL / 32767.0f) * voice_gain;
     float vr = (pb->mix.vR / 32767.0f) * voice_gain;
+    if (mono) {
+        vl = vr = sqrtf((vl * vl + vr * vr) * 0.5f);
+    }
     float al = (pb->mix.vAuxAL / 32767.0f) * voice_gain;
     float ar = (pb->mix.vAuxAR / 32767.0f) * voice_gain;
     float bl = (pb->mix.vAuxBL / 32767.0f) * voice_gain;
@@ -642,6 +650,7 @@ static void render_frame(float* out) {
     OSRestoreInterrupts(intr);
 
     /* 2. Process voice mixing and aux effect routing under audio_lock. */
+    pc_spatial_frame_begin();
     int n_used = 0, n_running = 0, n_stopped = 0, n_zero_mix = 0;
     int n_zero_ratio = 0, n_loop = 0, n_old = 0;
     for (int i = 0; i < AX_VOICES; i++) {
@@ -685,8 +694,21 @@ static void render_frame(float* out) {
         if (v->vpb.pb.addr.loopFlag) {
             n_loop++;
         }
-        mix_voice(v, out);
+        if (pc_spatial_voice_active(i)) {
+            /* Positional: mixed mono into its own frame, then placed. */
+            float dry[AX_FRAME * 2];
+            float mono[AX_FRAME];
+            memset(dry, 0, sizeof(dry));
+            mix_voice(v, dry, true);
+            for (int k = 0; k < AX_FRAME; k++) {
+                mono[k] = dry[k * 2];
+            }
+            pc_spatial_render(i, mono);
+        } else {
+            mix_voice(v, out, false);
+        }
     }
+    pc_spatial_frame_end(out);
 
     /* 3. Schroeder reverb aux effects execute under audio_lock so
      * AXRegisterAux*Callback and effect lifecycle functions cannot race
@@ -805,6 +827,7 @@ void AXInit(void) {
         s_voices[i].vpb.index = i;
     }
     s_aram = aurora_aram_base();
+    pc_spatial_init(AX_RATE, AX_FRAME);
     if (s_dump == NULL && getenv("MELEE_AUDIO_DUMP") != NULL) {
         s_dump = fopen(getenv("MELEE_AUDIO_DUMP"), "wb");
     }
@@ -875,6 +898,7 @@ AXVPB* AXAcquireVoice(u32 priority, void (*callback)(void*), u32 userContext) {
         if (priority == 0x1D) {
             pick->is_stream = true;
         }
+        pc_spatial_voice_clear((int)index);
     }
     audio_unlock();
     return pick ? &pick->vpb : NULL;
@@ -888,6 +912,7 @@ void AXFreeVoice(AXVPB* p) {
         v->is_stream = false;
         v->vpb.pb.state = 0;
         v->vpb.priority = 0;
+        pc_spatial_voice_clear((int)v->vpb.index);
         audio_unlock();
     }
 }

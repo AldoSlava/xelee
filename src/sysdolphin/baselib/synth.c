@@ -728,6 +728,21 @@ static inline struct HSD_SynthSFXNode* getNode(int sfx_id)
     }
 }
 
+#ifdef TARGET_PC
+int HSD_SynthSFXVoices(int id, int out[2])
+{
+    struct HSD_SynthSFXNode* node = getNode(id);
+    int i;
+    if (node == NULL) {
+        return 0;
+    }
+    for (i = 0; i < node->voice_count && i < 2; i++) {
+        out[i] = node->voice[i] != NULL ? (int) node->voice[i]->index : -1;
+    }
+    return i;
+}
+#endif
+
 /* Returns HSD_Synth_80389334's synth node id (0x40 * n + voice index), or -1.
  * Upstream declares this `bool`; under C11 that is 1-byte `_Bool`, so every id
  * clamps to 1 and the -1 sentinel clamps to 1 as well. The only caller,

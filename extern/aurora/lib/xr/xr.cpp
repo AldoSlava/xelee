@@ -6832,6 +6832,27 @@ extern "C" void aurora_xr_set_stage_center(float x, float y, float z) {
 
 extern "C" void aurora_xr_set_hud_on_top(bool on) { aurora::xr::g_hudOnTop = on; }
 
+extern "C" bool aurora_xr_audio_listener(float m[3][4]) {
+  using namespace aurora::xr;
+  if (!active())
+    return false;
+  XrPosef head;
+  {
+    std::lock_guard lock{g_viewMutex};
+    if (!g_viewsValid)
+      return false;
+    head.orientation = B.headOrientation;
+    head.position = B.head;
+  }
+  // Head <- room <- game: the inverse of the head's pose, after the arena's
+  // placement (what the eyes see, A in render_eyes, without the eye offsets).
+  const Mat4 t = mul(view_from_pose(head), arena_transform());
+  for (int r = 0; r < 3; ++r)
+    for (int c = 0; c < 4; ++c)
+      m[r][c] = t[r * 4 + c];
+  return true;
+}
+
 extern "C" void aurora_xr_set_stage_zoom(float zoom) {
   using namespace aurora::xr;
   std::lock_guard lock{g_arenaMutex};

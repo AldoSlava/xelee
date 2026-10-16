@@ -23,6 +23,9 @@ static void pc_mark_link(int link)
 #include "gobjplink.h"
 #include "gobjproc.h"
 #include "lobj.h"
+#ifdef TARGET_PC
+#include "pc/spatial_audio.h"
+#endif
 
 HSD_GObjProc** HSD_GObj_ProcList;
 HSD_GObjProc** HSD_GObj_GObjProcHead;
@@ -112,7 +115,15 @@ void HSD_GObj_RunProcs(void)
                 {
                     HSD_GObj_CurrentInvokedProcGObj = gobj;
                     HSD_GObj_CurrentInvokedProc = proc;
+#ifdef TARGET_PC
+                    /* Sounds this proc starts come from its fighter or
+                     * item (pc/spatial_audio.h; output only). */
+                    pc_spatial_proc(gobj);
+#endif
                     proc->on_invoke(proc->gobj);
+#ifdef TARGET_PC
+                    pc_spatial_proc(NULL);
+#endif
                     HSD_GObj_NextInvokedProc = proc->next;
                     if (HSD_GObj_DelayedProcInfo.flags != 0) {
                         HSD_GObj_DelayedProcInfo.in_delayed_proc = 1;

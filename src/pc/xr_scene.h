@@ -28,6 +28,9 @@ void pc_xr_hud_camera(void);
  * ended (Stage Clear's bonus tally, gm/gmregclear.c). Each scene starts
  * with it off. */
 void pc_xr_flat_view(bool on);
+/* The fight is shown in 3D: an XR session presents and pc_xr_flat_view is
+ * off. Any thread (a racy read is fine for its one user, positional audio). */
+bool pc_xr_world_3d(void);
 /* After the camera's HSD_CObjEndCurrent. */
 void pc_xr_mono_camera(void);
 struct HSD_JObj;
@@ -92,6 +95,7 @@ bool pc_xr_magnify_begin(void);
 void pc_xr_magnify_end(void);
 #else
 static inline bool pc_xr_presenting(void) { return false; }
+static inline bool pc_xr_world_3d(void) { return false; }
 static inline void pc_xr_stage_load(void) {}
 static inline void pc_xr_world_camera(const float view[3][4]) { (void)view; }
 static inline void pc_xr_camera_focus(const float interest[3]) { (void)interest; }

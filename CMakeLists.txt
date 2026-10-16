@@ -238,6 +238,7 @@ set(PC_SOURCES
         src/pc/os.c
         src/pc/region.c
         src/pc/slp.c
+        src/pc/spatial_audio.c
         src/pc/slp_format.c
         # Slippi netplay protocol (docs/slippi-migration-plan.md). slp_proto.h is
         # the constants header; slp_packet.c is the wire codec (M1); slp_msg.c
@@ -332,6 +333,26 @@ target_compile_options(melee PRIVATE
         $<$<BOOL:${ANDROID}>:-march=armv8-a+crc+crypto>
         $<$<BOOL:${ANDROID}>:-mtune=cortex-a73>)
 target_link_libraries(melee PRIVATE melee_game aurora::main melee_enet ${MELEE_CRYPTO_LIBS} ${MELEE_NETWORK_LIBS})
+
+# Positional sound effects (src/pc/spatial_audio.h), with Valve's Steam Audio.
+# On by default where the SDK can be had (cmake/SteamAudio.cmake fetches it);
+# otherwise compiled out. Built in, it still stays off until
+# MELEE_SPATIAL_AUDIO=1 at run time.
+option(MELEE_SPATIAL_AUDIO "Positional sound effects with Steam Audio (fetched; Linux x64, Android arm64)" ON)
+if (MELEE_SPATIAL_AUDIO)
+    include(cmake/SteamAudio.cmake)
+    if (MELEE_SPATIAL_AUDIO_READY)
+        # PUBLIC: the hooks in the game code (gobj.c, axdriver.c, camera.c)
+        # are empty inlines without it.
+        target_compile_definitions(melee_game PUBLIC MELEE_SPATIAL_AUDIO=1)
+        target_link_libraries(melee PRIVATE melee_phonon)
+        if (NOT ANDROID)
+            # libphonon.so is staged beside the executable (and in lib/ of
+            # the Linux tarball, which run.sh puts on LD_LIBRARY_PATH).
+            set_property(TARGET melee APPEND PROPERTY BUILD_RPATH "$ORIGIN")
+        endif ()
+    endif ()
+endif ()
 
 if (IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     target_link_libraries(melee PRIVATE
