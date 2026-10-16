@@ -16,7 +16,9 @@
 #include <melee/it/forward.h>
 /* it/it_26B1.h, declared here: its header pulls in every fighter type. */
 void it_8026B294(HSD_GObj* gobj, Vec3* pos);
+ItemKind itGetKind(HSD_GObj* gobj);
 #include <sysdolphin/baselib/gobj.h>
+#include <sysdolphin/baselib/jobj.h>
 #include <sysdolphin/baselib/jobj.h>
 
 #include <phonon.h>
@@ -32,6 +34,9 @@ void it_8026B294(HSD_GObj* gobj, Vec3* pos);
 #define SP_EMITTERS 64     /* fighters and items published per frame */
 #define SP_HANDLES 256     /* netplay starts remembered by handle */
 #define SP_STALE_NS 250000000ull /* positions older than this: back to plain stereo */
+#define SP_INSTANCES 32    /* stage sounds placed at the part that started them */
+#define SP_INSTANCE_NS 8000000000ull /* followed this long (an Arwing's pass) */
+#define SP_SHOT_NS 500000000ull      /* a start's shot appears within this */
 
 /* A fighter's position is at its feet; its sounds come from about the
  * middle of its body (the same lift pc/xr_scene.c gives the follow focus). */
@@ -117,6 +122,7 @@ static uint64_t now_ns(void) {
 /* ---- game thread ------------------------------------------------------ */
 
 static const HSD_GObj* s_cur;      /* the fighter or item whose proc runs */
+static const HSD_GObj* s_cur_part; /* or the stage part */
 static bool s_override_on;         /* a deferred netplay start: its noted emitter */
 static const void* s_override_gobj;
 static float s_override_pos[2][3];
@@ -135,6 +141,7 @@ void pc_spatial_proc(const void* gobj) {
     }
     s_cur = g != NULL && (g->classifier == HSD_GOBJ_CLASS_FIGHTER || g->classifier == HSD_GOBJ_CLASS_ITEM) ? g
                                                                                                           : NULL;
+    s_cur_part = g != NULL && g->classifier == HSD_GOBJ_CLASS_STAGE ? g : NULL;
 }
 
 /* Where an emitter is now; read only. False for anything else. */
@@ -160,20 +167,24 @@ static bool emitter_pos(const HSD_GObj* g, float pos[3]) {
     return true;
 }
 
-/* Stage sounds that no fighter or item starts, placed. A stereo one's left
- * and right voices each get a point (x[0] and x[1]); a mono one sits between
- * them. Read only, like the rest: the lava's height is the game's own, and a
- * point on a moving part goes where that joint was last drawn. */
+/* Stage sounds, placed. A stereo one's left and right voices each get a
+ * point (x[0] and x[1]); a mono one sits between them. The points are in
+ * game units, or in a stage part's joint as it was last drawn: a part of the
+ * map (part), or the part whose proc started the sound (from_proc, one
+ * placement per start, followed as that part moves). Read only, like the
+ * rest: the lava's height is the game's own. */
 typedef struct StageSound {
     int grkind;
-    int sfx[2];   /* the sounds placed so (0: unused) */
-    float x[2];   /* left voice, right voice; game units */
+    int sfx[4];     /* the sounds placed so (0: unused) */
+    float x[2];     /* left voice, right voice */
     float z;
-    bool lava_y;  /* y follows the lava's surface (Ground_801C4368) */
-    float y;      /* otherwise fixed */
-    float gain;   /* over the game's own level */
-    int part;     /* > 0: the points are in this part's joint (map gobj) */
-    int joint;    /* depth first from the part's root, as pc/xr_scene.c counts */
+    bool lava_y;    /* y follows the lava's surface (Ground_801C4368) */
+    float y;        /* otherwise fixed */
+    float gain;     /* over the game's own level */
+    int part;       /* > 0: in this map part's joint */
+    bool from_proc; /* in the starting part's joint */
+    int joint;      /* depth first from the part's root, as pc/xr_scene.c counts */
+    bool to_shot;   /* then with the Arwing laser the start fires, once it exists */
 } StageSound;
 
 static const StageSound s_stage_sounds[] = {
@@ -186,15 +197,50 @@ static const StageSound s_stage_sounds[] = {
      * quieter by the distance gain alone. The rumble is quiet in the game's
      * own mix (-30 to -50 dB, about 2.5 s), and lost under the stage, so it
      * is played 6 dB up. */
-    {0x08, {0x61A80, 0x61A81}, {-120.f + 245.f / 3.f, -120.f + 245.f * 2.f / 3.f}, 0.f, true, 0.f, 2.f, 0, 0},
-    /* Corneria: the Great Fox's engine hum, a stereo loop from the stage's
-     * start (grcorneria.c). Its right channel runs about 9 dB over its left,
-     * so heard as plain stereo it sat in the right ear. Both channels come
-     * from the engine at the ship's tail (part 3, joint 5's nozzle, x -200
-     * to -158 at rest), carried along as the ship drifts. */
-    {0x0E, {0x55737, 0}, {-180.f, -180.f}, 0.f, false, -19.f, 1.f, 3, 5},
+    {.grkind = 0x08,
+     .sfx = {0x61A80, 0x61A81},
+     .x = {-120.f + 245.f / 3.f, -120.f + 245.f * 2.f / 3.f},
+     .lava_y = true,
+     .gain = 2.f},
+    /* Corneria (grcorneria.c). The Great Fox (part 3) flies nose to the
+     * left. Its engine hum, a stereo loop from the stage's start whose right
+     * channel runs about 9 dB over its left (as plain stereo it sat in the
+     * right ear), comes from its tail: x 233-262 at rest, drawn at 0.54
+     * scale as the ship drifts. */
+    {.grkind = 0x0E, .sfx = {0x55737}, .x = {245.f, 245.f}, .y = 15.f, .gain = 1.f, .part = 3, .joint = 0},
+    /* Its cannon under the nose (joints 3 and 4, 10 units apart): the
+     * charge, one beam (0x55739) or a volley (0x5573A), and each shot. */
+    {.grkind = 0x0E, .sfx = {0x55739, 0x5573A, 0x55735}, .gain = 1.f, .part = 3, .joint = 3},
+    /* The Arwings (parts 1, 2 and 10; joint 3 carries the ship): the swoops
+     * as one comes and goes, heard from it all the way past. */
+    {.grkind = 0x0E, .sfx = {0x55730, 0x55731, 0x55732}, .gain = 1.f, .from_proc = true, .joint = 3},
+    /* An Arwing's laser shot: from the Arwing, then with the laser it makes
+     * just after starting the sound (itarwinglaser.c) as it flies. */
+    {.grkind = 0x0E, .sfx = {0x55733, 0x55734}, .gain = 1.f, .from_proc = true, .joint = 3, .to_shot = true},
 };
 #define SP_STAGE_SOUNDS ((int)(sizeof s_stage_sounds / sizeof s_stage_sounds[0]))
+
+/* One placement of a from_proc sound: its own emitter. */
+typedef struct StageInstance {
+    const StageSound* r;
+    const HSD_GObj* part; /* the part that started it */
+    const HSD_GObj* shot; /* to_shot: its laser, once matched */
+    bool waiting;         /* to_shot: no laser yet */
+    uint64_t stamp;       /* now_ns() at the start */
+    float pos[2][3];      /* where it was last */
+} StageInstance;
+
+static StageInstance s_inst[SP_INSTANCES];
+static unsigned s_inst_next;
+
+static bool live(const HSD_GObj* g, int plink) {
+    for (HSD_GObj* h = HSD_GObjPLinkHead[plink]; h != NULL && g != NULL; h = h->next) {
+        if (h == g) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /* A part's joint, counted as pc/xr_scene.c's nth_joint does. */
 static HSD_JObj* nth_joint(HSD_JObj* jobj, int* n) {
@@ -210,7 +256,28 @@ static HSD_JObj* nth_joint(HSD_JObj* jobj, int* n) {
     return NULL;
 }
 
-static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
+/* The points, in the part's joint as last drawn. False: no such joint. */
+static bool joint_points(const HSD_GObj* g, int joint, const float local[2][3], float pos[2][3]) {
+    HSD_JObj* root = g != NULL ? g->hsd_obj : NULL;
+    int n = joint - 1;
+    HSD_JObj* j = root == NULL ? NULL : joint == 0 ? root : nth_joint(root->child, &n);
+    if (j == NULL) {
+        return false;
+    }
+    for (int c = 0; c < 2; c++) {
+        float p[3];
+        for (int k = 0; k < 3; k++) {
+            p[k] = j->mtx[k][0] * local[c][0] + j->mtx[k][1] * local[c][1] + j->mtx[k][2] * local[c][2] + j->mtx[k][3];
+        }
+        if (!isfinite(p[0]) || !isfinite(p[1]) || !isfinite(p[2])) {
+            return false;
+        }
+        memcpy(pos[c], p, sizeof(p));
+    }
+    return true;
+}
+
+static void local_points(const StageSound* r, float pos[2][3]) {
     float y = r->y;
     if (r->lava_y) {
         float speed;
@@ -221,22 +288,28 @@ static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
         pos[c][1] = y;
         pos[c][2] = r->z;
     }
-    if (r->part > 0) {
-        HSD_GObj* g = Ground_GetMapGObj(r->part);
-        HSD_JObj* root = g != NULL ? g->hsd_obj : NULL;
-        int n = r->joint - 1;
-        HSD_JObj* j = root == NULL ? NULL : r->joint == 0 ? root : nth_joint(root->child, &n);
-        if (j == NULL) {
-            return; /* the part is gone: its rest position */
-        }
-        for (int c = 0; c < 2; c++) {
-            float p[3];
-            for (int k = 0; k < 3; k++) {
-                p[k] = j->mtx[k][0] * pos[c][0] + j->mtx[k][1] * pos[c][1] + j->mtx[k][2] * pos[c][2] + j->mtx[k][3];
-            }
-            if (isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2])) {
-                memcpy(pos[c], p, sizeof(p));
-            }
+}
+
+/* A map-wide one's points now (not a from_proc one). */
+static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
+    float local[2][3];
+    local_points(r, local);
+    if (r->part <= 0 || !joint_points(Ground_GetMapGObj(r->part), r->joint, local, pos)) {
+        memcpy(pos, local, sizeof(local)); /* or the part is gone: where it rests */
+    }
+}
+
+/* An instance's points now; where they were last once its part or laser is gone. */
+static void instance_pos(StageInstance* in) {
+    float p[3];
+    if (in->shot != NULL && live(in->shot, HSD_GOBJ_PLINK_ITEM) && emitter_pos(in->shot, p)) {
+        memcpy(in->pos[0], p, sizeof(p));
+        memcpy(in->pos[1], p, sizeof(p));
+    } else if (in->shot == NULL && live(in->part, HSD_GOBJ_PLINK_GROUND)) {
+        float local[2][3], pos[2][3];
+        local_points(in->r, local);
+        if (joint_points(in->part, in->r->joint, local, pos)) {
+            memcpy(in->pos, pos, sizeof(pos));
         }
     }
 }
@@ -244,8 +317,13 @@ static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
 static const StageSound* stage_sound(int sound_id) {
     for (int i = 0; i < SP_STAGE_SOUNDS; i++) {
         const StageSound* r = &s_stage_sounds[i];
-        if (r->grkind == (int)stage_info.grkind && (r->sfx[0] == sound_id || (r->sfx[1] != 0 && r->sfx[1] == sound_id))) {
-            return r;
+        if (r->grkind != (int)stage_info.grkind) {
+            continue;
+        }
+        for (int k = 0; k < 4 && r->sfx[k] != 0; k++) {
+            if (r->sfx[k] == sound_id) {
+                return r;
+            }
         }
     }
     return NULL;
@@ -255,9 +333,14 @@ static const StageSound* stage_sound(int sound_id) {
 static const char s_crowd_tag;
 #define SP_CROWD ((const void*)&s_crowd_tag)
 
-static bool is_stage_sound(const void* gobj) {
+/* A placed stage sound's entry, from its emitter; NULL for anything else. */
+static const StageSound* stage_entry(const void* gobj) {
     const StageSound* r = (const StageSound*)gobj;
-    return r >= s_stage_sounds && r < s_stage_sounds + SP_STAGE_SOUNDS;
+    if (r >= s_stage_sounds && r < s_stage_sounds + SP_STAGE_SOUNDS) {
+        return r;
+    }
+    const StageInstance* in = (const StageInstance*)gobj;
+    return in >= s_inst && in < s_inst + SP_INSTANCES ? in->r : NULL;
 }
 
 /* The emitter of a sound starting now, and its two points. */
@@ -271,10 +354,25 @@ static const void* find_emitter(int sound_id, int group, float pos[2][3]) {
         return s_cur;
     }
     const StageSound* r = stage_sound(sound_id);
-    if (r != NULL) {
-        stage_sound_pos(r, pos);
+    if (r == NULL) {
+        return NULL;
     }
-    return r;
+    if (!r->from_proc) {
+        stage_sound_pos(r, pos);
+        return r;
+    }
+    if (s_cur_part == NULL) {
+        return NULL; /* not from a part's proc: plain */
+    }
+    StageInstance* in = &s_inst[s_inst_next++ % SP_INSTANCES];
+    memset(in, 0, sizeof(*in));
+    in->r = r;
+    in->part = s_cur_part;
+    in->waiting = r->to_shot;
+    in->stamp = now_ns();
+    instance_pos(in);
+    memcpy(pos, in->pos, sizeof(in->pos));
+    return in;
 }
 
 bool pc_spatial_take_emitter(int sound_id, int group, const void** gobj, float pos[2][3]) {
@@ -361,13 +459,61 @@ static void collect(Snapshot* s, int plink, int* count) {
     }
 }
 
-/* This stage's placed sounds, which move with the lava. */
+/* Arwing lasers new since the last drawn frame go, oldest first, to the
+ * laser sounds started just before them that wait for one. */
+static void match_shots(void) {
+    static const HSD_GObj* seen[16];
+    static int n_seen;
+    const HSD_GObj* now[16];
+    int n = 0;
+    for (HSD_GObj* g = HSD_GObjPLinkHead[HSD_GOBJ_PLINK_ITEM]; g != NULL && n < 16; g = g->next) {
+        if (g->user_data != NULL && itGetKind(g) == It_Kind_Arwing_Laser) {
+            now[n++] = g;
+        }
+    }
+    uint64_t t = now_ns();
+    for (int i = 0; i < n; i++) {
+        bool old = false;
+        for (int k = 0; k < n_seen && !old; k++) {
+            old = seen[k] == now[i];
+        }
+        if (old) {
+            continue;
+        }
+        StageInstance* best = NULL;
+        for (int k = 0; k < SP_INSTANCES; k++) {
+            StageInstance* in = &s_inst[k];
+            if (in->waiting && t - in->stamp < SP_SHOT_NS && (best == NULL || in->stamp < best->stamp)) {
+                best = in;
+            }
+        }
+        if (best != NULL) {
+            best->shot = now[i];
+            best->waiting = false;
+        }
+    }
+    memcpy(seen, now, sizeof(now[0]) * (size_t)n);
+    n_seen = n;
+}
+
+/* This stage's placed sounds, which move with the lava, the ship or a laser. */
 static void collect_stage(Snapshot* s) {
     for (int i = 0; i < SP_STAGE_SOUNDS && s->n < SP_EMITTERS; i++) {
         const StageSound* r = &s_stage_sounds[i];
-        if (r->grkind == (int)stage_info.grkind) {
+        if (r->grkind == (int)stage_info.grkind && !r->from_proc) {
             stage_sound_pos(r, s->e[s->n].pos);
             s->e[s->n].gobj = r;
+            s->n++;
+        }
+    }
+    match_shots();
+    uint64_t t = now_ns();
+    for (int i = 0; i < SP_INSTANCES && s->n < SP_EMITTERS; i++) {
+        StageInstance* in = &s_inst[i];
+        if (in->r != NULL && t - in->stamp < SP_INSTANCE_NS) {
+            instance_pos(in);
+            memcpy(s->e[s->n].pos, in->pos, sizeof(in->pos));
+            s->e[s->n].gobj = in;
             s->n++;
         }
     }
@@ -655,7 +801,8 @@ void pc_spatial_voice_tag(int voice, const void* gobj, const float pos[2][3], in
     SpVoice* v = &s_v[voice];
     v->gobj = gobj;
     v->channel = channel;
-    v->boost = is_stage_sound(gobj) ? ((const StageSound*)gobj)->gain : 1.f;
+    const StageSound* r = stage_entry(gobj);
+    v->boost = r != NULL ? r->gain : 1.f;
     channel_pos(pos, channel, v->pos);
     v->tagged = true;
     v->last_frame = 0; /* a new sound: state resets at its first frame */
