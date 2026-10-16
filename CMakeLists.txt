@@ -241,6 +241,7 @@ set(PC_SOURCES
         src/pc/os.c
         src/pc/region.c
         src/pc/slp.c
+        src/pc/room_reverb.c
         src/pc/spatial_audio.c
         src/pc/stage_ambience.c
         src/pc/slp_format.c

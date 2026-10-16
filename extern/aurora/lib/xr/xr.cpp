@@ -518,6 +518,13 @@ struct Bridge {
   PFN_xrPerformEnvironmentRaycastMETA performRaycast = nullptr;
   PFN_xrPollFutureEXT pollFuture = nullptr;
   PFN_xrCancelFutureEXT cancelFuture = nullptr;
+  // The room's layout (XR thread: the room): XR_FB_scene, through the
+  // spatial entity queries.
+  bool hasSpatialEntityExt = false, hasSpatialEntityQueryExt = false, hasSceneExt = false;
+  PFN_xrQuerySpacesFB querySpaces = nullptr;
+  PFN_xrRetrieveSpaceQueryResultsFB retrieveSpaceQueryResults = nullptr;
+  PFN_xrGetSpaceRoomLayoutFB getSpaceRoomLayout = nullptr;
+  PFN_xrGetSpaceBoundary2DFB getSpaceBoundary2D = nullptr;
   XrSpace floorSpace = XR_NULL_HANDLE; // LOCAL_FLOOR
   XrSwapchain shadowSwapchain = XR_NULL_HANDLE;
   // The most composition layers a frame may have (XrSystemGraphicsProperties).
@@ -720,6 +727,9 @@ bool create_instance() {
     B.hasFutureExt |= !std::strcmp(p.extensionName, XR_EXT_FUTURE_EXTENSION_NAME);
     B.hasEnvRaycastExt |= !std::strcmp(p.extensionName, XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME);
     B.hasLocalFloorExt |= !std::strcmp(p.extensionName, XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
+    B.hasSpatialEntityExt |= !std::strcmp(p.extensionName, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME);
+    B.hasSpatialEntityQueryExt |= !std::strcmp(p.extensionName, XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME);
+    B.hasSceneExt |= !std::strcmp(p.extensionName, XR_FB_SCENE_EXTENSION_NAME);
     B.hasColorLutExt |= !std::strcmp(p.extensionName, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
   }
   if (!hasVk2) {
@@ -766,6 +776,14 @@ bool create_instance() {
   B.hasLocalFloorExt &= env_flag("AURORA_XR_LOCAL_FLOOR", true);
   if (B.hasLocalFloorExt)
     exts.push_back(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
+  // The room's size from Space Setup, for the reverb of sounds placed in it
+  // (USE_SCENE, as raycast). AURORA_XR_ROOM=0 leaves it unread.
+  B.hasSceneExt &= B.hasSpatialEntityExt && B.hasSpatialEntityQueryExt && env_flag("AURORA_XR_ROOM", true);
+  if (B.hasSceneExt) {
+    exts.push_back(XR_FB_SPATIAL_ENTITY_EXTENSION_NAME);
+    exts.push_back(XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME);
+    exts.push_back(XR_FB_SCENE_EXTENSION_NAME);
+  }
   // The room's grade by colour LUT; without it, brightness, contrast and
   // saturation (AURORA_XR_GRADE_LUT=0 forces those, AURORA_XR_GRADE=0 none).
   B.hasColorLutExt &= B.hasPassthroughExt && grade_wanted() &&
@@ -897,6 +915,13 @@ bool create_instance() {
     B.cancelFuture = xr_proc<PFN_xrCancelFutureEXT>("xrCancelFutureEXT");
     B.envRaycast = B.createRaycasterAsync && B.createRaycasterComplete && B.destroyRaycaster && B.performRaycast &&
                    B.pollFuture;
+  }
+  if (B.hasSceneExt) {
+    B.querySpaces = xr_proc<PFN_xrQuerySpacesFB>("xrQuerySpacesFB");
+    B.retrieveSpaceQueryResults = xr_proc<PFN_xrRetrieveSpaceQueryResultsFB>("xrRetrieveSpaceQueryResultsFB");
+    B.getSpaceRoomLayout = xr_proc<PFN_xrGetSpaceRoomLayoutFB>("xrGetSpaceRoomLayoutFB");
+    B.getSpaceBoundary2D = xr_proc<PFN_xrGetSpaceBoundary2DFB>("xrGetSpaceBoundary2DFB");
+    B.hasSceneExt = B.querySpaces && B.retrieveSpaceQueryResults && B.getSpaceRoomLayout && B.getSpaceBoundary2D;
   }
 #ifdef XR_META_boundary_visibility
   if (B.hasBoundaryVisibilityExt)
@@ -4382,6 +4407,169 @@ uint32_t sanitize_layers(const XrCompositionLayerBaseHeader** layers, uint32_t c
   return kept;
 }
 
+// ---------------------------------------------------------------- XR thread: the room
+//
+// The player's room's size, from the layout Space Setup saved (XR_FB_scene:
+// its floor's outline, and its floor's and ceiling's heights), for the
+// reverb of sounds placed in it (aurora_xr_room; src/pc/room_reverb.h).
+// Read once a session, as the session first has focus, in two queries the
+// runtime answers with events: the room's layout, then its floor and
+// ceiling. Without a layout (no Space Setup, USE_SCENE denied) there's none,
+// and the game takes a typical room. AURORA_XR_ROOM=0 leaves it unread.
+
+struct RoomQuery {
+  enum class Step { Idle, Layout, Planes, Done } step = Step::Idle;
+  XrAsyncRequestIdFB request = 0;
+  bool answered = false; // this query's results came
+  XrUuidEXT floor{}, ceiling{};
+  XrTime time = 0; // a recent display time, to locate the planes at
+};
+RoomQuery g_roomQuery; // XR thread
+
+struct RoomInfo {
+  bool known = false;
+  float area = 0.f, perimeter = 0.f, height = 0.f;
+};
+std::mutex g_roomMutex;
+RoomInfo g_room;
+
+void room_done(const char* why) {
+  if (why)
+    Log.info("Room layout not read: {}", why);
+  g_roomQuery.step = RoomQuery::Step::Done;
+}
+
+bool room_query(const XrSpaceFilterInfoBaseHeaderFB* filter, uint32_t max) {
+  XrSpaceQueryInfoFB qi{XR_TYPE_SPACE_QUERY_INFO_FB};
+  qi.queryAction = XR_SPACE_QUERY_ACTION_LOAD_FB;
+  qi.maxResultCount = max;
+  qi.filter = filter;
+  g_roomQuery.answered = false;
+  const XrResult r =
+      B.querySpaces(B.session, reinterpret_cast<const XrSpaceQueryInfoBaseHeaderFB*>(&qi), &g_roomQuery.request);
+  if (XR_FAILED(r)) {
+    room_done(fmt::format("the query failed (XrResult {})", static_cast<int>(r)).c_str());
+    return false;
+  }
+  return true;
+}
+
+// Each display frame: starts reading the room once the session has focus.
+void room_frame(XrTime time) {
+  g_roomQuery.time = time;
+  if (!B.hasSceneExt || g_roomQuery.step != RoomQuery::Step::Idle || !B.running || !B.focused)
+    return;
+  XrSpaceComponentFilterInfoFB f{XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB};
+  f.componentType = XR_SPACE_COMPONENT_TYPE_ROOM_LAYOUT_FB;
+  if (room_query(reinterpret_cast<const XrSpaceFilterInfoBaseHeaderFB*>(&f), 8))
+    g_roomQuery.step = RoomQuery::Step::Layout;
+}
+
+std::vector<XrSpaceQueryResultFB> room_results(XrAsyncRequestIdFB id) {
+  XrSpaceQueryResultsFB res{XR_TYPE_SPACE_QUERY_RESULTS_FB};
+  if (XR_FAILED(B.retrieveSpaceQueryResults(B.session, id, &res)))
+    return {};
+  std::vector<XrSpaceQueryResultFB> out(res.resultCountOutput);
+  res.resultCapacityInput = static_cast<uint32_t>(out.size());
+  res.results = out.data();
+  if (XR_FAILED(B.retrieveSpaceQueryResults(B.session, id, &res)))
+    return {};
+  out.resize(res.resultCountOutput);
+  return out;
+}
+
+// A plane's outline (XR_FB_scene's 2D boundary, in its own plane): its area
+// and perimeter. False without one.
+bool plane_outline(XrSpace space, float& area, float& perimeter) {
+  XrBoundary2DFB b{XR_TYPE_BOUNDARY_2D_FB};
+  if (XR_FAILED(B.getSpaceBoundary2D(B.session, space, &b)) || b.vertexCountOutput < 3)
+    return false;
+  std::vector<XrVector2f> v(b.vertexCountOutput);
+  b.vertexCapacityInput = static_cast<uint32_t>(v.size());
+  b.vertices = v.data();
+  if (XR_FAILED(B.getSpaceBoundary2D(B.session, space, &b)))
+    return false;
+  double twice = 0.0, around = 0.0;
+  for (size_t i = 0; i < v.size(); ++i) {
+    const XrVector2f& p = v[i];
+    const XrVector2f& q = v[(i + 1) % v.size()];
+    twice += static_cast<double>(p.x) * q.y - static_cast<double>(q.x) * p.y;
+    around += std::hypot(q.x - p.x, q.y - p.y);
+  }
+  area = static_cast<float>(std::fabs(twice) * 0.5);
+  perimeter = static_cast<float>(around);
+  return true;
+}
+
+void room_results_available(XrAsyncRequestIdFB id) {
+  if (id != g_roomQuery.request || g_roomQuery.step == RoomQuery::Step::Done)
+    return;
+  g_roomQuery.answered = true;
+  std::vector<XrSpaceQueryResultFB> results = room_results(id);
+  const auto release = [&results] {
+    for (const auto& r : results)
+      xrDestroySpace(r.space);
+  };
+  if (g_roomQuery.step == RoomQuery::Step::Layout) {
+    bool found = false;
+    for (const auto& r : results) {
+      XrRoomLayoutFB layout{XR_TYPE_ROOM_LAYOUT_FB};
+      if (XR_SUCCEEDED(B.getSpaceRoomLayout(B.session, r.space, &layout))) {
+        g_roomQuery.floor = layout.floorUuid;
+        g_roomQuery.ceiling = layout.ceilingUuid;
+        found = true;
+        break;
+      }
+    }
+    release();
+    if (!found)
+      return room_done("the scene's room has no layout");
+    std::array<XrUuidEXT, 2> ids{g_roomQuery.floor, g_roomQuery.ceiling};
+    XrSpaceUuidFilterInfoFB f{XR_TYPE_SPACE_UUID_FILTER_INFO_FB};
+    f.uuidCount = static_cast<uint32_t>(ids.size());
+    f.uuids = ids.data();
+    if (room_query(reinterpret_cast<const XrSpaceFilterInfoBaseHeaderFB*>(&f), 2))
+      g_roomQuery.step = RoomQuery::Step::Planes;
+    return;
+  }
+  // The floor and the ceiling.
+  float floorY = NAN, ceilingY = NAN, area = 0.f, perimeter = 0.f;
+  bool outline = false;
+  for (const auto& r : results) {
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    const bool located = XR_SUCCEEDED(xrLocateSpace(r.space, B.space, g_roomQuery.time, &loc)) &&
+                         (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT);
+    if (std::memcmp(&r.uuid, &g_roomQuery.floor, sizeof(XrUuidEXT)) == 0) {
+      if (located)
+        floorY = loc.pose.position.y;
+      outline = plane_outline(r.space, area, perimeter);
+    } else if (std::memcmp(&r.uuid, &g_roomQuery.ceiling, sizeof(XrUuidEXT)) == 0 && located) {
+      ceilingY = loc.pose.position.y;
+    }
+  }
+  release();
+  const float height = ceilingY - floorY;
+  if (!outline || !(height > 1.5f && height < 8.f) || !(area > 2.f && area < 400.f))
+    return room_done(fmt::format("floor {} ({:.1f} m², {:.1f} m around), height {:.2f} m: not a room",
+                                 outline ? "outlined" : "without an outline", area, perimeter, height)
+                         .c_str());
+  {
+    std::lock_guard lock{g_roomMutex};
+    g_room = {true, area, perimeter, height};
+  }
+  Log.info("Room from Space Setup: floor {:.1f} m² ({:.1f} m around), ceiling {:.2f} m over it", area, perimeter,
+           height);
+  room_done(nullptr);
+}
+
+// A query finished: one that never had results found nothing.
+void room_query_complete(const XrEventDataSpaceQueryCompleteFB& c) {
+  if (c.requestId != g_roomQuery.request || g_roomQuery.step == RoomQuery::Step::Done || g_roomQuery.answered)
+    return;
+  room_done(XR_FAILED(c.result) ? fmt::format("the query ended with XrResult {}", static_cast<int>(c.result)).c_str()
+                                : "no room in the scene (Space Setup not done?)");
+}
+
 // ---------------------------------------------------------------- XR worker: the room's grade
 //
 // During a fight in mixed reality the room takes on a little of the stage's
@@ -5522,6 +5710,7 @@ bool render_xr_frame() {
   B.triggersClick = onScreen || onPanel;
   // The surface under the stage is measured while it's being placed: the
   // hold before a fight, or a grab in a pause.
+  room_frame(fs.predictedDisplayTime);
   surface_frame(fight, fight && (placing > 0 || (G.target == Target::Arena && (G.oneHand >= 0 || G.twoHands))),
                 fs.predictedDisplayTime);
 
@@ -5851,6 +6040,10 @@ bool poll_events() {
       surface_request(1000, true);
     } else if (ev.type == XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB) {
       update_pacing();
+    } else if (ev.type == XR_TYPE_EVENT_DATA_SPACE_QUERY_RESULTS_AVAILABLE_FB) {
+      room_results_available(reinterpret_cast<const XrEventDataSpaceQueryResultsAvailableFB&>(ev).requestId);
+    } else if (ev.type == XR_TYPE_EVENT_DATA_SPACE_QUERY_COMPLETE_FB) {
+      room_query_complete(reinterpret_cast<const XrEventDataSpaceQueryCompleteFB&>(ev));
     } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
       return false;
 #ifdef XR_META_boundary_visibility
@@ -8457,6 +8650,17 @@ extern "C" void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin
   }
   // A stage ready for its fight: measured now, in case no hold comes.
   surface_request(1000, false);
+}
+
+extern "C" bool aurora_xr_room(float* floorArea, float* perimeter, float* height) {
+  using namespace aurora::xr;
+  std::lock_guard lock{g_roomMutex};
+  if (!g_room.known)
+    return false;
+  *floorArea = g_room.area;
+  *perimeter = g_room.perimeter;
+  *height = g_room.height;
+  return true;
 }
 
 extern "C" void aurora_xr_set_room_grade(float r, float g, float b, float saturation) {

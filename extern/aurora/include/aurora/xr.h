@@ -144,6 +144,13 @@ void aurora_xr_set_room_grade(float r, float g, float b, float saturation);
  * thread. */
 void aurora_xr_heavy_effect(void);
 
+/* The player's room, from the layout Space Setup saved: its floor's area
+ * (m²) and perimeter (m), and its height (m). False until it has been read
+ * (soon after the session first has focus) or when there is none (no
+ * Space Setup, USE_SCENE denied, AURORA_XR_ROOM=0); then nothing is
+ * written. Any thread. */
+bool aurora_xr_room(float* floorArea, float* perimeter, float* height);
+
 /* True while an OpenXR session is presenting the game. Any thread. */
 bool aurora_xr_active(void);
 /* For positional audio: the transform from the current stage's game world

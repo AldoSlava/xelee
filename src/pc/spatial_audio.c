@@ -6,6 +6,7 @@
 #ifdef MELEE_SPATIAL_AUDIO
 
 #include "pc/pc.h"
+#include "pc/room_reverb.h"
 #include "pc/xr_scene.h"
 #ifdef AURORA_ENABLE_OPENXR
 #include <aurora/xr.h>
@@ -32,6 +33,7 @@ ItemKind itGetKind(HSD_GObj* gobj);
 
 #define SP_VOICES 64       /* AX_VOICES */
 #define SP_PLACED 4        /* sounds made here, at points of the stage (pc_spatial_render_placed) */
+#define SP_ROOM_RATE 48000 /* SP_RATE, for the room's reverb (set up before SP_RATE is defined) */
 #define SP_EMITTERS 64     /* fighters and items published per frame */
 #define SP_HANDLES 256     /* netplay starts remembered by handle */
 #define SP_STALE_NS 250000000ull /* positions older than this: back to plain stereo */
@@ -441,6 +443,7 @@ void pc_spatial_handle_end(void) {
 typedef struct Snapshot {
     uint64_t stamp; /* now_ns() when published; 0: never */
     bool xr3d;      /* the fight is in 3D in a headset: the head is the listener */
+    bool room;      /* placed sounds reverberate in the player's room (room_wanted) */
     float view[3][4];
     int n;
     struct {
@@ -524,6 +527,65 @@ static void collect_stage(Snapshot* s) {
     }
 }
 
+/* ---- the player's room's reverb (pc/room_reverb.h) ---- */
+
+/* Two set-ups: the one playing and the next, made on the game thread
+ * (room_reverb_init measures itself, a few ms) and taken up by the audio
+ * thread as a frame starts. */
+static RoomReverb s_room[2];
+static int s_room_cur = -1;  /* audio thread writes: playing; -1: none yet (__atomic) */
+static int s_room_next = -1; /* game thread writes, audio thread takes (__atomic) */
+
+/* Placed sounds reverberate in the room in mixed reality, where they're in
+ * the player's room: not in full VR, where the player is in the stage and
+ * its own reverb fits, nor on a flat screen. MELEE_ROOM_REVERB=0 never, =1
+ * always (a desktop A/B). The launcher's Reverb setting turns it off with
+ * the stage's (pc_audio_reverb_on). */
+static bool room_wanted(bool xr3d) {
+    const char* v = getenv("MELEE_ROOM_REVERB");
+    if (v != NULL && v[0] != '\0') {
+        return v[0] != '0';
+    }
+    return xr3d && pc_xr_mixed_reality();
+}
+
+/* The reverb's level: its energy for a sound against the sound's own as
+ * heard from the reference distance, MELEE_ROOM_REVERB_DB (-9). A real
+ * room this size would have them about equal at arm's length; a little
+ * drier reads better for a game's small sounds. */
+static float room_wet(void) {
+    const char* v = getenv("MELEE_ROOM_REVERB_DB");
+    return powf(10.f, (v != NULL ? (float)atof(v) : -9.f) / 10.f);
+}
+
+/* Game thread: a set-up for the room the headset knows, or a typical living
+ * room, whenever that changes. */
+static void room_setup(void) {
+    static RoomShape made;
+    static bool have;
+    RoomShape shape = room_reverb_default_room;
+    bool measured = false;
+#ifdef AURORA_ENABLE_OPENXR
+    measured = aurora_xr_room(&shape.floor_area, &shape.perimeter, &shape.height);
+#endif
+    if ((have && memcmp(&shape, &made, sizeof(shape)) == 0) ||
+        __atomic_load_n(&s_room_next, __ATOMIC_ACQUIRE) >= 0) {
+        return; /* the same room, or the last set-up not taken up yet */
+    }
+    const int idx = __atomic_load_n(&s_room_cur, __ATOMIC_ACQUIRE) == 0 ? 1 : 0;
+    const uint64_t t0 = now_ns();
+    const float wet = room_wet();
+    room_reverb_init(&s_room[idx], &shape, SP_ROOM_RATE, wet);
+    __atomic_store_n(&s_room_next, idx, __ATOMIC_RELEASE);
+    made = shape;
+    have = true;
+    const RoomReverb* r = &s_room[idx];
+    pc_log_line("spatial: room reverb for %s: floor %.1f m2, perimeter %.1f m, height %.2f m; decay %.2f s low,"
+                " %.2f s high, late part from %.1f ms, level %.1f dB (set up in %.1f ms)",
+                measured ? "the headset's room" : "a typical living room", shape.floor_area, shape.perimeter,
+                shape.height, r->rt60[0], r->rt60[1], r->pre_ms, 10.f * log10f(wet), (now_ns() - t0) / 1e6);
+}
+
 void pc_spatial_frame(const float view[3][4]) {
     static Snapshot s; /* game thread only; static to keep it off the stack */
     static uint64_t last_log;
@@ -536,6 +598,10 @@ void pc_spatial_frame(const float view[3][4]) {
     collect_stage(&s);
     memcpy(s.view, view, sizeof(s.view));
     s.xr3d = pc_xr_world_3d();
+    s.room = room_wanted(s.xr3d);
+    if (s.room) {
+        room_setup();
+    }
     s.stamp = now_ns();
     pthread_mutex_lock(&s_snap_mutex);
     s_snap = s;
@@ -619,6 +685,10 @@ static float s_bus[2][SP_FRAME];      /* this frame's spatialized voices, 48 kHz
 static float s_bus_hist[2][SP_DOWN_TAPS];
 static bool s_bus_used;               /* anything in the bus or its history */
 static int s_bus_quiet;               /* frames since the bus last had a voice */
+static float s_room_in[SP_FRAME];     /* this frame's sends into the room's reverb */
+static bool s_room_on;                /* placed sounds reverberate in the room this frame */
+static bool s_room_ringing;           /* its tail still plays */
+static bool s_room_sent;              /* something went into it this frame */
 
 static Snapshot s_audio_snap;   /* the audio thread's copy */
 static float s_listener[3][4];  /* game units -> listener space, meters */
@@ -628,7 +698,7 @@ static uint64_t s_frame;        /* AX frames since start */
 
 /* Stats, MELEE_SPATIAL_AUDIO_STATS=1. */
 static struct {
-    unsigned tags, voice_frames, fallback_frames, frames, crowd_frames, speaker_frames;
+    unsigned tags, voice_frames, fallback_frames, frames, crowd_frames, speaker_frames, room_frames;
     double energy_in, energy_out;
     uint64_t ns;
     float sample_pos[3];
@@ -826,8 +896,15 @@ void pc_spatial_frame_begin(void) {
     s_frame++;
     s_active = false;
     s_music_bus_on = false;
+    s_room_on = false;
     if (!s_ready) {
         return;
+    }
+    const int next = __atomic_load_n(&s_room_next, __ATOMIC_ACQUIRE);
+    if (next >= 0) {
+        __atomic_store_n(&s_room_cur, next, __ATOMIC_RELEASE);
+        __atomic_store_n(&s_room_next, -1, __ATOMIC_RELEASE);
+        s_room_ringing = false; /* the new set-up starts silent */
     }
     if (s_crowd_in_used) {
         memset(s_crowd_in, 0, sizeof(s_crowd_in));
@@ -864,6 +941,11 @@ void pc_spatial_frame_begin(void) {
     s_active = true;
     memset(s_music_bus, 0, sizeof(s_music_bus));
     s_music_bus_on = true;
+    s_room_on = s->room && s_room_cur >= 0 && pc_audio_reverb_on();
+    if (s_room_sent) {
+        memset(s_room_in, 0, sizeof(s_room_in));
+        s_room_sent = false;
+    }
     /* Follow each tagged voice's emitter (Brinstar's lava rises and falls
      * under its sound). One no longer published (an item gone, a fighter
      * KO'd off the lists) keeps where it was last seen. */
@@ -928,6 +1010,14 @@ void pc_spatial_render(int voice, const float* mono) {
     }
     v->last_frame = s_frame;
     upsample(v, mono, in);
+    if (s_room_on) {
+        /* Into the room before the distance gain: a room's reverb is about
+         * as loud wherever in it the sound is. */
+        for (int i = 0; i < SP_FRAME; i++) {
+            s_room_in[i] += in[i] * SP_MAKEUP * v->boost;
+        }
+        s_room_sent = true;
+    }
 
     /* Listener space: x right, y up, -z ahead, meters. */
     const float* p = v->pos;
@@ -992,6 +1082,10 @@ void pc_spatial_render(int voice, const float* mono) {
             st.sample_gain = gain;
         }
     }
+}
+
+bool pc_spatial_room_reverb(void) {
+    return s_room_on;
 }
 
 bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono) {
@@ -1085,6 +1179,23 @@ void pc_spatial_frame_end(float* out) {
             iplBinauralEffectReset(s_seat_bin[k]);
         }
     }
+    /* The room's reverb, into the bus with the placed voices, while sounds
+     * go into it and as its tail plays out; cut once no fight draws. */
+    if (s_room_cur >= 0 && (s_room_sent || s_room_ringing)) {
+        RoomReverb* r = &s_room[s_room_cur];
+        if (!s_active) {
+            room_reverb_clear(r);
+            s_room_ringing = false;
+        } else {
+            const uint64_t t0 = now_ns();
+            room_reverb_process(r, s_room_in, s_bus[0], s_bus[1], SP_FRAME);
+            s_room_ringing = room_reverb_ringing(r);
+            s_bus_used = true;
+            s_bus_quiet = 0;
+            st.room_frames++;
+            st.ns += now_ns() - t0;
+        }
+    }
     /* The bus drains through the downsampler for its length after the last
      * voice, then stops costing anything. */
     if (s_bus_used) {
@@ -1110,13 +1221,14 @@ void pc_spatial_frame_end(float* out) {
     }
     const double ratio = st.energy_in > 0.0 ? 10.0 * log10(st.energy_out / st.energy_in) : 0.0;
     pc_log_line("spatial: audio: %u voices tagged, %u voice-frames spatialized, %u fell back to stereo, %u tagged now;"
-                " crowd %u frames, menu speakers %u;"
+                " crowd %u frames, menu speakers %u, room reverb %u;"
                 " %.1f us per AX frame (%.2f%% of its 5 ms); out/in %+.1f dB; e.g. at %.2f,%.2f,%.2f m gain %.2f",
                 st.tags, st.voice_frames, st.fallback_frames, active, st.crowd_frames, st.speaker_frames,
+                st.room_frames,
                 st.ns / 1e3 / 400.0,
                 st.ns / 1e9 / 400.0 / 0.005 * 100.0, ratio, st.sample_pos[0], st.sample_pos[1],
                 st.sample_pos[2], st.sample_gain);
-    st.tags = st.voice_frames = st.fallback_frames = st.crowd_frames = st.speaker_frames = 0;
+    st.tags = st.voice_frames = st.fallback_frames = st.crowd_frames = st.speaker_frames = st.room_frames = 0;
     st.energy_in = st.energy_out = 0.0;
     st.ns = 0;
     st.sampled = false;
