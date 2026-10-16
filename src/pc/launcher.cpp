@@ -10,6 +10,7 @@
 #include "net.h"
 #include "pc.h"
 #include "spatial_audio.h"
+#include "stage_ambience.h"
 #include "slippi/slp_user.h"
 #include <RmlUi/Core/Elements/ElementFormControl.h>
 #include <aurora/dvd.h>
@@ -450,7 +451,7 @@ class Launcher final : public Rml::EventListener {
                 "performance", "defaults-graphics"};
         case 1:
             return {"volume", "music-volume", "sfx-volume", "mute", "reverb", "spatial-audio",
-                "defaults-audio"};
+                "stage-sounds", "defaults-audio"};
         case 2:
             return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes",
                 "defaults-cheats"};
@@ -737,6 +738,18 @@ class Launcher final : public Rml::EventListener {
         text("spatial-audio", std::getenv("MELEE_SPATIAL_AUDIO") ? "Environment override" :
                               prefs.spatial_audio                ? "On" :
                                                                    "Off");
+        {
+            // Expanded stage sounds are made for spatial audio: without it, unavailable.
+            const char* env = std::getenv("MELEE_SPATIAL_AUDIO");
+            const bool spatial = env && *env ? env[0] != '0' : prefs.spatial_audio;
+            text("stage-sounds", !spatial                         ? "Needs spatial audio" :
+                                 std::getenv("MELEE_AMBIENCE")    ? "Environment override" :
+                                 prefs.stage_sounds               ? "On" :
+                                                                    "Off");
+            enabled("stage-sounds", spatial);
+            if (auto* row = element("stage-sounds-row"))
+                row->SetClass("unavailable", !spatial);
+        }
         text("fps", prefs.fps ? "On" : "Off");
         slider("scale", prefs.scale * 100.0f);
         text("scale-val", std::to_string(int(prefs.scale * 100 + 0.5f)) + "%");
@@ -838,6 +851,7 @@ class Launcher final : public Rml::EventListener {
             prefs.mute = d.mute;
             prefs.reverb = d.reverb;
             prefs.spatial_audio = d.spatial_audio;
+            prefs.stage_sounds = d.stage_sounds;
             message = "Audio settings are back to their defaults.";
         } else if (id == "defaults-cheats") {
             prefs.unlock_all = d.unlock_all;
@@ -1064,6 +1078,11 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("spatial-audio")->Focus();
+        } else if (id == "stage-sounds") {
+            prefs.stage_sounds = !prefs.stage_sounds;
+            save();
+            refresh_settings();
+            element("stage-sounds")->Focus();
         } else if (id == "xr-resolution") {
             const int next = xr_resolution_slider(prefs.xr_resolution) + 10;
             prefs.xr_resolution = xr_resolution_pref(float(next > 140 ? 80 : next));
@@ -1154,6 +1173,8 @@ public:
         text("disc-note", disc_note);
 #ifndef MELEE_SPATIAL_AUDIO
         if (auto* e = element("spatial-row"))  // built without Steam Audio
+            e->SetProperty("display", "none");
+        if (auto* e = element("stage-sounds-row"))  // made for spatial audio
             e->SetProperty("display", "none");
 #endif
         if (has_updater && prefs.check_updates) {
@@ -2284,6 +2305,7 @@ extern "C" void pc_menu_init(SDL_Window* window) {
     pc_audio_set_sfx_volume(prefs.sfx_volume);
     pc_audio_set_reverb(prefs.reverb);
     pc_spatial_set_enabled(prefs.spatial_audio);
+    pc_ambience_set_enabled(prefs.stage_sounds);
     auto* context = aurora::rmlui::get_context();
     if (!context) {
         SDL_Log("F1 menu: RmlUi context unavailable");

@@ -374,7 +374,7 @@ Preferences load_preferences(const std::filesystem::path& path) {
         } else if (key == "check_updates" || key == "custom_textures" || key == "unlock_all" ||
                    key == "frozen_stadium" || key == "free_camera" || key == "ucf" ||
                    key == "slippi_fixes" || key == "reverb" || key == "spatial_audio" ||
-                   key == "xr_spacewarp")
+                   key == "stage_sounds" || key == "xr_spacewarp")
         {
             int value;
             if (row >> value && (value == 0 || value == 1)) {
@@ -396,6 +396,8 @@ Preferences load_preferences(const std::filesystem::path& path) {
                     prefs.reverb = value;
                 else if (key == "spatial_audio")
                     prefs.spatial_audio = value;
+                else if (key == "stage_sounds")
+                    prefs.stage_sounds = value;
                 else if (key == "xr_spacewarp")
                     prefs.xr_spacewarp = value;
             }
@@ -444,7 +446,8 @@ bool save_preferences(
          << "\ninstall_id " << std::hex << prefs.install_id << std::dec << '\n';
     text << "reverb " << prefs.reverb << '\n';
     text << "slippi_fixes " << prefs.slippi_fixes << '\n';
-    text << "spatial_audio " << prefs.spatial_audio << "\nxr_resolution " << prefs.xr_resolution
+    text << "spatial_audio " << prefs.spatial_audio << "\nstage_sounds " << prefs.stage_sounds
+         << "\nxr_resolution " << prefs.xr_resolution
          << "\nxr_spacewarp " << prefs.xr_spacewarp << '\n';
     auto data = text.str();
     size_t done = 0;

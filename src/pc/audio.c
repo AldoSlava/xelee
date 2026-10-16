@@ -21,6 +21,7 @@
 #include "pc/pc.h"
 #include "pc/music_stream.h"
 #include "pc/spatial_audio.h"
+#include "pc/stage_ambience.h"
 #include <dolphin/ar.h>
 #include <dolphin/ax.h>
 #include <dolphin/axfx.h>
@@ -715,6 +716,12 @@ static void render_frame(float* out) {
         } else {
             mix_voice(v, out, false);
         }
+    }
+    /* Stage ambience (pc/stage_ambience.h): in a placed fight, from the
+     * crowd's seats all around. Made for spatial audio: without it, none. */
+    float* ambient_bus = pc_spatial_ambient_bus();
+    if (ambient_bus != NULL) {
+        pc_ambience_mix(ambient_bus, AX_FRAME, AX_RATE);
     }
     pc_spatial_frame_end(out);
 

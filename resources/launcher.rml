@@ -89,6 +89,7 @@
           <div class="row" data-desc="Silence the game without changing the volumes."><span class="name">Mute</span><button id="mute" class="value">Mute</button></div>
           <div class="row" data-desc="Stage reverb and echo. Off saves audio CPU on slow devices."><span class="name">Reverb</span><button id="reverb" class="value">On</button></div>
           <div class="row" id="spatial-row" data-desc="Fighters' and items' sounds come from where they are on the stage. Applies to the next game."><span class="name">Spatial audio</span><button id="spatial-audio" class="value">On</button></div>
+          <div class="row" id="stage-sounds-row" data-desc="Sounds the stages lack, made for spatial audio, such as the wind on the Great Fox's deck at Corneria. Needs spatial audio. Applies to the next game."><span class="name">Expanded stage sounds</span><button id="stage-sounds" class="value">On</button></div>
           <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-audio" class="value action">Restore</button></div>
         </div>
         <div id="page-cheats" class="page">

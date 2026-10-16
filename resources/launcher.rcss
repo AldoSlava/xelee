@@ -346,6 +346,10 @@ button.mini.primary { border-color: #e0b030; }
     margin-right: 16dp;
 }
 .row.current .name { color: #ffd84a; }
+/* A setting that needs another one turned on (Expanded stage sounds without
+ * spatial audio): shown, dimmed, and passed over by focus. */
+.row.unavailable { opacity: 0.45; }
+.row.unavailable .name { color: #9da2bb; }
 .detail { display: block; font-size: 13dp; font-weight: normal; color: #9da2bb; }
 .detail.error { color: #ff9a88; }
 .badge {

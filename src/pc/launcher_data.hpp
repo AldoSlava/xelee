@@ -46,6 +46,7 @@ struct Preferences {
     float music_volume = 0.8f;
     float sfx_volume = 1.0f;
     bool spatial_audio = true;  // fighters' and items' sounds placed (src/pc/spatial_audio.h)
+    bool stage_sounds = true;   // our own stage ambience (src/pc/stage_ambience.h); needs spatial audio
     // Quest: the eyes' resolution in percent of the headset's recommended
     // size (80-130), or 0 for dynamic resolution; and Application SpaceWarp.
     int xr_resolution = 0;

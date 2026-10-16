@@ -1,6 +1,7 @@
 #ifdef TARGET_PC
 #include "pc/xr_scene.h"
 #include "pc/spatial_audio.h"
+#include "pc/stage_ambience.h"
 #endif
 #include "camera.h"
 
@@ -4055,6 +4056,8 @@ static void fn_800301D0(HSD_GObj* gobj, intptr_t arg1)
         /* Positional audio: where fighters and items are, and the camera
          * (the listener outside a headset). Read only. */
         pc_spatial_frame((const float(*)[4]) cobj->view_mtx);
+        /* Stage ambience: which stage's plays (pc/stage_ambience.h). */
+        pc_ambience_frame();
 #endif
         Ground_801C4FAC(cobj);
         HSD_LObjDeleteCurrentAll(NULL);

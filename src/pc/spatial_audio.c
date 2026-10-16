@@ -887,6 +887,14 @@ float* pc_spatial_voice_bus(int voice) {
     return s_crowd_in;
 }
 
+float* pc_spatial_ambient_bus(void) {
+    if (!s_active) {
+        return NULL;
+    }
+    s_crowd_in_used = true;
+    return s_crowd_in;
+}
+
 bool pc_spatial_voice_active(int voice) {
     if (voice < 0 || voice >= SP_VOICES || !s_v[voice].tagged || s_v[voice].gobj == SP_CROWD) {
         return false;

@@ -103,6 +103,9 @@ float* pc_spatial_voice_bus(int voice);
  * (160 frames) the music mixes into this frame, in place of the output;
  * pc_spatial_output adds it. NULL otherwise (music into the output). */
 float* pc_spatial_music_bus(void);
+/* Audio thread: the crowd's bus for sounds of the place itself (stage
+ * ambience), heard from the same seats all around; NULL: mix them plain. */
+float* pc_spatial_ambient_bus(void);
 /* After the voices: adds the positional bus to the interleaved stereo mix
  * `out` (160 frames). */
 void pc_spatial_frame_end(float* out);
@@ -155,6 +158,7 @@ static inline float* pc_spatial_voice_bus(int voice) {
     return 0;
 }
 static inline float* pc_spatial_music_bus(void) { return 0; }
+static inline float* pc_spatial_ambient_bus(void) { return 0; }
 static inline void pc_spatial_frame_end(float* out) { (void)out; }
 static inline void pc_spatial_output(float* out) { (void)out; }
 static inline void pc_spatial_init(int rate, int frame) {
