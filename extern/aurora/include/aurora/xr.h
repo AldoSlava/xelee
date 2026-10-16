@@ -122,6 +122,12 @@ void aurora_xr_set_hud_on_top(bool on);
  * thread. */
 void aurora_xr_set_stage_top(float y);
 
+/* The game: a heavy effect starts this frame (a KO's explosion). Dynamic
+ * resolution drops ahead of it, as far as the last one needed, instead of
+ * after its first late frames, and comes back once it has passed. Any
+ * thread. */
+void aurora_xr_heavy_effect(void);
+
 /* True while an OpenXR session is presenting the game. Any thread. */
 bool aurora_xr_active(void);
 void aurora_xr_camera(int category, const float view[3][4]);

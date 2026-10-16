@@ -258,6 +258,19 @@ struct DynamicResolution {
   int ceiling = INT32_MAX;          // highest step allowed until ceilingUntil
   std::chrono::steady_clock::time_point ceilingUntil{};
   int brakes = 0, brakesSinceLog = 0; // in a row (for the hold's length); logged
+  // A heavy moment (a KO's explosion took the eye pass from 4.5 to 15 ms for
+  // half a second): the step it came from, while one lasts (-1: none).
+  int transientFrom = -1;
+  int transientTo = -1;     // a step the readings asked for, for the next decision
+  int overRun = 0, fitRun = 0; // readings in a row over the target / fitting the old step
+  double transientBaseNs = 0; // the frame GPU time before it
+  std::chrono::steady_clock::time_point transientSince{}, brakeQuietUntil{};
+  uint32_t transients = 0;
+  // A heavy effect the game announced (aurora_xr_heavy_effect): the share of
+  // pixels its drop keeps, learned from the last one's peak eye cost.
+  double hintPixels = 0.5;
+  bool transientHinted = false;
+  double transientPeakEyeNs = 0; // the moment's worst eye pass, at the step it came from
   uint32_t recentIndex = 0;
   uint64_t frameCount = 0;
   std::chrono::steady_clock::time_point lastFrame{};
@@ -4713,6 +4726,7 @@ enum TimingZone : uint32_t {
   kZoneMotion,
   kZoneCount
 };
+std::atomic<bool> g_heavyHint{false}; // aurora_xr_heavy_effect, for dynamic resolution
 std::atomic<bool> g_spikeSeen{false}; // a GPU frame spike was logged (RenderDoc trigger)
 constexpr std::array<const char*, kZoneCount> kZoneNames{"3D eyes", "3D right eye (fallback)", "3D compose", "HUD",
                                                          "HUD compose", "frame", "motion"};
@@ -5353,6 +5367,32 @@ void update_dynamic_resolution(bool missed) {
     auto& costs = g_dynresCosts[stage * 2 + (g_passthroughWanted ? 1 : 0)];
     const int levels = dynres_levels();
     dr.level = std::clamp(dr.level, 0, levels - 1);
+    // A heavy effect announced: down at once, before its first frame, to the
+    // step keeping the share of pixels the last one needed. Off by default
+    // (AURORA_XR_HINT=1): with the KO explosion's ring, beam and particles
+    // out of the 3D view, KOs on four-CPU Brinstar held 11 images over 16 KOs
+    // without it and 2 with it, but it dropped the scale (to 0.80) on all 15
+    // it saw, where the readings below dropped it twice.
+    static const bool hints = env_flag("AURORA_XR_HINT", false);
+    if (g_heavyHint.exchange(false) && hints && dr.transientFrom < 0 && dr.level > 0) {
+      const double fit = dynres_scale(dr.level) * std::sqrt(dr.hintPixels);
+      int to = 0;
+      for (int i = dr.level - 1; i > 0; --i)
+        if (dynres_scale(i) <= fit) {
+          to = i;
+          break;
+        }
+      dr.transientFrom = dr.level;
+      dr.transientBaseNs = dr.emaNs > 0 ? dr.emaNs : dr.spanNs > 0 ? dr.spanNs : dr.targetNs * 0.7;
+      dr.transientSince = now;
+      dr.transientTo = to;
+      dr.overRun = dr.fitRun = 0;
+      dr.transientHinted = true;
+      dr.transientPeakEyeNs = 0;
+      ++dr.transients;
+      Log.info("Dynamic resolution: heavy effect ahead, {:.3f} -> {:.3f} ({:.0f}% of the pixels)",
+               dynres_scale(dr.level), dynres_scale(to), 100.0 * dr.hintPixels);
+    }
     // Margins to the ideal latency's slot, from the pacing probe.
     {
       std::vector<float> margins;
@@ -5417,6 +5457,7 @@ void update_dynamic_resolution(bool missed) {
       const double ns = t.lastFrameNs;
       // The eye pass of the same frame (its share of the span), when timed.
       const double eyeNs = t.last3DNs > 0 && t.last3DNs < ns ? t.last3DNs : ns;
+      const double emaBefore = dr.emaNs;
       bool spike = dr.emaNs > 0 && ns > dr.emaNs * 1.5;
       if (spike && ++dr.spikeRun >= 5) {
         dr.emaNs = 0;
@@ -5429,6 +5470,8 @@ void update_dynamic_resolution(bool missed) {
         ++dr.skipSettle;
       } else if (compiling) {
         ++dr.skipCompile;
+      } else if (dr.transientFrom >= 0) {
+        ++dr.skipSpike; // a heavy moment's frames say nothing of the scene
       } else if (spike || ns < 2.0e6) {
         ++dr.skipSpike;
       } else {
@@ -5444,7 +5487,71 @@ void update_dynamic_resolution(bool missed) {
         c.samples = std::min(c.samples + 1, kDynresFullSamples);
         c.lastFrame = dr.frameCount;
       }
+      // Heavy moments: two readings in a row over the target and half again
+      // over this step's average go straight down to the step whose pixels
+      // fit the target (the eye pass scales with them). The step taken from
+      // comes back as soon as three readings in a row say it would fit
+      // again, without the brake's hold: a momentary effect mustn't leave
+      // the fight at a low resolution for the brake's 15-60 s. Over 4 s, it
+      // is the scene: the usual steps take over from where it is.
+      if (dr.settle > 4 && !compiling && ns >= 2.0e6) {
+        const auto fitStep = [&] {
+          const double want = std::max(dr.targetNs - (ns - eyeNs), 0.0);
+          const double fit = dynres_scale(dr.level) * std::sqrt(want / std::max(eyeNs, 1.0));
+          for (int i = dr.level - 1; i > 0; --i)
+            if (dynres_scale(i) <= fit)
+              return i;
+          return 0;
+        };
+        const bool over = ns > dr.targetNs + dr.bandNs;
+        // AURORA_XR_TRANSIENT=0: no drop from the readings (announced effects
+        // still drop: AURORA_XR_HINT).
+        static const bool reactive = env_flag("AURORA_XR_TRANSIENT", true);
+        if (dr.transientFrom < 0) {
+          dr.overRun = reactive && over && emaBefore > 0 && ns > emaBefore * 1.5 ? dr.overRun + 1 : 0;
+          if (dr.overRun >= 2 && dr.level > 0) {
+            dr.transientFrom = dr.level;
+            dr.transientBaseNs = emaBefore;
+            dr.transientSince = now;
+            dr.transientTo = fitStep();
+            dr.overRun = dr.fitRun = 0;
+            dr.transientHinted = false;
+            ++dr.transients;
+            Log.info("Dynamic resolution: heavy moment ({:.1f} ms against {:.1f}), {:.3f} -> {:.3f}", ns / 1e6,
+                     emaBefore / 1e6, dynres_scale(dr.level), dynres_scale(dr.transientTo));
+          }
+        } else {
+          const double from = dynres_scale(dr.transientFrom), at = dynres_scale(dr.level);
+          const double atFrom = (ns - eyeNs) + eyeNs * (from * from) / (at * at);
+          dr.transientPeakEyeNs = std::max(dr.transientPeakEyeNs, eyeNs * (from * from) / (at * at));
+          // Back as soon as the step it came from fits the target again. (Not
+          // the frame time before it: a busy fight's frames grew past that and
+          // the moment never ended, leaving the scale at its floor.)
+          dr.fitRun = atFrom <= dr.targetNs ? dr.fitRun + 1 : 0;
+          dr.overRun = over ? dr.overRun + 1 : 0;
+          if (dr.fitRun >= 3) {
+            dr.transientTo = dr.transientFrom;
+            // What the next announced one keeps: the pixels this one's worst
+            // frame could have had within the target, half way from before.
+            if (dr.transientHinted && dr.transientPeakEyeNs > 0) {
+              const double keep =
+                  std::clamp((dr.targetNs - dr.restNs) / dr.transientPeakEyeNs, 0.25, 1.0);
+              dr.hintPixels = std::clamp(dr.hintPixels * 0.5 + keep * 0.5, 0.25, 1.0);
+            }
+          } else if (dr.overRun >= 2 && dr.level > 0) {
+            dr.transientTo = fitStep();
+            dr.overRun = 0;
+          } else if (now - dr.transientSince > std::chrono::seconds(4)) {
+            // Never low for longer than this: back to where it was, and the
+            // usual steps take it down gradually if the scene really is
+            // dearer now.
+            Log.info("Dynamic resolution: heavy moment lasted over 4 s; back to {:.3f}", from);
+            dr.transientTo = dr.transientFrom;
+          }
+        }
+      }
     }
+    const bool heavyMoment = dr.transientFrom >= 0 || now < dr.brakeQuietUntil;
     // A run of missed 3D images (two within a second) is a panic; a lone
     // miss comes at the same rate at any scale. (The render worker's own
     // cadence jitters, so a long gap between 3D frames is no signal.)
@@ -5456,7 +5563,7 @@ void update_dynamic_resolution(bool missed) {
         recent += f != 0 && dr.frameCount - f < 60 ? 1 : 0;
       // With the GPU well under the target the misses are the CPU's, and
       // less resolution can't help (Mushroom Kingdom II at 8.3 ms).
-      panic = recent >= 2 && (dr.emaNs == 0 || dr.emaNs > dr.targetNs - 2.5e6);
+      panic = recent >= 2 && (dr.emaNs == 0 || dr.emaNs > dr.targetNs - 2.5e6) && !heavyMoment;
       if (!panic)
         ++dr.loneMisses;
     }
@@ -5468,7 +5575,7 @@ void update_dynamic_resolution(bool missed) {
     // 15 s (30, 60 if it brakes again within that).
     bool brake = false;
     if (const uint32_t lateNow = g_lateFrames.load(std::memory_order_relaxed); lateNow != dr.lateFramesSeen) {
-      for (uint32_t i = dr.lateFramesSeen; i != lateNow; ++i)
+      for (uint32_t i = dr.lateFramesSeen; i != lateNow && !heavyMoment; ++i)
         dr.recentLate[dr.recentLateIndex++ % dr.recentLate.size()] = dr.frameCount;
       dr.lateFramesSeen = lateNow;
       int recent = 0;
@@ -5486,7 +5593,23 @@ void update_dynamic_resolution(bool missed) {
     }
     const int ceiling = now < dr.ceilingUntil ? dr.ceiling : INT32_MAX;
     int next = dr.level;
-    if (brake) {
+    bool back = false; // back from a heavy moment: above any ceiling
+    if (dr.transientTo >= 0) {
+      next = dr.transientTo;
+      if (dr.transientTo == dr.transientFrom) {
+        back = true;
+        Log.info("Dynamic resolution: back to {:.3f} after {:.2f} s", dynres_scale(next),
+                 std::chrono::duration<double>(now - dr.transientSince).count());
+        dr.transientFrom = -1;
+        // Frames made late by the moment, still coming in, mustn't brake.
+        dr.brakeQuietUntil = now + std::chrono::seconds(1);
+        std::fill(dr.recentLate.begin(), dr.recentLate.end(), 0);
+        std::fill(dr.recentMisses.begin(), dr.recentMisses.end(), 0);
+      }
+      dr.transientTo = -1;
+    } else if (heavyMoment) {
+      // While one lasts, the readings above decide.
+    } else if (brake) {
       next = dr.level - 1;
     } else if (panic) {
       // This step is dearer than it measured: remembered past the band.
@@ -5516,7 +5639,7 @@ void update_dynamic_resolution(bool missed) {
         next = dr.level + 1;
       }
     }
-    if (next > dr.level)
+    if (next > dr.level && !back)
       next = std::min(next, std::max(ceiling, dr.level));
     // Below 1.0 only while SpaceWarp is on (see minScale).
     const int floor = appsw_on() ? 0 : std::max(static_cast<int>((1.f - dr.minScale) / kDynresStep + 0.5f), 0);
@@ -6593,6 +6716,8 @@ extern "C" void aurora_xr_set_placing_image(int which, int width, int height, co
 extern "C" void aurora_xr_set_passthrough(bool on) { aurora::xr::g_passthroughWanted = on; }
 
 extern "C" bool aurora_xr_active(void) { return aurora::xr::active(); }
+
+extern "C" void aurora_xr_heavy_effect(void) { aurora::xr::g_heavyHint = true; }
 
 extern "C" void aurora_xr_set_stage_top(float y) {
   std::lock_guard lock{aurora::xr::g_arenaMutex};
