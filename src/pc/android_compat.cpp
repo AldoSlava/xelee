@@ -310,24 +310,6 @@ const char* pc_android_device_name(void) {
     return s_label[0] != '\0' ? s_label : nullptr;
 }
 
-#ifdef AURORA_ENABLE_OPENXR
-#include <aurora/xr.h>
-
-/* dev.melee.RoomLight (the Quest build's room light sampler, in the
- * immersive game's process): whether a measurement is due, and each one, for
- * matching the 3D view to the room's light (aurora_xr_room_light_poll). */
-extern "C" JNIEXPORT jint JNICALL Java_dev_melee_RoomLight_nativePoll(JNIEnv*, jclass) {
-    return aurora_xr_room_light_poll();
-}
-
-extern "C" JNIEXPORT void JNICALL Java_dev_melee_RoomLight_nativeSample(JNIEnv*, jclass, jint source, jfloat luma,
-    jfloat r, jfloat g, jfloat b, jfloat exposure_ms, jfloat iso, jfloat wb_r, jfloat wb_g_even, jfloat wb_g_odd,
-    jfloat wb_b, jfloat lux) {
-    const float wb[4] = {wb_r, wb_g_even, wb_g_odd, wb_b};
-    aurora_xr_room_light_sample(source, luma, r, g, b, exposure_ms, iso, wb, lux);
-}
-#endif
-
 #else
 
 void pc_android_multicast_lock_acquire(void) {}

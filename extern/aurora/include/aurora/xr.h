@@ -138,27 +138,6 @@ void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin, float zma
  * aurora_xr_set_stage resets it to none. Any thread. */
 void aurora_xr_set_room_grade(float r, float g, float b, float saturation);
 
-/* Matching the 3D view's brightness and colour to the room's light in mixed
- * reality. The platform measures the room (on Quest: short bursts from a
- * passthrough camera, else the light sensor) and hands each measurement in;
- * the scale it leads to goes on the 3D view's layer in the compositor.
- *
- * Polled by the platform's sampler about twice a second: 1 when a
- * measurement is due (a stage's placing began, or the refresh period
- * passed while the room shows), 0 when not, -1 when room light matching is
- * off (AURORA_XR_ROOM_LIGHT=0): the sampler can stop. Any thread. */
-int aurora_xr_room_light_poll(void);
-/* A measurement. `source`: 1 a camera frame, 2 a light sensor. Camera: the
- * mean linear luminance and RGB of the frame's middle and lower part (0-1),
- * its exposure (ms) and sensitivity (ISO), and white balance gains (R, G
- * even, G odd, B). Sensor: lux. Unknown values are negative. Any thread. */
-void aurora_xr_room_light_sample(int source, float luma, float r, float g, float b, float exposure_ms, float iso,
-                                 const float wb_gains[4], float lux);
-/* The current stage's own mean linear luminance as the 3D view shows it,
- * which room light matching evens out a little (0: leave it as it is).
- * aurora_xr_set_stage resets it. Any thread. */
-void aurora_xr_set_stage_luminance(float luminance);
-
 /* The game: a heavy effect starts this frame (a KO's explosion). Dynamic
  * resolution drops ahead of it, as far as the last one needed, instead of
  * after its first late frames, and comes back once it has passed. Any

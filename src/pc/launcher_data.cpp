@@ -375,7 +375,7 @@ Preferences load_preferences(const std::filesystem::path& path) {
                    key == "frozen_stadium" || key == "free_camera" || key == "ucf" ||
                    key == "slippi_fixes" || key == "reverb" || key == "spatial_audio" ||
                    key == "stage_sounds" || key == "xr_spacewarp" ||
-                   key == "xr_shadow" || key == "xr_room_light")
+                   key == "xr_shadow")
         {
             int value;
             if (row >> value && (value == 0 || value == 1)) {
@@ -403,8 +403,6 @@ Preferences load_preferences(const std::filesystem::path& path) {
                     prefs.xr_spacewarp = value;
                 else if (key == "xr_shadow")
                     prefs.xr_shadow = value;
-                else if (key == "xr_room_light")
-                    prefs.xr_room_light = value;
             }
         } else if (key == "xr_room_grade") {
             int value;
@@ -458,7 +456,7 @@ bool save_preferences(
     text << "spatial_audio " << prefs.spatial_audio << "\nstage_sounds " << prefs.stage_sounds
          << "\nxr_resolution " << prefs.xr_resolution
          << "\nxr_spacewarp " << prefs.xr_spacewarp << "\nxr_shadow " << prefs.xr_shadow
-         << "\nxr_room_grade " << prefs.xr_room_grade << "\nxr_room_light " << prefs.xr_room_light << '\n';
+         << "\nxr_room_grade " << prefs.xr_room_grade << '\n';
     auto data = text.str();
     size_t done = 0;
     bool ok = true;

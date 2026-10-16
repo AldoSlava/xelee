@@ -551,29 +551,6 @@ static const RoomGrade s_grades[] = {
 };
 #define GRADE_COUNT ((int)(sizeof s_grades / sizeof s_grades[0]))
 
-/* PROVISIONAL (hand-set, not measured): each stage's mean linear luminance
- * as the 3D view shows it in mixed reality, for room light matching
- * (aurora_xr_set_stage_luminance), which evens stages out a little against
- * AURORA_XR_ROOM_LIGHT_MREF (0.15). Guesses from how the stages look; to be
- * replaced by measurements (the mean linear luminance of the covered pixels
- * of an AURORA_XR_DUMP eye image per stage), which the desktop XR build
- * couldn't present for here. Other stages: left as they are.
- * MELEE_XR_STAGE_LUMINANCE overrides for the stage played. */
-typedef struct {
-    int grkind;
-    float luminance;
-} StageLuminance;
-
-static const StageLuminance s_luminances[] = {
-    {0x08, 0.09f}, /* Brinstar: dark red rock */
-    {0x16, 0.26f}, /* Icicle Mountain: snow and ice */
-    {0x13, 0.12f}, /* Big Blue: the grey track and cars */
-    {0x0C, 0.2f},  /* Fountain of Dreams: pale marble and water */
-    {0x24, 0.16f}, /* Battlefield: grey stone, grass */
-    {0x25, 0.07f}, /* Final Destination: dark, with glowing lines */
-};
-#define LUMINANCE_COUNT ((int)(sizeof s_luminances / sizeof s_luminances[0]))
-
 /* Stages whose own lighting changes during a fight, which the room's grade
  * then follows: Venom, whose Great Fox flies through caves where the
  * stage's lights dim and redden. Each frame the 3D view draws, the stage's
@@ -659,17 +636,6 @@ static void room_grade(int grkind) {
         s_grade_dynamic |= s_dynamic_grades[i] == grkind;
     }
     dynamic_grade_reset();
-    float luminance = 0.f;
-    for (int i = 0; i < LUMINANCE_COUNT; i++) {
-        if (s_luminances[i].grkind == grkind) {
-            luminance = s_luminances[i].luminance;
-        }
-    }
-    env = getenv("MELEE_XR_STAGE_LUMINANCE");
-    if (env != NULL) {
-        luminance = (float)atof(env);
-    }
-    aurora_xr_set_stage_luminance(luminance);
 }
 
 static HSD_JObj* nth_joint(HSD_JObj* jobj, int* n) {

@@ -451,7 +451,7 @@ class Launcher final : public Rml::EventListener {
         switch (tab) {
         case 0:
             return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "xr-shadow",
-                "xr-room-grade", "xr-room-light", "aspect",
+                "xr-room-grade", "aspect",
                 "hud-mode", "aa", "filter-mode", "fps", "custom-textures", "backend",
                 "performance", "defaults-graphics"};
         case 1:
@@ -721,7 +721,6 @@ class Launcher final : public Rml::EventListener {
         text("spacewarp", prefs.xr_spacewarp ? "On" : "Off");
         text("xr-shadow", prefs.xr_shadow ? "On" : "Off");
         text("xr-room-grade", xr_room_grade_names[prefs.xr_room_grade & 3]);
-        text("xr-room-light", prefs.xr_room_light ? "On" : "Off");
         text("aspect", prefs.widescreen == 0 ? "Original (73:60)" :
                        prefs.widescreen == 1 ? "Widescreen 16:9" :
                                                "Auto (window aspect)");
@@ -853,7 +852,6 @@ class Launcher final : public Rml::EventListener {
             prefs.xr_spacewarp = d.xr_spacewarp;
             prefs.xr_shadow = d.xr_shadow;
             prefs.xr_room_grade = d.xr_room_grade;
-            prefs.xr_room_light = d.xr_room_light;
             message = "Graphics settings are back to their defaults.";
             if (restart)
                 message += " Anti-aliasing and the backend apply after a restart.";
@@ -1108,12 +1106,11 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("spacewarp")->Focus();
-        } else if (id == "xr-shadow" || id == "xr-room-light") {
-            bool& value = id == "xr-shadow" ? prefs.xr_shadow : prefs.xr_room_light;
-            value = !value;
+        } else if (id == "xr-shadow") {
+            prefs.xr_shadow = !prefs.xr_shadow;
             save();
             refresh_settings();
-            element(id.c_str())->Focus();
+            element("xr-shadow")->Focus();
         } else if (id.rfind("defaults-", 0) == 0) {
             restore_defaults(id);
             element(id.c_str())->Focus();
@@ -1630,7 +1627,6 @@ extern "C" void pc_launcher_configure(AuroraConfig* config) {
     config->xrNoSpaceWarp = !prefs.xr_spacewarp;
     config->xrNoStageShadow = !prefs.xr_shadow;
     config->xrRoomGrade = xr_room_grade_strength[prefs.xr_room_grade & 3];
-    config->xrNoRoomLight = !prefs.xr_room_light;
     config->maxTextureAnisotropy = prefs.anisotropy;
     if (!std::getenv("MELEE_VSYNC"))
         config->vsync = prefs.vsync;

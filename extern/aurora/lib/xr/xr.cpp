@@ -3641,7 +3641,7 @@ void build_pointer_layers(PointerLayers& out, bool onTargetOnly = false) {
 //
 // AURORA_XR_RAYCAST=0 leaves the raycaster off and AURORA_XR_LOCAL_FLOOR=0
 // the floor; AURORA_XR_SURFACE_SHADOW=0 hides the shadow while the surface is
-// still measured (blind A/B); AURORA_XR_SHADOW_ALPHA (0.4) is its opacity on
+// still measured (blind A/B); AURORA_XR_SHADOW_ALPHA (0.7) is its opacity on
 // contact, AURORA_XR_SHADOW_SPREAD (0.5) how fast it widens with the gap.
 // AURORA_XR_SURFACE_LOG=1 logs the casts once a second while they run (ray
 // statuses, the consensus height, its spread and coverage, the shadow it
@@ -3651,7 +3651,7 @@ constexpr int64_t kMsNs = 1000000;
 
 struct SurfaceSettings {
   bool shadow = true, log = false;
-  float alpha = 0.4f, spread = 0.5f;
+  float alpha = 0.7f, spread = 0.5f;
 };
 
 const SurfaceSettings& surface_settings() {
@@ -3659,7 +3659,7 @@ const SurfaceSettings& surface_settings() {
     SurfaceSettings s;
     s.shadow = env_flag("AURORA_XR_SURFACE_SHADOW", !g_config.xrNoStageShadow); // the launcher's Stage shadow
     s.log = env_flag("AURORA_XR_SURFACE_LOG", false);
-    s.alpha = std::clamp(env_float("AURORA_XR_SHADOW_ALPHA", 0.4f), 0.f, 1.f);
+    s.alpha = std::clamp(env_float("AURORA_XR_SHADOW_ALPHA", 0.7f), 0.f, 1.f);
     s.spread = std::max(env_float("AURORA_XR_SHADOW_SPREAD", 0.5f), 0.f);
     return s;
   }();
@@ -3754,7 +3754,10 @@ ShadowShape shadow_shape(const ArenaSnapshot& a, float y, float coverage) {
   sh.gap = std::max(under.y - y, 0.f); // sunk into the table: as on contact
   sh.radius = std::sqrt(sh.width * sh.depth / 3.14159265f);
   const float r2 = sh.radius * sh.radius;
-  sh.alpha = r2 > 0.f ? surface_settings().alpha * smoothstep(0.55f, 0.9f, coverage) * r2 / (r2 + sh.gap * sh.gap)
+  // Coverage: on the headset a stage on a desk read 0.44-0.65 of its rays
+  // on it (overhanging the desk); faded from 0.2 to 0.6, not 0.55 to 0.9,
+  // which hid most shadows.
+  sh.alpha = r2 > 0.f ? surface_settings().alpha * smoothstep(0.2f, 0.6f, coverage) * r2 / (r2 + sh.gap * sh.gap)
                       : 0.f;
   if (sh.alpha < 0.04f) // too faint to see
     sh.alpha = 0.f;
@@ -4432,7 +4435,6 @@ struct GradeShared {
   RoomGrade grade;   // the current stage's (aurora_xr_set_room_grade)
   uint64_t seq = 0;  // bumped with every new grade
   bool on = false;   // a fight shows over the room
-  float roomWeight = 1.f; // how much of it the room's light allows (XR thread: room light)
   bool stop = false;
 } g_grade;
 std::thread g_gradeThread;
@@ -4555,10 +4557,9 @@ void grade_main() {
     RoomGrade grade;
     uint64_t seq;
     bool on;
-    float room;
     {
       std::unique_lock lock{g_grade.mutex};
-      const bool fading = weight != (g_grade.on && lookOn ? g_grade.roomWeight : 0.f);
+      const bool fading = weight != (g_grade.on && lookOn ? 1.f : 0.f);
       if (!g_grade.stop && (g_grade.seq == builtSeq || monotonic_ns() - builtNs < 100 * kMsNs))
         g_grade.cv.wait_for(lock, fading || g_grade.seq != builtSeq ? std::chrono::milliseconds(33)
                                                                     : std::chrono::milliseconds(1000));
@@ -4567,7 +4568,6 @@ void grade_main() {
       grade = g_grade.grade;
       seq = g_grade.seq;
       on = g_grade.on;
-      room = g_grade.roomWeight;
     }
     const auto now = std::chrono::steady_clock::now();
     const float dt = std::min(std::chrono::duration<float>(now - last).count(), 0.25f);
@@ -4603,7 +4603,7 @@ void grade_main() {
         force = true; // the style takes the new or rewritten LUT
       }
     }
-    const float want = on && lookOn ? room : 0.f;
+    const float want = on && lookOn ? 1.f : 0.f;
     if (set.log && want != loggedWant && (want == 0.f || loggedWant == 0.f)) {
       Log.info("Room grade fading {} (to {:.2f})", want > weight ? "in" : "out", want);
       loggedWant = want;
@@ -4666,216 +4666,6 @@ void grade_frame(bool on) {
   std::lock_guard lock{g_grade.mutex};
   g_grade.on = on;
   g_grade.cv.notify_one();
-}
-
-// ---------------------------------------------------------------- XR thread: room light
-//
-// In mixed reality the 3D view's brightness and colour follow the room's
-// light (docs/xr-auto-room-light.md, T4): in a dim room a stage at full
-// brightness reads as a screen, not a thing in the room. The platform
-// measures what the passthrough shows (aurora_xr_room_light_sample; on
-// Quest a 4-frame burst from one passthrough camera at each placing hold and
-// every 15 s, else the light sensor, else nothing) on its own threads, and
-// the scale goes on the 3D view's layer as XrCompositionLayerColorScaleBiasKHR:
-// the compositor multiplies, the eye pass pays nothing. With P the
-// measurement (the camera's mean linear luminance, or lux on the sensor's
-// scale) against P0, where the stage looks right as it is:
-//   luminance  s = clamp((P/P0)^gamma * (M_ref/M_stage)^beta, s_min, s_max)
-//   tint       s * (1 + w * (the room's colour / its luminance - 1)), within +-tint_max
-//   the HUD    clamp((P/P0)^hud_gamma, hud_min, 1): legibility first
-//   the grade  clamp((P/P0)^grade_gamma, grade_min, 1) of the room's grade:
-//              a dim room isn't darkened further
-// M_stage is the stage's own brightness (aurora_xr_set_stage_luminance):
-// a dark stage stays darker, only less so. Passthrough's auto exposure holds
-// what's shown steady until the room is too dark for it, so in lit rooms
-// P is about P0 and nothing changes; the curve acts in the dim evening
-// regime. Without any measurement (Quest 2 and Pro, the camera permission
-// denied, no light sensor) the room counts as normal: P = P0. Smoothed over
-// about 3 s, at most 10% a second during a fight, snapped at a placing hold.
-//
-// AURORA_XR_ROOM_LIGHT=0 turns it off (blind A/B); AURORA_XR_ROOM_LIGHT_FIXED
-// "s" or "r,g,b" pins the 3D view's scale instead (A/B of fixed scales);
-// AURORA_XR_ROOM_LIGHT_SOURCE camera, sensor or normal uses only that;
-// AURORA_XR_ROOM_LIGHT_P0, _GAMMA, _BETA, _MIN, _MAX, _MREF, _TINT, _TINT_MAX,
-// _HUD_GAMMA, _HUD_MIN, _GRADE_GAMMA, _GRADE_MIN, _LUX0 (the lux where the
-// sensor's room counts as normal), _TAU (s) and _PERIOD (s) tune it;
-// AURORA_XR_ROOM_LIGHT_LOG=1 logs a line a second (the measurement,
-// exposure, gain, white balance and the scales), and the sampler logs the
-// cameras' characteristics and the sensors at start.
-
-struct RoomSample {
-  int source = 0; // 1 camera, 2 light sensor (0: none yet)
-  float luma = -1.f, r = -1.f, g = -1.f, b = -1.f, exposureMs = -1.f, iso = -1.f, lux = -1.f;
-  std::array<float, 4> wb{-1.f, -1.f, -1.f, -1.f};
-};
-
-struct RoomShared {
-  std::mutex mutex;
-  RoomSample sample;
-  uint64_t samples = 0;       // how many have come
-  bool due = false;           // a measurement is due (aurora_xr_room_light_poll)
-  float stageLuminance = 0.f; // M_stage (0: leave the stage as it is)
-} g_room;
-
-struct RoomSettings {
-  bool on = true, log = false;
-  int source = 0; // 0 any, 1 the camera only, 2 the sensor only, 3 none (normal room)
-  bool fixed = false;
-  std::array<float, 3> fixedScale{1.f, 1.f, 1.f};
-  float p0 = 0.16f, gamma = 0.5f, beta = 0.15f, sMin = 0.6f, sMax = 1.05f, mRef = 0.15f;
-  float tint = 0.2f, tintMax = 0.06f, hudGamma = 0.25f, hudMin = 0.85f, gradeGamma = 1.f, gradeMin = 0.3f;
-  float lux0 = 50.f, tau = 3.f, period = 15.f;
-};
-
-const RoomSettings& room_settings() {
-  static const RoomSettings s = [] {
-    RoomSettings s;
-    s.on = env_flag("AURORA_XR_ROOM_LIGHT", !g_config.xrNoRoomLight); // the launcher's Match room lighting
-    s.log = env_flag("AURORA_XR_ROOM_LIGHT_LOG", false);
-    if (const char* v = std::getenv("AURORA_XR_ROOM_LIGHT_SOURCE")) {
-      const std::string_view src{v};
-      s.source = src == "camera" ? 1 : src == "sensor" ? 2 : src == "normal" ? 3 : 0;
-    }
-    if (const char* v = std::getenv("AURORA_XR_ROOM_LIGHT_FIXED"); v != nullptr && *v != '\0') {
-      auto& f = s.fixedScale;
-      const int n = std::sscanf(v, "%f,%f,%f", &f[0], &f[1], &f[2]);
-      if (n == 1)
-        f[1] = f[2] = f[0];
-      s.fixed = n == 1 || n == 3;
-    }
-    const auto knob = [](const char* name, float def, float lo, float hi) {
-      return std::clamp(env_float(name, def), lo, hi);
-    };
-    s.p0 = knob("AURORA_XR_ROOM_LIGHT_P0", s.p0, 0.001f, 1.f);
-    s.gamma = knob("AURORA_XR_ROOM_LIGHT_GAMMA", s.gamma, 0.f, 2.f);
-    s.beta = knob("AURORA_XR_ROOM_LIGHT_BETA", s.beta, 0.f, 1.f);
-    s.sMin = knob("AURORA_XR_ROOM_LIGHT_MIN", s.sMin, 0.f, 1.f);
-    s.sMax = knob("AURORA_XR_ROOM_LIGHT_MAX", s.sMax, s.sMin, 2.f);
-    s.mRef = knob("AURORA_XR_ROOM_LIGHT_MREF", s.mRef, 0.001f, 1.f);
-    s.tint = knob("AURORA_XR_ROOM_LIGHT_TINT", s.tint, 0.f, 1.f);
-    s.tintMax = knob("AURORA_XR_ROOM_LIGHT_TINT_MAX", s.tintMax, 0.f, 0.5f);
-    s.hudGamma = knob("AURORA_XR_ROOM_LIGHT_HUD_GAMMA", s.hudGamma, 0.f, 2.f);
-    s.hudMin = knob("AURORA_XR_ROOM_LIGHT_HUD_MIN", s.hudMin, 0.f, 1.f);
-    s.gradeGamma = knob("AURORA_XR_ROOM_LIGHT_GRADE_GAMMA", s.gradeGamma, 0.f, 4.f);
-    s.gradeMin = knob("AURORA_XR_ROOM_LIGHT_GRADE_MIN", s.gradeMin, 0.f, 1.f);
-    s.lux0 = knob("AURORA_XR_ROOM_LIGHT_LUX0", s.lux0, 0.1f, 100000.f);
-    s.tau = knob("AURORA_XR_ROOM_LIGHT_TAU", s.tau, 0.05f, 60.f);
-    s.period = knob("AURORA_XR_ROOM_LIGHT_PERIOD", s.period, 1.f, 600.f);
-    return s;
-  }();
-  return s;
-}
-
-// The room's light against a normal room's (1), from a measurement; false
-// when it gives none this setup may use.
-bool room_level(const RoomSample& m, const RoomSettings& set, float& level) {
-  if (m.source == 1 && m.luma >= 0.f && (set.source == 0 || set.source == 1)) {
-    level = m.luma / set.p0;
-    return true;
-  }
-  // The sensor: passthrough's exposure keeps up with the room down to about
-  // lux0, and what it shows falls with the light below that.
-  if (m.source == 2 && m.lux >= 0.f && (set.source == 0 || set.source == 2)) {
-    level = std::min(m.lux / set.lux0, 1.f);
-    return true;
-  }
-  return false;
-}
-
-// XR thread, every frame: the scales for the 3D view and the HUD (into
-// their colour scale structs), and the room grade's share. False: leave the
-// layers as they are (off, or not mixed reality).
-bool room_light_frame(bool fight, bool held, bool placingStarted, bool roomShown,
-                      XrCompositionLayerColorScaleBiasKHR& proj, XrCompositionLayerColorScaleBiasKHR& hud) {
-  const RoomSettings& set = room_settings();
-  if (!set.on || !B.hasColorScaleBias)
-    return false;
-  const auto now = std::chrono::steady_clock::now();
-  static auto lastDue = std::chrono::steady_clock::time_point{};
-  static auto lastFrame = now, lastLog = now;
-  const float dt = std::min(std::chrono::duration<float>(now - lastFrame).count(), 0.25f);
-  lastFrame = now;
-  RoomSample m;
-  uint64_t samples;
-  float stageLum;
-  {
-    std::lock_guard lock{g_room.mutex};
-    // A measurement when a placing hold begins, and every period while the
-    // room shows.
-    if (roomShown && B.focused && (placingStarted || now - lastDue >= std::chrono::duration<float>(set.period))) {
-      g_room.due = true;
-      lastDue = now;
-    }
-    m = g_room.sample;
-    samples = g_room.samples;
-    stageLum = g_room.stageLuminance;
-  }
-  float level = 1.f;
-  const bool measured = room_level(m, set, level);
-  level = std::max(level, 0.001f);
-  // Targets, each on its own curve.
-  const float stage = stageLum > 0.f ? std::pow(set.mRef / stageLum, set.beta) : 1.f;
-  const float lum = std::clamp(std::pow(level, set.gamma) * stage, set.sMin, set.sMax);
-  std::array<float, 3> want{lum, lum, lum};
-  if (measured && m.source == 1 && m.luma > 0.f && m.r >= 0.f && m.g >= 0.f && m.b >= 0.f) {
-    const float c[3] = {m.r, m.g, m.b};
-    for (int i = 0; i < 3; ++i)
-      want[i] = lum * std::clamp(1.f + set.tint * (c[i] / m.luma - 1.f), 1.f - set.tintMax, 1.f + set.tintMax);
-  }
-  if (set.fixed)
-    want = set.fixedScale;
-  const float wantHud = std::clamp(std::pow(level, set.hudGamma), set.hudMin, 1.f);
-  const float wantGrade = std::clamp(std::pow(level, set.gradeGamma), set.gradeMin, 1.f);
-  // Hysteresis: a target moves only past 0.03, so measurement noise never shows.
-  static std::array<float, 3> target{1.f, 1.f, 1.f}, cur{1.f, 1.f, 1.f};
-  static float targetHud = 1.f, curHud = 1.f, sentGrade = 1.f;
-  static uint64_t seen = 0;
-  for (int i = 0; i < 3; ++i)
-    if (std::abs(want[i] - target[i]) > 0.03f || set.fixed) {
-      target = want;
-      break;
-    }
-  if (std::abs(wantHud - targetHud) > 0.03f)
-    targetHud = wantHud;
-  // Snapped while a placing hold shows (and for the first measurement),
-  // else eased over tau, and at most 10% a second during a fight.
-  const bool fresh = samples != seen;
-  seen = samples;
-  if ((fresh && (held || samples == 1)) || set.fixed) {
-    cur = target;
-    curHud = targetHud;
-  } else {
-    const float k = 1.f - std::exp(-dt / set.tau);
-    const float limit = fight && !held ? 0.1f * dt : 1.f;
-    for (int i = 0; i < 3; ++i)
-      cur[i] += std::clamp((target[i] - cur[i]) * k, -limit, limit);
-    curHud += std::clamp((targetHud - curHud) * k, -limit, limit);
-  }
-  if (std::abs(wantGrade - sentGrade) > 0.01f) {
-    sentGrade = wantGrade;
-    std::lock_guard lock{g_grade.mutex};
-    g_grade.roomWeight = wantGrade;
-    g_grade.cv.notify_one();
-  }
-  if (set.log && now - lastLog >= std::chrono::seconds(1)) {
-    lastLog = now;
-    Log.info("Room light: {} P {:.3f} (P/P0 {:.2f}), exposure {:.2f} ms, gain ISO {:.0f}, white balance {:.2f}/{:.2f}/"
-             "{:.2f}/{:.2f}, lux {:.1f}; stage M {:.3f} (x{:.2f}); scale 3D {:.3f}/{:.3f}/{:.3f} (target {:.3f}/{:.3f}/"
-             "{:.3f}), HUD {:.3f}, grade {:.2f}{}",
-             !measured ? "normal room (no measurement)" : m.source == 1 ? "camera" : "light sensor",
-             m.source == 1 ? m.luma : -1.f, level, m.exposureMs, m.iso, m.wb[0], m.wb[1], m.wb[2], m.wb[3], m.lux,
-             stageLum, stage, cur[0], cur[1], cur[2], target[0], target[1], target[2], curHud, sentGrade,
-             set.fixed ? " (fixed)" : roomShown ? "" : " (not shown: full VR)");
-  }
-  if (!roomShown)
-    return false;
-  // Premultiplied: the colour scales, the alpha stays (bias 0, or the
-  // see-through parts would glow over the room).
-  proj = {XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR};
-  proj.colorScale = {cur[0], cur[1], cur[2], 1.f};
-  hud = {XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR};
-  hud.colorScale = {curHud, curHud, curHud, 1.f};
-  return true;
 }
 
 // ---------------------------------------------------------------- XR thread: placing the stage
@@ -5350,13 +5140,6 @@ bool render_xr_frame() {
   const bool shadow = build_shadow_layer(shadowQuad, shadowTint, fs.shouldRender && fight && roomShown);
   // The room's grade, while a fight that isn't held for placing shows over it.
   grade_frame(fight && placing == 0 && roomShown);
-  // The 3D view and the HUD matched to the room's light.
-  XrCompositionLayerColorScaleBiasKHR projScale{XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR};
-  XrCompositionLayerColorScaleBiasKHR hudScale{XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR};
-  static int lastPlacing = 0;
-  const bool roomScaled =
-      room_light_frame(fight, placing > 0, placing > 0 && lastPlacing == 0, roomShown, projScale, hudScale);
-  lastPlacing = placing;
   int shadowIndex = -1;
   std::array<XrCompositionLayerProjectionView, 2> projViews{};
   std::array<XrCompositionLayerSpaceWarpInfoFB, 2> spaceWarp{};
@@ -5434,8 +5217,6 @@ bool render_xr_frame() {
     proj.space = B.space;
     proj.viewCount = 2;
     proj.views = projViews.data();
-    if (roomScaled)
-      proj.next = &projScale;
     // No HUD while the stage is held for placing, cards open or not.
     const bool showHud = hud.haveImage && (now - hud.lastRelease < std::chrono::milliseconds(250) || !flatSince) &&
                          placing == 0;
@@ -5446,8 +5227,6 @@ bool render_xr_frame() {
       hudQuad.subImage.swapchain = hud.swapchain;
       hudQuad.subImage.imageRect = {{0, 0}, {static_cast<int32_t>(hud.width), static_cast<int32_t>(hud.height)}};
       hud_placement(hudQuad.pose, hudQuad.size);
-      if (roomScaled)
-        hudQuad.next = &hudScale;
     }
     // Mixed reality: the HUD goes under the 3D view, which is see-through
     // wherever nothing drew, so fighters passing over it hide it. Nothing
@@ -8284,44 +8063,10 @@ extern "C" void aurora_xr_set_room_grade(float r, float g, float b, float satura
   g_grade.cv.notify_one();
 }
 
-extern "C" int aurora_xr_room_light_poll(void) {
-  using namespace aurora::xr;
-  if (!room_settings().on || room_settings().source == 3)
-    return -1;
-  std::lock_guard lock{g_room.mutex};
-  return std::exchange(g_room.due, false) ? 1 : 0;
-}
-
-extern "C" void aurora_xr_room_light_sample(int source, float luma, float r, float g, float b, float exposure_ms,
-                                            float iso, const float wb_gains[4], float lux) {
-  using namespace aurora::xr;
-  RoomSample m;
-  m.source = source;
-  m.luma = luma;
-  m.r = r;
-  m.g = g;
-  m.b = b;
-  m.exposureMs = exposure_ms;
-  m.iso = iso;
-  m.lux = lux;
-  if (wb_gains)
-    std::copy(wb_gains, wb_gains + 4, m.wb.begin());
-  std::lock_guard lock{g_room.mutex};
-  g_room.sample = m;
-  ++g_room.samples;
-}
-
-extern "C" void aurora_xr_set_stage_luminance(float luminance) {
-  using namespace aurora::xr;
-  std::lock_guard lock{g_room.mutex};
-  g_room.stageLuminance = std::max(luminance, 0.f);
-}
-
 extern "C" void aurora_xr_set_stage(int stage, float x, float y, float z, float scale) {
   using namespace aurora::xr;
   surface_request(0, true); // another stage: what was under the last one isn't under it
   aurora_xr_set_room_grade(1.f, 1.f, 1.f, 1.f);
-  aurora_xr_set_stage_luminance(0.f);
   std::lock_guard lock{g_arenaMutex};
   g_stage = stage;
   g_arenaCenter = {x, y, z};

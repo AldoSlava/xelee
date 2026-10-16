@@ -1,5 +1,7 @@
 # Automatic room-light matching on Quest: research report
 
+> **Outcome (2026-10-16): built, tried on the headset, and removed.** T4 shipped in 35fd3ea using passthrough camera bursts. In a normally lit room it did close to nothing (the scale stays near 1), and the user couldn't see a difference. Quest 3 exposes no ambient light sensor to apps: `dumpsys sensorservice` lists only the head IMU and double tap. So the light-sensor fallback had nothing to read. The user chose to drop the feature and its camera permission (`HEADSET_CAMERA`) rather than keep a permission prompt for a barely visible effect. The passthrough tint (T5) stays. One finding worth keeping if this is revisited: Meta's camera vendor tags (`com.meta.extra_metadata.camera_source`, `.position`) come as `byte[1]`, not as Numbers. Passthrough cameras are 50 and 51; camera 1 needs `android.permission.CAMERA`.
+
 Branch `quest-xr` at `6417425`, written 2026-10-16. This is research only: no code was changed, nothing was built, and the headset was not touched. It follows `docs/xr-stage-grounding-report.md` (T4, T5, T6, §7). The goal is to replace T4's manual **Bright / Normal / Dim** launcher preset with something automatic.
 
 Verdicts used below:

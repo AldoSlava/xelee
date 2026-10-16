@@ -19,21 +19,5 @@ public class MeleeXrActivity extends MeleeActivity {
             android.util.Log.e("melee", "setenv failed", e);
         }
         super.onCreate(savedInstanceState);
-        if (!mBrokenLibraries) {
-            mRoomLight = new RoomLight(this);
-            mRoomLight.start();
-        }
-    }
-
-    /* The room's light, for matching the 3D view to it (RoomLight). */
-    private RoomLight mRoomLight;
-
-    @Override
-    protected void onDestroy() {
-        if (mRoomLight != null) {
-            mRoomLight.stop();
-            mRoomLight = null;
-        }
-        super.onDestroy();
     }
 }

@@ -142,12 +142,6 @@ typedef struct {
    * AURORA_XR_GRADE_STRENGTH override it.
    */
   float xrRoomGrade;
-  /*
-   * Leave the 3D view's brightness as it is, whatever the room's light (and
-   * never sample the passthrough camera for it). AURORA_XR_ROOM_LIGHT
-   * overrides it.
-   */
-  bool xrNoRoomLight;
 } AuroraConfig;
 
 typedef struct {
