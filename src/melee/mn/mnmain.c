@@ -990,13 +990,12 @@ static void mn_PcLabelLean(void* gobj_)
         }
     }
     {
-        /* The stock label textures lean right a little (about 3 degrees) and sit a hair
-         * off level; the joint's own turn is only the tilt. Shear x by y and
-         * turn about z, in the joint's frame, before the tilt. */
-        const float k = 0.05f, z = -0.01f;
-        const float cz = cosf(z), sz = sinf(z);
-        Mtx lean = { { cz + k * sz, -sz + k * cz, 0.0f, 0.0f },
-                     { sz, cz, 0.0f, 0.0f },
+        /* The stock label textures lean right about 3.4 degrees and sit level;
+         * the font's own lean is a little short of that. The joint's own turn
+         * is only the tilt. Shear x by y, in the joint's frame, before the tilt. */
+        const float k = 0.01f;
+        Mtx lean = { { 1.0f, k, 0.0f, 0.0f },
+                     { 0.0f, 1.0f, 0.0f, 0.0f },
                      { 0.0f, 0.0f, 1.0f, 0.0f } };
         Mtx tilt;
         for (r = 0; r < 3; r++) {
@@ -1736,6 +1735,30 @@ static int mn_PcSelectionFrames(MenuKind kind, int selection)
     }
     return 2 * selection;
 }
+
+/* The row layouts are keyed by row count, and the stock ones for two and three
+ * rows (Trophies) leave wide gaps and zig-zag. Online Mode's menus stack their
+ * rows a little apart instead, each one step down and left of the last. In
+ * world terms the middle row sits at (-5.5, -0.2, 20.7), a step is (-1.0,
+ * -2.2, -0.1) with rows touching and down is (0, -1, 0); below are the same
+ * three in the rows' parent frame. */
+static void mn_PcStackRow(MenuKind kind, HSD_JObj* row, int index, int count)
+{
+    static const Vec3 middle = { 16.9684f, 2.6541f, -3.8327f };
+    static const Vec3 step = { 0.0438f, 2.3351f, 0.6289f };
+    static const Vec3 down = { -0.2198f, 0.7934f, 0.5676f };
+    const float gap = 0.4f;
+    float at = index - (count - 1) * 0.5f;
+    Vec3 pos;
+
+    if ((kind != MENU_KIND_ONLINE && kind != MENU_KIND_ONLINE_SLIPPI) || count < 2) {
+        return;
+    }
+    pos.x = middle.x + at * (step.x + gap * down.x);
+    pos.y = middle.y + at * (step.y + gap * down.y);
+    pos.z = middle.z + at * (step.z + gap * down.z);
+    HSD_JObjSetTranslate(row, &pos);
+}
 #endif
 
 /// @brief frame offset of a selection's cursor animation
@@ -1856,6 +1879,10 @@ HSD_GObj* mn_8022B3A0(u8 state)
             unlocked_index = mn_80229A04(menu_kind, i);
             HSD_JObjReqAnim(option_jobjs[unlocked_index], unlocked_count);
             HSD_JObjAnim(option_jobjs[unlocked_index]);
+#ifdef TARGET_PC
+            mn_PcStackRow(menu_kind, option_jobjs[unlocked_index], unlocked_index,
+                          unlocked_count);
+#endif
             cursor_jobj = HSD_JObjLoadJoint(DP(HSD_Joint, model->joint));
             HSD_JObjAddAnimAll(cursor_jobj, DP(HSD_AnimJoint, model->animjoint),
                                DP(HSD_MatAnimJoint,
