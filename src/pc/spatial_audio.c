@@ -88,7 +88,7 @@ static struct {
     float pos[3];
 } s_handles[SP_HANDLES];
 static unsigned s_handle_next;
-static unsigned s_starts_tagged, s_starts_plain; /* stats */
+static unsigned s_starts_tagged, s_starts_plain, s_late_found, s_late_missed; /* stats */
 
 void pc_spatial_proc(const void* gobj) {
     const HSD_GObj* g = gobj;
@@ -164,9 +164,11 @@ void pc_spatial_handle_begin(int32_t handle) {
             s_override_on = true;
             s_override_gobj = s_handles[i].gobj;
             memcpy(s_override_pos, s_handles[i].pos, sizeof(s_override_pos));
+            s_late_found++;
             return;
         }
     }
+    s_late_missed++; /* started with no emitter (or noted too long ago) */
 }
 
 void pc_spatial_handle_end(void) {
@@ -217,9 +219,11 @@ void pc_spatial_frame(const float view[3][4]) {
 
     if (stats_on() && s.stamp - last_log >= 2000000000ull) {
         last_log = s.stamp;
-        pc_log_line("spatial: game: starts tagged=%u plain=%u, publishing %d fighters %d items, listener %s",
-                    s_starts_tagged, s_starts_plain, s.fighters, s.items, s.xr3d ? "head (XR)" : "camera");
-        s_starts_tagged = s_starts_plain = 0;
+        pc_log_line("spatial: game: starts tagged=%u plain=%u, rollback-late starts with emitter %u without %u;"
+                    " publishing %d fighters %d items, listener %s",
+                    s_starts_tagged, s_starts_plain, s_late_found, s_late_missed, s.fighters, s.items,
+                    s.xr3d ? "head (XR)" : "camera");
+        s_starts_tagged = s_starts_plain = s_late_found = s_late_missed = 0;
     }
 }
 
