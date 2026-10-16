@@ -122,6 +122,13 @@ void aurora_xr_set_hud_on_top(bool on);
  * thread. */
 void aurora_xr_set_stage_top(float y);
 
+/* The stage's footprint (world units), for the soft shadow it casts on the
+ * real surface under it in mixed reality: the x and z span of what stands
+ * on that surface, and its underside (its lowest point in the 3D view, after
+ * any cuts). xmin >= xmax: none (a stage whose course slides through the
+ * arena). aurora_xr_set_stage clears it. Any thread. */
+void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin, float zmax, float ybottom);
+
 /* The game: a heavy effect starts this frame (a KO's explosion). Dynamic
  * resolution drops ahead of it, as far as the last one needed, instead of
  * after its first late frames, and comes back once it has passed. Any

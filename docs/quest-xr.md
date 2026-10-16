@@ -1544,6 +1544,12 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `MELEE_POINTER_MOUSE` | 0 | 1: the mouse in the window is the screen's pointer, its right button Back (testing the menu hooks flat) |
 | `AURORA_XR_HUD_ON_TOP` | 0 | 1: the HUD draws over the fighters in mixed reality too (it always does in full VR) |
 | `AURORA_XR_DUMP` | unset | Directory to write each stream's image once (PPM, plus alpha as PGM) |
+| `AURORA_XR_RAYCAST` | 1 | 0 leaves `XR_META_environment_raycast` off: no surface measured under the stage (Quest 3/3S, spatial data permission) |
+| `AURORA_XR_LOCAL_FLOOR` | 1 | 0 leaves `XR_EXT_local_floor` off: the floor no longer stands in for the surface without raycast |
+| `AURORA_XR_SURFACE_SHADOW` | 1 | 0 hides the stage's shadow on the surface under it (still measured): blind A/B |
+| `AURORA_XR_SHADOW_ALPHA` | 0.4 | The shadow's opacity with the stage resting on the surface; it falls as R²/(R²+gap²) |
+| `AURORA_XR_SHADOW_SPREAD` | 0.5 | How much the shadow widens per footprint radius of gap |
+| `AURORA_XR_SURFACE_LOG` | 0 | 1 logs the surface casts once a second while they run (ray statuses, consensus height, spread, coverage, gap, shadow) and the rays' timing every 10 s |
 | `MELEE_XR_STAGE_LAYERS` | `0xB` | Stage layers shown in 3D, as a bitmask |
 | `MELEE_XR_PARTS` | unset | Overrides, e.g. `16:1,-16:1/12,-16:2/2.27` (`stage:part[/joint[.mesh]]`, `-` hides) |
 | `MELEE_XR_STAGE_LOG` | unset | Log each stage part's id and layer once |

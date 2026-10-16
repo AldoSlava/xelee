@@ -12,6 +12,8 @@
       build/quest-perf/<label>-<phase>.log.
   quest_perf.py mode mr|vr      switch the running game (MELEE_XR_CONTROL)
   quest_perf.py summarize LOG   summarize a saved logcat
+  quest_perf.py grant           grant the runtime permissions the launcher
+                                panel would ask for (every run does this too)
 
 Benchmarks: --cpu-level / --gpu-level pin the clocks for the run
 (debug.oculus.cpuLevel / gpuLevel, cleared after), e.g. 3 and 2, the caps
@@ -112,6 +114,26 @@ def hand_back():
     adb("shell", "rm", "-f", ENV_FILE, CTL_FILE, check=False)
     adb("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_disable", check=False)
     adb("shell", "settings", "put", "system", "screen_off_timeout", str(IDLE_SCREEN_TIMEOUT_MS), check=False)
+
+
+# Runtime permissions the game asks for in the launcher panel, which an
+# unattended run never shows: granted up front, so no dialog waits on anyone
+# and the features behind them run as they would for a player who allowed
+# them. USE_SCENE (both names): the stage's shadow on the surface under it.
+PERMISSIONS = [
+    "horizonos.permission.USE_SCENE",
+    "com.oculus.permission.USE_SCENE",
+]
+
+
+def grant_permissions():
+    """pm grant each of PERMISSIONS; one the device doesn't know, or the
+    installed build doesn't declare, is reported and skipped."""
+    for perm in PERMISSIONS:
+        r = subprocess.run(["adb", "shell", "pm", "grant", PKG, perm], text=True, capture_output=True)
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout).strip().splitlines()
+            print(f"  pm grant {perm}: {msg[0] if msg else 'failed'}")
 
 
 def shell_write(path, text):
@@ -281,6 +303,7 @@ def run_phases(args):
     adb("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close")
     adb("shell", "settings", "put", "system", "screen_off_timeout", str(RUN_SCREEN_TIMEOUT_MS))
     adb("shell", "am", "force-stop", PKG)
+    grant_permissions()
     # The headset logs so much that the default buffer turned over in ~20 s:
     # a phase's log held only its last two stats windows.
     adb("logcat", "-G", LOG_BUFFER, check=False)
@@ -338,6 +361,7 @@ def main():
     s.add_argument("log")
     sub.add_parser("wake", help="wake the headset and keep it on unworn")
     sub.add_parser("handback", help="let the headset sleep: the end of a batch")
+    sub.add_parser("grant", help="grant the game's runtime permissions (also done by every run)")
     args = ap.parse_args()
     if args.cmd == "summarize":
         with open(args.log) as f:
@@ -352,6 +376,8 @@ def main():
         adb("shell", "settings", "put", "system", "screen_off_timeout", str(RUN_SCREEN_TIMEOUT_MS))
     elif args.cmd == "handback":
         hand_back()
+    elif args.cmd == "grant":
+        grant_permissions()
     else:
         run(args)
 

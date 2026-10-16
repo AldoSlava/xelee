@@ -88,8 +88,72 @@ public class MeleeActivity extends SDLActivity {
                 if (mTouchOverlay != null) {
                     mTouchOverlay.setLauncherActive(active);
                 }
+                if (active) {
+                    requestXrPermissions();
+                }
             }
         });
+    }
+
+    /* Runtime permissions the Quest build's game uses when granted, and does
+     * without otherwise: spatial data (USE_SCENE, both names; the stage's
+     * shadow on the real surface under it). Asked for here, in the launcher
+     * panel, once the graphics device is up, never in the immersive game: a
+     * grant is the package's, so it covers the game's process too. Only the
+     * ones this build's manifest declares (none on phones), once a launch;
+     * Android itself stops asking after repeated denials. */
+    private static final String[] XR_PERMISSIONS = {
+        "horizonos.permission.USE_SCENE",
+        "com.oculus.permission.USE_SCENE",
+    };
+    private static final int XR_PERMISSIONS_REQUEST = 0x4d58; /* clear of SDL's own request codes */
+    private boolean mXrPermissionsAsked;
+
+    private void requestXrPermissions() {
+        if (mXrPermissionsAsked || getClass() != MeleeActivity.class
+                || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) {
+            return;
+        }
+        mXrPermissionsAsked = true;
+        java.util.List<String> declared;
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            android.content.pm.PackageInfo info =
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+                    ? pm.getPackageInfo(getPackageName(), android.content.pm.PackageManager.PackageInfoFlags.of(
+                          android.content.pm.PackageManager.GET_PERMISSIONS))
+                    : pm.getPackageInfo(getPackageName(), android.content.pm.PackageManager.GET_PERMISSIONS);
+            String[] requested = info.requestedPermissions;
+            declared = requested != null ? java.util.Arrays.asList(requested) : new java.util.ArrayList<String>();
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return;
+        }
+        java.util.List<String> ask = new java.util.ArrayList<>();
+        for (String p : XR_PERMISSIONS) {
+            if (!declared.contains(p)) {
+                continue;
+            }
+            boolean granted = checkSelfPermission(p) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            android.util.Log.i("melee", "permission " + p + (granted ? ": granted" : ": not granted, asking"));
+            if (!granted) {
+                ask.add(p);
+            }
+        }
+        if (!ask.isEmpty()) {
+            requestPermissions(ask.toArray(new String[0]), XR_PERMISSIONS_REQUEST);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode != XR_PERMISSIONS_REQUEST) {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+            return;
+        }
+        for (int i = 0; i < permissions.length && i < grantResults.length; i++) {
+            android.util.Log.i("melee", "permission " + permissions[i] + ": "
+                + (grantResults[i] == android.content.pm.PackageManager.PERMISSION_GRANTED ? "granted" : "denied"));
+        }
     }
 
     /* Meta Quest hybrid builds (MELEE_XR=1): the launcher runs in this 2D

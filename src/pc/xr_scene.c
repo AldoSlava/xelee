@@ -499,6 +499,29 @@ static const LevelRule s_levels[] = {
 };
 #define LEVEL_COUNT ((int)(sizeof s_levels / sizeof s_levels[0]))
 
+/* What a stage stands on a real surface with, for the soft shadow it casts
+ * there in mixed reality (aurora_xr_set_stage_footprint): the x and z span
+ * of its body and its underside, the lowest point the 3D view keeps (game
+ * units). Measured from the disc's models (tools/stagebounds.py). Stages not
+ * listed take their floors' x span, 30 units either side in z, and their
+ * lowest cut (s_clips) or -40 as the underside. Stages whose course slides
+ * through a window (s_follows) cast none. */
+typedef struct {
+    int grkind;
+    float xmin, xmax, zmin, zmax, ybottom;
+} StageFootprint;
+
+static const StageFootprint s_footprints[] = {
+    {0x24, -85.5f, 85.5f, -36.5f, 36.5f, -50.f},   /* Battlefield: the platform (part 6) */
+    {0x25, -85.6f, 85.6f, -85.6f, 85.6f, -139.f},  /* Final Destination: part 3, its point far below */
+    {0x08, -73.f, 63.1f, -35.3f, 34.4f, -35.f},    /* Brinstar: part 6 */
+    {0x0C, -85.9f, 85.9f, -93.7f, 80.6f, -80.f},   /* Fountain of Dreams: the basin; the pole is cut at -80 */
+    {0x16, -150.f, 150.f, -48.f, 48.f, -140.f},    /* Icicle Mountain: its box (s_clips) */
+    {0x13, -152.f, 152.f, -60.f, 60.f, -60.f},     /* Big Blue: the solid part of its box, cut below -60 */
+    {0x1C, -77.3f, 77.3f, -50.f, 50.f, -36.f},     /* Dream Land: parts 4 and 5 */
+};
+#define FOOTPRINT_COUNT ((int)(sizeof s_footprints / sizeof s_footprints[0]))
+
 static HSD_JObj* nth_joint(HSD_JObj* jobj, int* n) {
     for (; jobj != NULL; jobj = jobj->next) {
         if ((*n)-- == 0) {
@@ -1222,6 +1245,8 @@ void pc_xr_poll_control(void) {
  * is in mplib.c: the collision data is in the disc's byte order, which this
  * file isn't built to read on every platform (clang on Android). */
 static int s_top_grkind = -1;
+/* Every floor's x span within the blast zones (stage_top). */
+static float s_floors_left = NAN, s_floors_right = NAN;
 
 void pc_xr_stage_load(void) {
     s_top_grkind = -1;
@@ -1244,12 +1269,40 @@ static float stage_top(void) {
         s_platform_left = pleft;
         s_platform_right = pright;
     }
+    s_floors_left = min_x;
+    s_floors_right = max_x;
     pc_log_line("xr: stage %d top floor at y %.1f from x %.1f to %.1f; floors from x %.1f to %.1f; blast zones x %.0f to "
                 "%.0f, y %.0f "
                 "to %.0f",
                 stage_info.grkind, top, s_platform_left, s_platform_right, min_x, max_x, Stage_GetBlastZoneLeftOffset(), Stage_GetBlastZoneRightOffset(),
                 Stage_GetBlastZoneBottomOffset(), Stage_GetBlastZoneTopOffset());
     return top;
+}
+
+/* The stage's footprint for its shadow on the real surface below
+ * (s_footprints), once its floors are in. */
+static void stage_footprint(int grkind) {
+    if (s_follow != NULL) {
+        aurora_xr_set_stage_footprint(0.f, 0.f, 0.f, 0.f, 0.f);
+        return;
+    }
+    for (int i = 0; i < FOOTPRINT_COUNT; i++) {
+        const StageFootprint* f = &s_footprints[i];
+        if (f->grkind == grkind) {
+            aurora_xr_set_stage_footprint(f->xmin, f->xmax, f->zmin, f->zmax, f->ybottom);
+            return;
+        }
+    }
+    float bottom = -40.f;
+    bool cut = false;
+    for (int i = 0; i < CLIP_COUNT; i++) {
+        const float* p = s_clips[i].plane;
+        if (s_clips[i].grkind == grkind && p[0] == 0.f && p[1] == 1.f && p[2] == 0.f && (!cut || -p[3] < bottom)) {
+            bottom = -p[3]; /* CLIP_BELOW: kept above y = -d */
+            cut = true;
+        }
+    }
+    aurora_xr_set_stage_footprint(s_floors_left, s_floors_right, -30.f, 30.f, bottom);
 }
 
 bool pc_xr_stage_part_begin(int grkind, int map_id, int layer, HSD_JObj* root) {
@@ -1288,6 +1341,7 @@ bool pc_xr_stage_part_begin(int grkind, int map_id, int layer, HSD_JObj* root) {
         aurora_xr_set_stage_top(s_follow != NULL ? NAN : top);
         if (!isnan(top)) {
             s_top_grkind = grkind;
+            stage_footprint(grkind);
             pc_xr_place_stage_ready(grkind);
         }
     }

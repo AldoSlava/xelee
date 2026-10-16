@@ -382,6 +382,13 @@ float g_stageZoom = 1.f;
 std::atomic<bool> g_hudOnTop{false};
 // The stage's highest floor (game units; NaN: unknown), for the HUD.
 float g_stageTop = std::numeric_limits<float>::quiet_NaN();
+// The stage's footprint on a real surface (aurora_xr_set_stage_footprint;
+// game units), for its shadow there.
+struct Footprint {
+  bool valid = false;
+  float xmin = 0.f, xmax = 0.f, zmin = 0.f, zmax = 0.f, ybottom = 0.f;
+};
+Footprint g_footprint;
 
 // Set by the game every fight frame (aurora_xr_set_paused): the fight is
 // paused, so the controllers point and grab instead of playing.
@@ -492,6 +499,21 @@ struct Bridge {
   PFN_xrPassthroughStartFB startPassthrough = nullptr;
   PFN_xrPassthroughPauseFB pausePassthrough = nullptr;
   bool passthroughRunning = false;
+  // The real surface under the stage (XR worker: the surface under the
+  // stage): XR_META_environment_raycast, which needs XR_EXT_future, and
+  // XR_EXT_local_floor's floor where there is no raycast.
+  bool hasFutureExt = false, hasEnvRaycastExt = false, hasLocalFloorExt = false;
+  bool envRaycast = false; // enabled, and the system says it can
+  PFN_xrCreateEnvironmentRaycasterAsyncMETA createRaycasterAsync = nullptr;
+  PFN_xrCreateEnvironmentRaycasterCompleteMETA createRaycasterComplete = nullptr;
+  PFN_xrDestroyEnvironmentRaycasterMETA destroyRaycaster = nullptr;
+  PFN_xrPerformEnvironmentRaycastMETA performRaycast = nullptr;
+  PFN_xrPollFutureEXT pollFuture = nullptr;
+  PFN_xrCancelFutureEXT cancelFuture = nullptr;
+  XrSpace floorSpace = XR_NULL_HANDLE; // LOCAL_FLOOR
+  XrSwapchain shadowSwapchain = XR_NULL_HANDLE;
+  // The most composition layers a frame may have (XrSystemGraphicsProperties).
+  uint32_t maxLayers = 16;
 #ifdef XR_META_boundary_visibility
   // The Guardian boundary, hidden while passthrough shows the room.
   bool hasBoundaryVisibilityExt = false;
@@ -681,6 +703,9 @@ bool create_instance() {
 #ifdef XR_META_boundary_visibility
     B.hasBoundaryVisibilityExt |= !std::strcmp(p.extensionName, XR_META_BOUNDARY_VISIBILITY_EXTENSION_NAME);
 #endif
+    B.hasFutureExt |= !std::strcmp(p.extensionName, XR_EXT_FUTURE_EXTENSION_NAME);
+    B.hasEnvRaycastExt |= !std::strcmp(p.extensionName, XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME);
+    B.hasLocalFloorExt |= !std::strcmp(p.extensionName, XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
   }
   if (!hasVk2) {
     Log.error("OpenXR runtime lacks XR_KHR_vulkan_enable2");
@@ -715,6 +740,17 @@ bool create_instance() {
   if (B.hasBoundaryVisibilityExt)
     exts.push_back(XR_META_BOUNDARY_VISIBILITY_EXTENSION_NAME);
 #endif
+  // The surface under the stage, for its shadow. Raycast is offered only to
+  // apps declaring USE_SCENE, on Quest 3 and 3S; AURORA_XR_RAYCAST=0 leaves
+  // it off, AURORA_XR_LOCAL_FLOOR=0 the floor that stands in for it.
+  B.hasEnvRaycastExt &= B.hasFutureExt && env_flag("AURORA_XR_RAYCAST", true);
+  if (B.hasEnvRaycastExt) {
+    exts.push_back(XR_EXT_FUTURE_EXTENSION_NAME);
+    exts.push_back(XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME);
+  }
+  B.hasLocalFloorExt &= env_flag("AURORA_XR_LOCAL_FLOOR", true);
+  if (B.hasLocalFloorExt)
+    exts.push_back(XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
   XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
 #ifdef __ANDROID__
   exts.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
@@ -739,6 +775,20 @@ bool create_instance() {
   XrSystemGetInfo si{XR_TYPE_SYSTEM_GET_INFO};
   si.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
   XR_TRY(xrGetSystem(B.instance, &si, &B.systemId));
+  {
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    XrSystemEnvironmentRaycastPropertiesMETA raycast{XR_TYPE_SYSTEM_ENVIRONMENT_RAYCAST_PROPERTIES_META};
+    if (B.hasEnvRaycastExt)
+      sp.next = &raycast;
+    if (XR_SUCCEEDED(xrGetSystemProperties(B.instance, B.systemId, &sp))) {
+      B.maxLayers = std::max<uint32_t>(sp.graphicsProperties.maxLayerCount, 1);
+      B.envRaycast = B.hasEnvRaycastExt && raycast.supportsEnvironmentRaycast;
+    }
+    Log.info("System {}: at most {} composition layers a frame; environment raycast {}, local floor {}",
+             sp.systemName, B.maxLayers,
+             B.envRaycast ? "available" : B.hasEnvRaycastExt ? "offered but unsupported" : "not offered",
+             B.hasLocalFloorExt ? "available" : "not offered");
+  }
   if (B.hasSpaceWarpExt) {
     XrSystemSpaceWarpPropertiesFB sw{XR_TYPE_SYSTEM_SPACE_WARP_PROPERTIES_FB};
     XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
@@ -796,6 +846,18 @@ bool create_instance() {
     B.createHandTracker = xr_proc<PFN_xrCreateHandTrackerEXT>("xrCreateHandTrackerEXT");
     B.destroyHandTracker = xr_proc<PFN_xrDestroyHandTrackerEXT>("xrDestroyHandTrackerEXT");
     B.locateHandJoints = xr_proc<PFN_xrLocateHandJointsEXT>("xrLocateHandJointsEXT");
+  }
+  if (B.envRaycast) {
+    B.createRaycasterAsync =
+        xr_proc<PFN_xrCreateEnvironmentRaycasterAsyncMETA>("xrCreateEnvironmentRaycasterAsyncMETA");
+    B.createRaycasterComplete =
+        xr_proc<PFN_xrCreateEnvironmentRaycasterCompleteMETA>("xrCreateEnvironmentRaycasterCompleteMETA");
+    B.destroyRaycaster = xr_proc<PFN_xrDestroyEnvironmentRaycasterMETA>("xrDestroyEnvironmentRaycasterMETA");
+    B.performRaycast = xr_proc<PFN_xrPerformEnvironmentRaycastMETA>("xrPerformEnvironmentRaycastMETA");
+    B.pollFuture = xr_proc<PFN_xrPollFutureEXT>("xrPollFutureEXT");
+    B.cancelFuture = xr_proc<PFN_xrCancelFutureEXT>("xrCancelFutureEXT");
+    B.envRaycast = B.createRaycasterAsync && B.createRaycasterComplete && B.destroyRaycaster && B.performRaycast &&
+                   B.pollFuture;
   }
 #ifdef XR_META_boundary_visibility
   if (B.hasBoundaryVisibilityExt)
@@ -1091,6 +1153,13 @@ bool create_session() {
   rsci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
   rsci.poseInReferenceSpace.orientation.w = 1.f;
   XR_TRY(xrCreateReferenceSpace(B.session, &rsci, &B.space));
+  // The floor under LOCAL's origin: only a surface for the stage's shadow
+  // when nothing better is known, never where anything is placed.
+  if (B.hasLocalFloorExt) {
+    rsci.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT;
+    if (XR_FAILED(xrCreateReferenceSpace(B.session, &rsci, &B.floorSpace)))
+      B.floorSpace = XR_NULL_HANDLE;
+  }
 
   // The game's frames are already sRGB-encoded bytes. Dawn draws them through
   // a UNORM view of a mutable-format *_SRGB swapchain image, which stores the
@@ -3511,6 +3580,688 @@ void build_pointer_layers(PointerLayers& out, bool onTargetOnly = false) {
   }
 }
 
+// ---------------------------------------------------------------- XR worker: the surface under the stage
+//
+// In mixed reality the stage casts a soft shadow on the real surface under it
+// (docs/xr-raycast-surface-plan.md): a quad layer between passthrough and the
+// 3D view, so it costs the eye pass nothing, the compositor keeps it on the
+// table at display rate, and the stage's own pixels cover it where it sits.
+// Where that surface is comes from XR_META_environment_raycast (Quest 3 and
+// 3S, with the spatial data permission, USE_SCENE): nine rays straight down
+// through the stage's footprint against the headset's live depth, filtered
+// for a level surface, for the player's own hands, and for agreement across
+// rays and over time. A worker thread owns the raycaster and casts only while
+// the stage is being placed (the hold before a fight, a grab in a pause, the
+// Place Stage scene), for half a second after it's let go, and for a second
+// when a stage appears without a hold (netplay, a stage change, a recenter);
+// then the estimate stays frozen for the fight. Nothing waits on it: the XR
+// thread only copies its snapshot as it builds the layers. Without the
+// raycaster (Quest 2 and Pro, the permission denied), the floor from
+// XR_EXT_local_floor stands in, and without either there is no shadow: one at
+// a guessed height would say the stage floats where it doesn't.
+//
+// The shadow's strength is a disc's ambient occlusion, R²/(R²+h²) for a
+// footprint of effective radius R at a gap h over the surface: dark when the
+// stage rests on the desk, soft a hand over it, gone a meter over the floor.
+// It fades with how much of the footprint is over the surface (a stage
+// hanging off a table's edge), and widens with the gap.
+//
+// AURORA_XR_RAYCAST=0 leaves the raycaster off and AURORA_XR_LOCAL_FLOOR=0
+// the floor; AURORA_XR_SURFACE_SHADOW=0 hides the shadow while the surface is
+// still measured (blind A/B); AURORA_XR_SHADOW_ALPHA (0.4) is its opacity on
+// contact, AURORA_XR_SHADOW_SPREAD (0.5) how fast it widens with the gap.
+// AURORA_XR_SURFACE_LOG=1 logs the casts once a second while they run (ray
+// statuses, the consensus height, its spread and coverage, the shadow it
+// makes) and the rays' timing every 10 s.
+
+constexpr int64_t kMsNs = 1000000;
+
+struct SurfaceSettings {
+  bool shadow = true, log = false;
+  float alpha = 0.4f, spread = 0.5f;
+};
+
+const SurfaceSettings& surface_settings() {
+  static const SurfaceSettings s = [] {
+    SurfaceSettings s;
+    s.shadow = env_flag("AURORA_XR_SURFACE_SHADOW", true);
+    s.log = env_flag("AURORA_XR_SURFACE_LOG", false);
+    s.alpha = std::clamp(env_float("AURORA_XR_SHADOW_ALPHA", 0.4f), 0.f, 1.f);
+    s.spread = std::max(env_float("AURORA_XR_SHADOW_SPREAD", 0.5f), 0.f);
+    return s;
+  }();
+  return s;
+}
+
+// What the worker found, for the XR thread.
+struct SurfaceEstimate {
+  enum class State { Unknown, Known, Frozen };
+  enum class Source { Raycast, Floor };
+  State state = State::Unknown; // Known: measured now; Frozen: held since the last casts
+  Source source = Source::Raycast;
+  float y = 0.f;        // the surface's height (meters, LOCAL)
+  float coverage = 0.f; // the share of the footprint's rays that found it
+  float sigma = 0.f;    // its spread over the casts that settled it (meters)
+};
+
+const char* surface_state_name(SurfaceEstimate::State s) {
+  return s == SurfaceEstimate::State::Unknown ? "unknown" : s == SurfaceEstimate::State::Known ? "known" : "frozen";
+}
+
+// Between the XR thread (and the game's setters) and the worker.
+struct SurfaceShared {
+  std::mutex mutex;
+  std::condition_variable cv;
+  SurfaceEstimate estimate;         // the worker's latest
+  bool placing = false;             // the stage is being placed: cast all along
+  int64_t burstUntilNs = 0;         // cast until then (monotonic_ns)
+  bool reset = false;               // forget the estimate first (another stage, a recenter)
+  bool stop = false;
+  XrTime displayTime = 0;           // the latest predicted display time, for the rays
+  std::array<XrVector3f, 2> hands{}; // each hand's or controller's touch point
+  std::array<bool, 2> handValid{};
+};
+SurfaceShared g_surface;
+std::thread g_surfaceThread;
+
+// Any thread: cast for `burstMs` (0: no burst), and with `reset` forget what
+// was found first.
+void surface_request(int burstMs, bool reset) {
+  std::lock_guard lock{g_surface.mutex};
+  g_surface.reset |= reset;
+  if (burstMs > 0)
+    g_surface.burstUntilNs = std::max(g_surface.burstUntilNs, monotonic_ns() + burstMs * kMsNs);
+  g_surface.cv.notify_one();
+}
+
+// The arena and the stage's footprint, as one consistent copy.
+struct ArenaSnapshot {
+  ArenaPose pose;
+  std::array<float, 3> center{};
+  float zoom = 1.f;
+  Footprint footprint;
+  int stage = -1;
+};
+
+ArenaSnapshot arena_snapshot() {
+  std::lock_guard lock{g_arenaMutex};
+  init_arena();
+  return {g_arena, g_arenaCenter, g_stageZoom, g_footprint, g_stage};
+}
+
+// A game point (game units) in the room.
+XrVector3f arena_point(const ArenaSnapshot& a, float x, float y, float z) {
+  const XrVector3f g{x - a.center[0], y - a.center[1], z - a.center[2]};
+  return a.pose.pos + rot_y(g * (a.pose.scale * a.zoom), a.pose.yaw);
+}
+
+float smoothstep(float e0, float e1, float x) {
+  const float t = std::clamp((x - e0) / (e1 - e0), 0.f, 1.f);
+  return t * t * (3.f - 2.f * t);
+}
+
+// The footprint's shadow on a surface at height y (LOCAL) with `coverage` of
+// it over that surface: where its middle is, its size there (meters), the
+// gap from the stage's underside down to it, the footprint's effective
+// radius and the shadow's opacity (0: none to show).
+struct ShadowShape {
+  XrVector3f center{};
+  float yaw = 0.f, width = 0.f, depth = 0.f, gap = 0.f, radius = 0.f, alpha = 0.f;
+};
+
+ShadowShape shadow_shape(const ArenaSnapshot& a, float y, float coverage) {
+  const Footprint& f = a.footprint;
+  const float s = a.pose.scale * a.zoom;
+  const XrVector3f under = arena_point(a, (f.xmin + f.xmax) * 0.5f, f.ybottom, (f.zmin + f.zmax) * 0.5f);
+  ShadowShape sh;
+  sh.center = {under.x, y, under.z};
+  sh.yaw = a.pose.yaw;
+  sh.width = (f.xmax - f.xmin) * s;
+  sh.depth = (f.zmax - f.zmin) * s;
+  sh.gap = std::max(under.y - y, 0.f); // sunk into the table: as on contact
+  sh.radius = std::sqrt(sh.width * sh.depth / 3.14159265f);
+  const float r2 = sh.radius * sh.radius;
+  sh.alpha = r2 > 0.f ? surface_settings().alpha * smoothstep(0.55f, 0.9f, coverage) * r2 / (r2 + sh.gap * sh.gap)
+                      : 0.f;
+  if (sh.alpha < 0.04f) // too faint to see
+    sh.alpha = 0.f;
+  return sh;
+}
+
+// The floor's height in LOCAL (XR_EXT_local_floor), false if unknown.
+bool locate_floor(XrTime time, float& y) {
+  if (!B.floorSpace || time == 0)
+    return false;
+  XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+  if (XR_FAILED(xrLocateSpace(B.floorSpace, B.space, time, &loc)) ||
+      !(loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT))
+    return false;
+  y = loc.pose.position.y;
+  return true;
+}
+
+// The worker's own.
+struct SurfaceWorker {
+  enum class Caster { Off, Creating, Ready, Declined, Unsupported, Failed };
+  Caster caster = Caster::Off;
+  XrEnvironmentRaycasterMETA raycaster = XR_NULL_HANDLE;
+  XrFutureEXT future = XR_NULL_FUTURE_EXT;
+  int64_t createNs = 0, lastCastNs = 0;
+  bool active = false, placing = false; // casting; for placing (else a burst)
+  SurfaceEstimate est;
+  float emaY = 0.f; // followed, the estimate moving only by 5 mm or more
+  struct Candidate {
+    int64_t ns;
+    float y, coverage;
+  };
+  std::deque<Candidate> recent; // the last 2 s
+  int64_t lastCandidateNs = 0;
+  // Logged (AURORA_XR_SURFACE_LOG): since the last line, casts by outcome
+  // and rays by status (0: the call failed), and each ray's time.
+  uint32_t casts = 0, blind = 0, none = 0;
+  std::array<uint32_t, 7> statuses{};
+  float lastY = 0.f, lastCoverage = 0.f;
+  std::vector<float> rayUs;
+  int64_t lineNs = 0, timingNs = 0;
+};
+
+using Caster = SurfaceWorker::Caster;
+
+void raycaster_failed(SurfaceWorker& w, XrResult r) {
+  w.future = XR_NULL_FUTURE_EXT;
+  if (r == XR_ERROR_PERMISSION_INSUFFICIENT) {
+    w.caster = Caster::Declined;
+    Log.info("Environment raycast not allowed (the spatial data permission is off): no surface measured, the "
+             "floor stands in");
+  } else if (r == XR_ERROR_FEATURE_UNSUPPORTED) {
+    w.caster = Caster::Unsupported;
+    Log.info("Environment raycast unsupported here: the floor stands in");
+  } else {
+    w.caster = Caster::Failed;
+    Log.warn("Environment raycaster creation failed: XrResult {}; the floor stands in", static_cast<int>(r));
+  }
+}
+
+// Creates the raycaster without waiting: starts it, then polls its future.
+void raycaster_step(SurfaceWorker& w) {
+  if (w.caster == Caster::Off) {
+    XrEnvironmentRaycasterCreateInfoMETA ci{XR_TYPE_ENVIRONMENT_RAYCASTER_CREATE_INFO_META};
+    const XrResult r = B.createRaycasterAsync(B.session, &ci, &w.future);
+    if (XR_FAILED(r)) {
+      raycaster_failed(w, r);
+      return;
+    }
+    w.caster = Caster::Creating;
+    w.createNs = monotonic_ns();
+  }
+  if (w.caster != Caster::Creating)
+    return;
+  XrFuturePollInfoEXT pi{XR_TYPE_FUTURE_POLL_INFO_EXT};
+  pi.future = w.future;
+  XrFuturePollResultEXT pr{XR_TYPE_FUTURE_POLL_RESULT_EXT};
+  if (const XrResult r = B.pollFuture(B.instance, &pi, &pr); XR_FAILED(r)) {
+    raycaster_failed(w, r);
+    return;
+  }
+  if (pr.state != XR_FUTURE_STATE_READY_EXT)
+    return;
+  XrEnvironmentRaycasterCreateCompletionMETA done{XR_TYPE_ENVIRONMENT_RAYCASTER_CREATE_COMPLETION_META};
+  XrResult r = B.createRaycasterComplete(B.session, w.future, &done);
+  w.future = XR_NULL_FUTURE_EXT;
+  if (XR_SUCCEEDED(r))
+    r = done.futureResult;
+  if (XR_FAILED(r)) {
+    raycaster_failed(w, r);
+    return;
+  }
+  w.raycaster = done.environmentRaycaster;
+  w.caster = Caster::Ready;
+  w.lastCastNs = monotonic_ns();
+  Log.info("Environment raycaster ready after {} ms", (w.lastCastNs - w.createNs) / kMsNs);
+}
+
+void raycaster_destroy(SurfaceWorker& w) {
+  if (w.future != XR_NULL_FUTURE_EXT && B.cancelFuture) {
+    XrFutureCancelInfoEXT ci{XR_TYPE_FUTURE_CANCEL_INFO_EXT};
+    ci.future = w.future;
+    B.cancelFuture(B.instance, &ci);
+  }
+  w.future = XR_NULL_FUTURE_EXT;
+  if (w.raycaster)
+    B.destroyRaycaster(w.raycaster);
+  w.raycaster = XR_NULL_HANDLE;
+  if (w.caster == Caster::Creating || w.caster == Caster::Ready)
+    w.caster = Caster::Off;
+}
+
+// One cast: a grid of rays straight down, from just above the stage's
+// underside, across most of its footprint.
+struct SurfaceCast {
+  bool blind = false; // half the rays or more saw nothing either way: no information
+  bool found = false; // a surface under enough of the footprint, and under its middle
+  float y = 0.f, coverage = 0.f;
+};
+
+constexpr int kSurfaceGrid = 3;            // rays across and deep
+constexpr float kSurfaceGridReach = 0.8f;  // of the footprint's half extents
+constexpr float kSurfaceRayLift = 0.1f;    // meters over the underside: a stage resting on the desk still sees it
+constexpr float kSurfaceRayReach = 2.5f;   // meters: a low stage's floor, not the storey below
+
+SurfaceCast cast_footprint(SurfaceWorker& w, const ArenaSnapshot& a, XrTime time,
+                           const std::array<XrVector3f, 2>& hands, const std::array<bool, 2>& handValid) {
+  SurfaceCast out;
+  const Footprint& f = a.footprint;
+  const float cx = (f.xmin + f.xmax) * 0.5f, cz = (f.zmin + f.zmax) * 0.5f;
+  const float hx = (f.xmax - f.xmin) * 0.5f * kSurfaceGridReach, hz = (f.zmax - f.zmin) * 0.5f * kSurfaceGridReach;
+  XrEnvironmentRaycastFilterDistanceMETA reach{XR_TYPE_ENVIRONMENT_RAYCAST_FILTER_DISTANCE_META};
+  reach.maxDistance = kSurfaceRayReach;
+  const XrEnvironmentRaycastFilterBaseHeaderMETA* filters[] = {
+      reinterpret_cast<const XrEnvironmentRaycastFilterBaseHeaderMETA*>(&reach)};
+  struct Height {
+    float y;
+    int row;
+    bool weak; // the hit point is behind something: its pose may be off
+  };
+  constexpr int kRays = kSurfaceGrid * kSurfaceGrid;
+  std::array<Height, kRays> heights{};
+  int n = 0, noInfo = 0;
+  for (int row = 0; row < kSurfaceGrid; ++row)
+    for (int col = 0; col < kSurfaceGrid; ++col) {
+      XrVector3f origin = arena_point(a, cx + hx * static_cast<float>(col - 1), f.ybottom,
+                                      cz + hz * static_cast<float>(row - 1));
+      origin.y += kSurfaceRayLift;
+      XrEnvironmentRaycastHitGetInfoMETA gi{XR_TYPE_ENVIRONMENT_RAYCAST_HIT_GET_INFO_META};
+      gi.baseSpace = B.space;
+      gi.time = time;
+      gi.origin = origin;
+      gi.direction = {0.f, -1.f, 0.f};
+      gi.filterCount = 1;
+      gi.filters = filters;
+      XrEnvironmentRaycastHitMETA hit{XR_TYPE_ENVIRONMENT_RAYCAST_HIT_META};
+      const int64_t t0 = monotonic_ns();
+      const XrResult r = B.performRaycast(w.raycaster, &gi, &hit);
+      if (w.rayUs.size() < 8192)
+        w.rayUs.push_back(static_cast<float>(monotonic_ns() - t0) / 1e3f);
+      const int status = XR_SUCCEEDED(r) ? static_cast<int>(hit.status) : 0;
+      ++w.statuses[status >= 1 && status <= 6 ? status : 0];
+      if (status == 0 || hit.status == XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_POINT_OUTSIDE_OF_FOV_META ||
+          hit.status == XR_ENVIRONMENT_RAYCAST_HIT_STATUS_RAY_OCCLUDED_META) {
+        ++noInfo; // out of the depth cameras' view, or a hand in the way of it
+        continue;
+      }
+      if (hit.status != XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_META &&
+          hit.status != XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_POINT_OCCLUDED_META &&
+          hit.status != XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_INVALID_ORIENTATION_META)
+        continue; // nothing within reach
+      const XrVector3f p = hit.pose.position;
+      // Level within 15 degrees (the normal is +Z turned by the pose):
+      // cushions, laps and the sides of things are no surface to rest on.
+      if (hit.status != XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_INVALID_ORIENTATION_META &&
+          qrot(hit.pose.orientation, {0.f, 0.f, 1.f}).y < 0.966f)
+        continue;
+      // The player's own hand or controller under the stage, between the
+      // ray's start and what it hit.
+      bool hand = false;
+      for (int h = 0; h < 2; ++h)
+        hand |= handValid[h] && std::hypot(hands[h].x - origin.x, hands[h].z - origin.z) < 0.12f &&
+                hands[h].y > p.y && hands[h].y < origin.y;
+      if (!hand)
+        heights[n++] = {p.y, row, hit.status == XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_POINT_OCCLUDED_META};
+    }
+  if (noInfo * 2 >= kRays) {
+    out.blind = true;
+    return out;
+  }
+  // Weak hits can keep an estimate alive, never start one.
+  if (w.est.state == SurfaceEstimate::State::Unknown)
+    n = static_cast<int>(std::remove_if(heights.begin(), heights.begin() + n, [](const Height& h) { return h.weak; }) -
+                         heights.begin());
+  std::sort(heights.begin(), heights.begin() + n, [](const Height& l, const Height& r) { return l.y < r.y; });
+  // The largest cluster within +-1.5 cm. On a tie the higher one: a lower
+  // one only when it covers more rays (a box under one corner of the stage
+  // shouldn't lift its whole shadow).
+  int first = 0, count = 0;
+  for (int i = 0, j = 0; i < n; ++i) {
+    while (heights[i].y - heights[j].y > 0.03f)
+      ++j;
+    if (i - j + 1 >= count) {
+      count = i - j + 1;
+      first = j;
+    }
+  }
+  bool middle = false;
+  for (int i = first; i < first + count; ++i)
+    middle |= heights[i].row == kSurfaceGrid / 2;
+  if (count < 4 || !middle)
+    return out;
+  out.found = true;
+  out.y = heights[first + count / 2].y;
+  out.coverage = static_cast<float>(count) / static_cast<float>(kRays);
+  return out;
+}
+
+// The newest candidates that agree with the newest one (within a
+// centimeter), back to the first that doesn't: settled once they span `span`
+// with a spread of 5 mm at most. A table holds still to the millimeter; a
+// hand held under the stage, or a passer-by, doesn't.
+bool surface_settled(const std::deque<SurfaceWorker::Candidate>& recent, int64_t span, float& y, float& sigma,
+                     float& coverage) {
+  if (recent.empty())
+    return false;
+  const auto& last = recent.back();
+  std::vector<float> ys;
+  float cov = 0.f;
+  int64_t since = last.ns;
+  for (auto it = recent.rbegin(); it != recent.rend() && std::abs(it->y - last.y) <= 0.01f; ++it) {
+    ys.push_back(it->y);
+    cov += it->coverage;
+    since = it->ns;
+  }
+  if (ys.size() < 3 || last.ns - since < span)
+    return false;
+  double mean = 0.0, var = 0.0;
+  for (float v : ys)
+    mean += v;
+  mean /= static_cast<double>(ys.size());
+  for (float v : ys)
+    var += (v - mean) * (v - mean);
+  sigma = static_cast<float>(std::sqrt(var / static_cast<double>(ys.size())));
+  if (sigma > 0.005f)
+    return false;
+  std::nth_element(ys.begin(), ys.begin() + static_cast<std::ptrdiff_t>(ys.size() / 2), ys.end());
+  y = ys[ys.size() / 2];
+  coverage = cov / static_cast<float>(ys.size());
+  return true;
+}
+
+void surface_note(SurfaceWorker& w, const SurfaceCast& c, int64_t now, const ArenaSnapshot& a) {
+  using State = SurfaceEstimate::State;
+  ++w.casts;
+  if (c.blind) {
+    ++w.blind; // no information: nothing changes
+    return;
+  }
+  if (!c.found) {
+    ++w.none;
+    if (w.est.state == State::Known && now - w.lastCandidateNs > 1000 * kMsNs) {
+      w.est.state = State::Unknown;
+      w.recent.clear();
+      Log.info("Surface under stage {}: lost", a.stage);
+    }
+    return;
+  }
+  const int64_t since = w.lastCandidateNs != 0 ? now - w.lastCandidateNs : 0;
+  w.lastCandidateNs = now;
+  w.lastY = c.y;
+  w.lastCoverage = c.coverage;
+  w.recent.push_back({now, c.y, c.coverage});
+  while (now - w.recent.front().ns > 2000 * kMsNs)
+    w.recent.pop_front();
+  float y = 0.f, sigma = 0.f, coverage = 0.f;
+  const auto settle = [&](const char* how) {
+    w.est = {State::Known, SurfaceEstimate::Source::Raycast, y, coverage, sigma};
+    w.emaY = y;
+    const ShadowShape sh = shadow_shape(a, y, coverage);
+    Log.info("Surface under stage {}: {} at y {:.3f} (sigma {:.1f} mm, coverage {:.2f}), {:.2f} m under the stage; "
+             "shadow {:.2f}",
+             a.stage, how, y, sigma * 1000.f, coverage, sh.gap, sh.alpha);
+  };
+  if (w.est.state == State::Unknown) {
+    // Placing casts all along; a burst gets a little longer to agree.
+    if (surface_settled(w.recent, (w.placing ? 400 : 600) * kMsNs, y, sigma, coverage))
+      settle("known");
+    return;
+  }
+  if (std::abs(c.y - w.est.y) <= 0.03f) {
+    // The same surface: followed smoothly, ignoring millimeters so the
+    // shadow doesn't shimmer.
+    const float k = 1.f - std::exp(-static_cast<float>(std::min<int64_t>(since, 500 * kMsNs)) / (250.f * kMsNs));
+    w.emaY += (c.y - w.emaY) * k;
+    if (std::abs(w.emaY - w.est.y) >= 0.005f)
+      w.est.y = w.emaY;
+    w.est.coverage += (c.coverage - w.est.coverage) * k;
+  } else if (surface_settled(w.recent, 500 * kMsNs, y, sigma, coverage)) {
+    settle("moved"); // over another surface, consistently
+  }
+}
+
+void surface_publish(const SurfaceEstimate& e) {
+  std::lock_guard lock{g_surface.mutex};
+  g_surface.estimate = e;
+}
+
+void surface_log(SurfaceWorker& w, int64_t now, const ArenaSnapshot& a) {
+  if (now - w.lineNs >= 1000 * kMsNs) {
+    if (w.casts > 0) {
+      const bool known = w.est.state != SurfaceEstimate::State::Unknown;
+      const ShadowShape sh = shadow_shape(a, known ? w.est.y : w.lastY, known ? w.est.coverage : w.lastCoverage);
+      Log.info("Surface casts: {} in {:.1f} s ({} blind, {} without a surface); rays hit/no hit/hit occluded/out of "
+               "view/ray occluded/no normal/failed {}/{}/{}/{}/{}/{}/{}; last candidate y {:.3f} coverage {:.2f}; "
+               "estimate {} y {:.3f} sigma {:.1f} mm coverage {:.2f}; gap {:.2f} m, R {:.2f} m, shadow {:.2f}",
+               w.casts, static_cast<double>(now - w.lineNs) / 1e9, w.blind, w.none, w.statuses[1], w.statuses[2],
+               w.statuses[3], w.statuses[4], w.statuses[5], w.statuses[6], w.statuses[0], w.lastY, w.lastCoverage,
+               surface_state_name(w.est.state), w.est.y, w.est.sigma * 1000.f, w.est.coverage, sh.gap, sh.radius,
+               sh.alpha);
+    }
+    w.lineNs = now;
+    w.casts = w.blind = w.none = 0;
+    w.statuses = {};
+  }
+  if (now - w.timingNs >= 10000 * kMsNs) {
+    if (!w.rayUs.empty()) {
+      std::sort(w.rayUs.begin(), w.rayUs.end());
+      const auto at = [&](double q) { return w.rayUs[static_cast<size_t>(q * static_cast<double>(w.rayUs.size() - 1))]; };
+      Log.info("Surface rays: {} in {:.0f} s, {:.0f}/{:.0f}/{:.0f} us each (median/99th percentile/most)",
+               w.rayUs.size(), static_cast<double>(now - w.timingNs) / 1e9, at(0.5), at(0.99), w.rayUs.back());
+    }
+    w.timingNs = now;
+    w.rayUs.clear();
+  }
+}
+
+void surface_main() {
+  using State = SurfaceEstimate::State;
+  SurfaceWorker w;
+  w.lineNs = w.timingNs = monotonic_ns();
+  for (;;) {
+    bool placing, reset;
+    int64_t burstUntil;
+    XrTime time;
+    std::array<XrVector3f, 2> hands;
+    std::array<bool, 2> handValid;
+    {
+      std::unique_lock lock{g_surface.mutex};
+      // 15 casts a second while casting, the raycaster's future polled every
+      // 50 ms while it's created; otherwise asleep until asked (waking each
+      // second to let an idle raycaster go).
+      if (!g_surface.stop && !g_surface.reset)
+        g_surface.cv.wait_for(lock, w.caster == Caster::Creating ? std::chrono::milliseconds(50)
+                                    : w.active                   ? std::chrono::milliseconds(66)
+                                                                 : std::chrono::milliseconds(1000));
+      if (g_surface.stop)
+        break;
+      placing = g_surface.placing;
+      reset = std::exchange(g_surface.reset, false);
+      burstUntil = g_surface.burstUntilNs;
+      time = g_surface.displayTime;
+      hands = g_surface.hands;
+      handValid = g_surface.handValid;
+    }
+    const int64_t now = monotonic_ns();
+    if (reset) {
+      w.est = {};
+      w.recent.clear();
+      surface_publish(w.est);
+    }
+    const bool active = placing || now < burstUntil;
+    if (active && !w.active) {
+      // Measured afresh, keeping what was known in the meantime.
+      w.recent.clear();
+      w.lastCandidateNs = now;
+      if (w.est.state == State::Frozen)
+        w.est.state = State::Known;
+    } else if (!active && w.active && w.est.state == State::Known) {
+      // Placed: held for the fight.
+      w.est.state = State::Frozen;
+      surface_publish(w.est);
+      if (surface_settings().log)
+        Log.info("Surface frozen at y {:.3f}, coverage {:.2f}", w.est.y, w.est.coverage);
+    }
+    w.active = active;
+    w.placing = placing;
+    if (!active) {
+      // An idle raycaster goes after 2 s: whatever it keeps running for
+      // depth isn't paid for during fights.
+      if (w.caster == Caster::Ready && now - w.lastCastNs > 2000 * kMsNs)
+        raycaster_destroy(w);
+      else if (w.caster == Caster::Creating)
+        raycaster_step(w);
+      continue;
+    }
+    const ArenaSnapshot a = arena_snapshot();
+    if (!a.footprint.valid || time == 0)
+      continue;
+    if (B.envRaycast && (w.caster == Caster::Off || w.caster == Caster::Creating || w.caster == Caster::Ready)) {
+      raycaster_step(w);
+      if (w.caster != Caster::Ready)
+        continue;
+      surface_note(w, cast_footprint(w, a, time, hands, handValid), now, a);
+      w.lastCastNs = now;
+      surface_publish(w.est);
+      if (surface_settings().log)
+        surface_log(w, now, a);
+    } else if (float y; locate_floor(time, y)) {
+      if (w.est.state == State::Unknown)
+        Log.info("Surface under stage {}: the floor, at y {:.3f}", a.stage, y);
+      w.est = {State::Known, SurfaceEstimate::Source::Floor, y, 1.f, 0.f};
+      surface_publish(w.est);
+    }
+  }
+  raycaster_destroy(w);
+}
+
+void start_surface_worker() {
+  if (g_surfaceThread.joinable() || (!B.envRaycast && !B.floorSpace))
+    return;
+  {
+    std::lock_guard lock{g_surface.mutex};
+    g_surface.stop = false;
+  }
+  g_surfaceThread = std::thread(surface_main);
+}
+
+// Before the session goes: the raycaster is the session's child.
+void stop_surface_worker() {
+  if (!g_surfaceThread.joinable())
+    return;
+  {
+    std::lock_guard lock{g_surface.mutex};
+    g_surface.stop = true;
+  }
+  g_surface.cv.notify_one();
+  g_surfaceThread.join();
+}
+
+// XR thread, every frame: what the worker casts for. While the stage is
+// being placed it casts all along; once it's let go, half a second more to
+// confirm; when a fight's stage appears without a hold (netplay), a second.
+void surface_frame(bool fight, bool placing, XrTime time) {
+  if (!g_surfaceThread.joinable())
+    return;
+  static bool wasFight = false, wasPlacing = false;
+  int burstMs = 0;
+  if (fight && !wasFight && !placing)
+    burstMs = 1000;
+  if (wasPlacing && !placing)
+    burstMs = 500;
+  const bool changed = placing != wasPlacing || burstMs > 0;
+  wasFight = fight;
+  wasPlacing = placing;
+  std::lock_guard lock{g_surface.mutex};
+  g_surface.displayTime = time;
+  g_surface.placing = placing;
+  for (int h = 0; h < 2; ++h) {
+    g_surface.hands[h] = G.hands[h].touch;
+    g_surface.handValid[h] = G.hands[h].valid;
+  }
+  if (burstMs > 0)
+    g_surface.burstUntilNs = std::max(g_surface.burstUntilNs, monotonic_ns() + burstMs * kMsNs);
+  if (changed)
+    g_surface.cv.notify_one();
+}
+
+constexpr uint32_t kShadowSize = 128;
+// How far the shadow's texture reaches, against the footprint it's for (each
+// way): room for the penumbra, which fades out before the texture's edge.
+constexpr float kShadowMargin = 1.6f;
+
+// Premultiplied black: a rounded rectangle (a superellipse), solid in the
+// middle and soft from halfway out, half dark at the footprint's edge.
+bool create_shadow_texture() {
+  std::vector<uint8_t> px(kShadowSize * kShadowSize * 4, 0);
+  for (uint32_t y = 0; y < kShadowSize; ++y)
+    for (uint32_t x = 0; x < kShadowSize; ++x) {
+      const float u = ((x + 0.5f) / kShadowSize * 2.f - 1.f) * kShadowMargin;
+      const float v = ((y + 0.5f) / kShadowSize * 2.f - 1.f) * kShadowMargin;
+      const float r = std::pow(std::pow(std::abs(u), 4.f) + std::pow(std::abs(v), 4.f), 0.25f);
+      px[(y * kShadowSize + x) * 4 + 3] = static_cast<uint8_t>(std::lround((1.f - smoothstep(0.5f, 1.5f, r)) * 255.f));
+    }
+  return create_static_swapchain(B.shadowSwapchain, kShadowSize, kShadowSize, px);
+}
+
+// The rotation b, then a.
+XrQuaternionf qmul(const XrQuaternionf& a, const XrQuaternionf& b) {
+  return {a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+          a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z};
+}
+
+// XR thread, every frame: the stage's shadow on the surface under it, false
+// when there's none to show (`shown`: a fight shows over passthrough). It
+// fades in and out over about a quarter second, never popping.
+bool build_shadow_layer(XrCompositionLayerQuad& q, XrCompositionLayerColorScaleBiasKHR& tint, bool shown) {
+  static float alpha = 0.f; // as shown, easing toward the target
+  static ShadowShape last;
+  static auto lastTime = std::chrono::steady_clock::now();
+  const auto now = std::chrono::steady_clock::now();
+  const float dt = std::min(std::chrono::duration<float>(now - lastTime).count(), 0.1f);
+  lastTime = now;
+  if (!shown || !surface_settings().shadow || !B.shadowSwapchain || !B.hasColorScaleBias) {
+    alpha = 0.f;
+    return false;
+  }
+  SurfaceEstimate e;
+  {
+    std::lock_guard lock{g_surface.mutex};
+    e = g_surface.estimate;
+  }
+  float target = 0.f;
+  if (const ArenaSnapshot a = arena_snapshot(); e.state != SurfaceEstimate::State::Unknown && a.footprint.valid) {
+    last = shadow_shape(a, e.y, e.coverage);
+    target = last.alpha;
+  }
+  alpha += (target - alpha) * (1.f - std::exp(-dt / 0.08f));
+  if (target == 0.f && alpha < 0.003f)
+    alpha = 0.f;
+  if (alpha <= 0.f)
+    return false;
+  const float grow = 1.f + surface_settings().spread * (last.radius > 0.f ? last.gap / last.radius : 0.f);
+  q = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+  q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+  q.space = B.space;
+  q.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+  q.subImage.swapchain = B.shadowSwapchain;
+  q.subImage.imageRect = {{0, 0}, {static_cast<int32_t>(kShadowSize), static_cast<int32_t>(kShadowSize)}};
+  // Flat on the surface (a quad faces +Z: tipped back to face up), turned
+  // with the stage, 2 mm over it.
+  constexpr XrQuaternionf kFaceUp{-0.70710678f, 0.f, 0.f, 0.70710678f};
+  q.pose = {qmul(yaw_quat(last.yaw), kFaceUp), {last.center.x, last.center.y + 0.002f, last.center.z}};
+  q.size = {last.width * kShadowMargin * grow, last.depth * kShadowMargin * grow};
+  tint = {XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR};
+  tint.colorScale = {alpha, alpha, alpha, alpha}; // premultiplied black: only the alpha matters
+  q.next = &tint;
+  return true;
+}
+
 // ---------------------------------------------------------------- XR thread: placing the stage
 //
 // While the game holds a fight before it starts (aurora_xr_set_placing), the
@@ -3956,17 +4707,28 @@ bool render_xr_frame() {
                         });
   B.pointerMode = pointing || onScreen;
   B.triggersClick = onScreen;
+  // The surface under the stage is measured while it's being placed: the
+  // hold before a fight, or a grab in a pause.
+  surface_frame(fight, fight && (placing > 0 || (G.target == Target::Arena && (G.oneHand >= 0 || G.twoHands))),
+                fs.predictedDisplayTime);
 
-  std::array<const XrCompositionLayerBaseHeader*, 3 + kMaxPlacingLayers + kMaxPointerLayers> layers{};
+  // The passthrough, the shadow, the HUD and the 3D view, the HUD on top in
+  // full VR, then the placing cards and the lasers.
+  std::array<const XrCompositionLayerBaseHeader*, 4 + kMaxPlacingLayers + kMaxPointerLayers> layers{};
   uint32_t layerCount = 0;
   XrCompositionLayerPassthroughFB ptLayer{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
   sync_passthrough();
   sync_boundary();
-  if (B.passthroughLayer && B.passthroughRunning && g_passthroughWanted) {
+  const bool roomShown = B.passthroughLayer && B.passthroughRunning && g_passthroughWanted;
+  if (roomShown) {
     ptLayer.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
     ptLayer.layerHandle = B.passthroughLayer;
     layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&ptLayer);
   }
+  XrCompositionLayerQuad shadowQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerColorScaleBiasKHR shadowTint{XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR};
+  const bool shadow = build_shadow_layer(shadowQuad, shadowTint, fs.shouldRender && fight && roomShown);
+  int shadowIndex = -1;
   std::array<XrCompositionLayerProjectionView, 2> projViews{};
   std::array<XrCompositionLayerSpaceWarpInfoFB, 2> spaceWarp{};
   XrCompositionLayerProjection proj{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
@@ -4062,6 +4824,10 @@ bool render_xr_frame() {
     // a stage whose scenery reaches it (aurora_xr_set_hud_on_top).
     static const bool hudOnTopEnv = env_flag("AURORA_XR_HUD_ON_TOP", false);
     const bool hudUnder = g_passthroughWanted && !hudOnTopEnv && !g_hudOnTop;
+    if (shadow) {
+      shadowIndex = static_cast<int>(layerCount);
+      layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&shadowQuad);
+    }
     if (showHud && hudUnder)
       layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&hudQuad);
     layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&proj);
@@ -4095,6 +4861,23 @@ bool render_xr_frame() {
       build_pointer_layers(pointers, true);
     for (uint32_t i = 0; i < pointers.count; ++i)
       layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&pointers.quads[i]);
+  }
+  // Within the runtime's limit (16 at least, by the spec): the shadow goes
+  // first, then the topmost layers.
+  if (layerCount > B.maxLayers) {
+    const uint32_t wanted = layerCount;
+    if (shadowIndex >= 0) {
+      std::copy(layers.begin() + shadowIndex + 1, layers.begin() + layerCount, layers.begin() + shadowIndex);
+      --layerCount;
+    }
+    static bool warned = false;
+    if (!warned) {
+      Log.warn("{} composition layers wanted, {} allowed: dropped {}{}", wanted, B.maxLayers,
+               shadowIndex >= 0 ? "the stage's shadow" : "the topmost layers",
+               shadowIndex >= 0 && layerCount > B.maxLayers ? " and the topmost layers" : "");
+      warned = true;
+    }
+    layerCount = std::min(layerCount, B.maxLayers);
   }
   XrFrameEndInfo fei{XR_TYPE_FRAME_END_INFO};
   fei.displayTime = fs.predictedDisplayTime;
@@ -4223,12 +5006,20 @@ bool poll_events() {
         B.running = false;
         return false;
       }
+      // Back on the head: the room may have changed meanwhile.
+      if (state == XR_SESSION_STATE_FOCUSED && !B.focused)
+        surface_request(1000, false);
       B.focused = state == XR_SESSION_STATE_FOCUSED;
       if (!B.focused) {
         std::lock_guard lock{g_padMutex};
         g_padValid = false;
       }
       g_sessionRunning = B.running;
+    } else if (ev.type == XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING) {
+      // A recenter moves LOCAL: whatever was measured in it is gone.
+      Log.info("Reference space {} recentered", static_cast<int>(
+          reinterpret_cast<const XrEventDataReferenceSpaceChangePending&>(ev).referenceSpaceType));
+      surface_request(1000, true);
     } else if (ev.type == XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB) {
       update_pacing();
     } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
@@ -4264,6 +5055,9 @@ bool setup() {
     Log.warn("Laser pointers unavailable");
   if (!create_hand_trackers())
     Log.info("Hand tracking unavailable");
+  if (!create_shadow_texture())
+    Log.warn("The stage's shadow unavailable");
+  start_surface_worker();
   if (const char* dir = std::getenv("AURORA_XR_DUMP"); dir != nullptr && *dir != '\0')
     B.dumpDir = dir;
   // Not every exit path calls aurora::shutdown, so stop the XR thread from an
@@ -4277,6 +5071,7 @@ bool setup() {
 // Destroy everything the XR thread created, newest first. Dawn owns the
 // device and instance; the OpenXR instance outlives them (release_instance).
 void teardown() {
+  stop_surface_worker();
   // Only our queue: Dawn may be submitting on its own, and vkDeviceWaitIdle
   // would need every queue externally synchronized.
   if (B.queue)
@@ -4308,7 +5103,7 @@ void teardown() {
     ht = XR_NULL_HANDLE;
   }
   for (XrSwapchain* sc : {&B.beamSwapchain, &B.dotSwapchain, &B.barSwapchain, &B.backSwapchain,
-                          &B.zeroMotionSwapchain}) {
+                          &B.zeroMotionSwapchain, &B.shadowSwapchain}) {
     if (*sc)
       xrDestroySwapchain(*sc);
     *sc = XR_NULL_HANDLE;
@@ -4346,6 +5141,9 @@ void teardown() {
       xrDestroySwapchain(st.swapchain);
     st.swapchain = XR_NULL_HANDLE;
   }
+  if (B.floorSpace)
+    xrDestroySpace(B.floorSpace);
+  B.floorSpace = XR_NULL_HANDLE;
   if (B.space)
     xrDestroySpace(B.space);
   if (B.session)
@@ -6819,14 +7617,26 @@ extern "C" void aurora_xr_set_stage_top(float y) {
   aurora::xr::g_stageTop = y;
 }
 
+extern "C" void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin, float zmax, float ybottom) {
+  using namespace aurora::xr;
+  {
+    std::lock_guard lock{g_arenaMutex};
+    g_footprint = {xmin < xmax && zmin < zmax, xmin, xmax, zmin, zmax, ybottom};
+  }
+  // A stage ready for its fight: measured now, in case no hold comes.
+  surface_request(1000, false);
+}
+
 extern "C" void aurora_xr_set_stage(int stage, float x, float y, float z, float scale) {
   using namespace aurora::xr;
+  surface_request(0, true); // another stage: what was under the last one isn't under it
   std::lock_guard lock{g_arenaMutex};
   g_stage = stage;
   g_arenaCenter = {x, y, z};
   g_stageScale = scale > 0.f ? scale : 1.f;
   g_stageZoom = 1.f;
   g_hudOnTop = false;
+  g_footprint = {};
   init_arena();
   if (const auto it = g_stageArenas.find(stage); it != g_stageArenas.end()) {
     g_arena = it->second;

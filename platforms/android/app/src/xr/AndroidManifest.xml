@@ -19,6 +19,13 @@
     <uses-permission android:name="com.oculus.permission.HAND_TRACKING" />
     <!-- XR_META_boundary_visibility: hide the Guardian boundary in mixed reality. -->
     <uses-permission android:name="com.oculus.permission.BOUNDARY_VISIBILITY" />
+    <!-- Spatial data: XR_META_environment_raycast finds the real surface under
+         the stage for its shadow (Quest 3 and 3S). The runtime offers it only
+         to apps declaring this; its filter names the horizonos permission,
+         Meta's docs the com.oculus one, so both. Asked for in the launcher
+         panel (MeleeActivity.setLauncherActive). -->
+    <uses-permission android:name="horizonos.permission.USE_SCENE" />
+    <uses-permission android:name="com.oculus.permission.USE_SCENE" />
 
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
