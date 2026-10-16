@@ -134,6 +134,12 @@ rm -f "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a/libopenxr_loader.so"
 if [[ -f "${BUILD_DIR}/libopenxr_loader.so" ]]; then
     cp "${BUILD_DIR}/libopenxr_loader.so" "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a/"
 fi
+# Steam Audio, which libmelee.so links when built with positional audio
+# (cmake/SteamAudio.cmake); dropped when a build without it comes next.
+rm -f "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a/libphonon.so"
+if [[ -f "${BUILD_DIR}/libphonon.so" ]]; then
+    cp "${BUILD_DIR}/libphonon.so" "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a/"
+fi
 if [[ -f "${BUILD_DIR}/_deps/png-build/libpng16.so" ]]; then
     "${STRIP_TOOL}" --strip-unneeded -o "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a/libpng16.so" "${BUILD_DIR}/_deps/png-build/libpng16.so"
 fi

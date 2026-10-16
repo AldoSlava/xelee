@@ -697,6 +697,8 @@ static bool s_flat_view;
 
 void pc_xr_flat_view(bool on) { s_flat_view = on; }
 
+bool pc_xr_world_3d(void) { return !s_flat_view && pc_xr_presenting(); }
+
 /* The stage being followed (s_follows), for the stage last drawn; NULL when
  * it isn't one. Its center, and whether that has been placed yet. */
 static FollowRule s_follow_rule;

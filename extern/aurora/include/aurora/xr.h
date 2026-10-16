@@ -124,6 +124,13 @@ void aurora_xr_set_stage_top(float y);
 
 /* True while an OpenXR session is presenting the game. Any thread. */
 bool aurora_xr_active(void);
+/* For positional audio: the transform from the current stage's game world
+ * (game units) to the head's own space (meters; x right, y up, -z ahead),
+ * from the newest head pose and the arena's placement, in GX Mtx layout.
+ * False, leaving `m` untouched, while no session presents or the head pose
+ * is not tracked. Any thread; cheap (two short locks), so an audio thread
+ * may call it every audio frame. */
+bool aurora_xr_audio_listener(float m[3][4]);
 void aurora_xr_camera(int category, const float view[3][4]);
 
 /* Extra placement for the following AURORA_XR_WORLD draws in the 3D view

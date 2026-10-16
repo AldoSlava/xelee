@@ -1,5 +1,6 @@
 #ifdef TARGET_PC
 #include "pc/xr_scene.h"
+#include "pc/spatial_audio.h"
 #endif
 #include "camera.h"
 
@@ -4051,6 +4052,9 @@ static void fn_800301D0(HSD_GObj* gobj, intptr_t arg1)
          * (Green Greens' blue sky). */
         pc_xr_camera_focus(&game_camera.transform.interest.x);
         pc_xr_world_camera((const float(*)[4]) cobj->view_mtx);
+        /* Positional audio: where fighters and items are, and the camera
+         * (the listener outside a headset). Read only. */
+        pc_spatial_frame((const float(*)[4]) cobj->view_mtx);
 #endif
         Ground_801C4FAC(cobj);
         HSD_LObjDeleteCurrentAll(NULL);

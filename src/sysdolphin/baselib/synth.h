@@ -32,6 +32,12 @@ struct HSD_SynthSFXNode;
 /* Returns the synth node id, or -1. Upstream's `bool` is 1-byte `_Bool` here,
  * which clamps both the id and the -1 to 1; axdriver's HSD_SM::vID needs the
  * real value. */
+#ifdef TARGET_PC
+/* The AX voice indices (0..63) of a playing synth sound `id` (what
+ * HSD_SynthSFXPlayWithGroup returned): 1 or 2 of them, or 0 when it is gone.
+ * For pc/spatial_audio.c. */
+int HSD_SynthSFXVoices(int id, int out[2]);
+#endif
 /* 3896F0 */ int HSD_SynthSFXPlayWithGroup(int, u8, u8, u8, int, int, int, f32,
                                            f32, f32, f32, f32);
 void HSD_SynthSFXKeyOff(int);

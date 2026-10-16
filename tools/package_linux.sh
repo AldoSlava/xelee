@@ -90,6 +90,11 @@ if [[ -n "${LIBUSB_PATH}" && -f "${LIBUSB_PATH}" ]]; then
     mkdir -p "${TAR_STAGE}/lib"
     cp -L "${LIBUSB_PATH}" "${TAR_STAGE}/lib/libusb-1.0.so.0"
 fi
+# Steam Audio, when the build has positional audio (cmake/SteamAudio.cmake).
+if [[ -f "${BUILD_DIR}/libphonon.so" ]]; then
+    mkdir -p "${TAR_STAGE}/lib"
+    cp "${BUILD_DIR}/libphonon.so" "${TAR_STAGE}/lib/"
+fi
 cat << 'APP_RUN' > "${TAR_STAGE}/run.sh"
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
