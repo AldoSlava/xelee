@@ -446,7 +446,7 @@ class Launcher final : public Rml::EventListener {
         switch (tab) {
         case 0:
             return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "aspect",
-                "hud-mode", "aa", "filter", "filter-mode", "fps", "custom-textures", "backend",
+                "hud-mode", "aa", "filter-mode", "fps", "custom-textures", "backend",
                 "performance", "defaults-graphics"};
         case 1:
             return {"volume", "music-volume", "sfx-volume", "mute", "reverb", "spatial-audio",
@@ -815,8 +815,7 @@ class Launcher final : public Rml::EventListener {
                 prefs.vsync = d.vsync;
                 aurora_enable_vsync(prefs.vsync);
             }
-            const bool restart = prefs.msaa != d.msaa || prefs.anisotropy != d.anisotropy ||
-                                 prefs.backend != d.backend;
+            const bool restart = prefs.msaa != d.msaa || prefs.backend != d.backend;
             prefs.render_scale = d.render_scale;
             prefs.widescreen = d.widescreen;
             prefs.hud_mode = d.hud_mode;
@@ -831,7 +830,7 @@ class Launcher final : public Rml::EventListener {
             prefs.xr_spacewarp = d.xr_spacewarp;
             message = "Graphics settings are back to their defaults.";
             if (restart)
-                message += " Anti-aliasing, filtering and the backend apply after a restart.";
+                message += " Anti-aliasing and the backend apply after a restart.";
         } else if (id == "defaults-audio") {
             prefs.volume = d.volume;
             prefs.music_volume = d.music_volume;
@@ -1087,8 +1086,8 @@ class Launcher final : public Rml::EventListener {
             prefs.reverb = false;
             save();
             refresh_settings();
-            note("Performance preset: internal resolution 1x, anti-aliasing off, filtering 1x "
-                 "and reverb off. Anti-aliasing and filtering apply after a restart.");
+            note("Performance preset: internal resolution 1x, anti-aliasing off and reverb "
+                 "off. Anti-aliasing applies after a restart.");
             element("performance")->Focus();
         } else if (id == "fps") {
             prefs.fps = !prefs.fps;
@@ -1733,8 +1732,8 @@ public:
     std::vector<std::string> page_focus() const {
         switch (tab) {
         case 0:
-            return {"display", "sync", "resolution", "aspect", "hud-mode", "aa", "filter",
-                "filter-mode", "custom-textures", "backend"};
+            return {"display", "sync", "resolution", "aspect", "hud-mode", "aa", "filter-mode",
+                "custom-textures", "backend"};
         case 1:
             return {"volume", "music-volume", "sfx-volume", "mute", "reverb", "fps", "scale",
                 "port-check-update"};

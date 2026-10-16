@@ -70,12 +70,13 @@
           <div class="row no-quest" data-desc="Applies to fights. Menus and cutscenes keep the original aspect."><span class="name">Aspect ratio</span><button id="aspect" class="value">Original (73:60)</button></div>
           <div class="row no-quest" data-desc="Classic keeps 4:3 safe margins; Wide anchors damage and stocks to the 16:9 edges."><span class="name">HUD layout</span><button id="hud-mode" class="value">Classic (4:3)</button></div>
           <div class="row no-quest" data-desc="Smooth polygon edges with multisampling. Applies after a restart."><span class="name">Anti-aliasing <span class="badge">RESTART</span></span><button id="aa" class="value">Anti-aliasing</button></div>
-          <div class="row" data-desc="Sharper textures seen at an angle, where the texture allows it. Applies after a restart."><span class="name">Anisotropic filtering <span class="badge">RESTART</span></span><button id="filter" class="value">Filtering</button></div>
+          <!-- Hidden for now: Melee never asks for anisotropic filtering, so it does nothing. -->
+          <div class="row" style="display: none;" data-desc="Sharper textures seen at an angle, where the texture allows it. Applies after a restart."><span class="name">Anisotropic filtering <span class="badge">RESTART</span></span><button id="filter" class="value">Filtering</button></div>
           <div class="row no-quest" data-desc="A filter over the finished frame. Off presents it as rendered."><span class="name">Post-processing</span><button id="filter-mode" class="value">Off</button></div>
           <div class="row no-quest" data-desc="Show the frame rate in a corner of the screen."><span class="name">FPS counter</span><button id="fps" class="value">FPS counter</button></div>
           <div class="row" data-desc="Load replacement textures from the textures folder."><span class="name">Custom HD textures</span><button id="custom-textures" class="value">Enabled</button></div>
           <div class="row no-quest" data-desc="Auto, or a specific graphics API this platform provides. Applies after a restart."><span class="name">Graphics backend <span class="badge">RESTART</span></span><button id="backend" class="value">Auto</button></div>
-          <div class="row no-quest" data-desc="For slow devices: 1x internal resolution, no anti-aliasing, 1x filtering and reverb off."><span class="name">Performance preset</span><button id="performance" class="value action">Apply</button></div>
+          <div class="row no-quest" data-desc="For slow devices: 1x internal resolution, no anti-aliasing and reverb off."><span class="name">Performance preset</span><button id="performance" class="value action">Apply</button></div>
           <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-graphics" class="value action">Restore</button></div>
         </div>
         <div id="page-audio" class="page">

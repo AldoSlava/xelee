@@ -12,7 +12,8 @@
 <div class="setting"><div class="description"><h3>Aspect ratio</h3><p>Applies to fights. Menus and cutscenes keep the original aspect. Applied when the menu closes.</p></div><button id="aspect">Original (73:60)</button></div>
 <div class="setting"><div class="description"><h3>HUD layout</h3><p>Classic keeps 4:3 safe margins; Wide anchors damage/stocks to 16:9 edges.</p></div><button id="hud-mode">Classic (4:3)</button></div>
 <div class="setting"><div class="description"><h3>Anti-aliasing <span class="badge">RESTART</span></h3></div><button id="aa">Anti-aliasing</button></div>
-<div class="setting"><div class="description"><h3>Anisotropic filtering <span class="badge">RESTART</span></h3></div><button id="filter">Filtering</button></div>
+<!-- Hidden for now: Melee never asks for anisotropic filtering, so it does nothing. -->
+<div class="setting" style="display: none;"><div class="description"><h3>Anisotropic filtering <span class="badge">RESTART</span></h3></div><button id="filter">Filtering</button></div>
 <div class="setting"><div class="description"><h3>Post-processing filter</h3><p>Off presents the frame as rendered.</p></div><button id="filter-mode">Off</button></div>
 <div class="setting"><div class="description"><h3>Custom HD textures</h3><p>Load replacement textures from the textures directory.</p></div><button id="custom-textures">Enabled</button></div>
 <div class="setting"><div class="description"><h3>Graphics backend <span class="badge">RESTART</span></h3></div><button id="backend">Auto</button></div>
