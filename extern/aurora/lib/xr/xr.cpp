@@ -506,6 +506,7 @@ struct Bridge {
   uint32_t maxLutResolution = 0;
   PFN_xrCreatePassthroughColorLutMETA createColorLut = nullptr;
   PFN_xrDestroyPassthroughColorLutMETA destroyColorLut = nullptr;
+  PFN_xrUpdatePassthroughColorLutMETA updateColorLut = nullptr;
   // The real surface under the stage (XR worker: the surface under the
   // stage): XR_META_environment_raycast, which needs XR_EXT_future, and
   // XR_EXT_local_floor's floor where there is no raycast.
@@ -838,6 +839,7 @@ bool create_instance() {
   if (B.hasColorLutExt) {
     B.createColorLut = xr_proc<PFN_xrCreatePassthroughColorLutMETA>("xrCreatePassthroughColorLutMETA");
     B.destroyColorLut = xr_proc<PFN_xrDestroyPassthroughColorLutMETA>("xrDestroyPassthroughColorLutMETA");
+    B.updateColorLut = xr_proc<PFN_xrUpdatePassthroughColorLutMETA>("xrUpdatePassthroughColorLutMETA");
     if (!B.createColorLut || !B.destroyColorLut)
       B.maxLutResolution = 0;
   }
@@ -4305,7 +4307,9 @@ bool build_shadow_layer(XrCompositionLayerQuad& q, XrCompositionLayerColorScaleB
 // XR_META_passthrough_color_lut it's a colour LUT built for the stage and an
 // interpolated map from an identity LUT to it, whose weight fades in as the
 // fight starts (or its hold is let go) and out as it ends; without the
-// extension, brightness and saturation, which can't tint. A worker thread
+// extension, brightness and saturation, which can't tint. A grade may also
+// change mid-fight (Venom's caves, as its lights dim): the LUT is then
+// rewritten in place, at most ten times a second. A worker thread
 // builds the LUTs and sets the styles; the XR thread only says whether a
 // fight shows over the room.
 //
@@ -4401,12 +4405,27 @@ XrPassthroughColorLutMETA create_lut(const RoomGrade& g, uint32_t res) {
   return lut;
 }
 
+// A grade that changes during a fight (a stage's own lighting, as Venom's
+// caves) rewrites the LUT in place instead of making another.
+bool update_lut(XrPassthroughColorLutMETA lut, const RoomGrade& g, uint32_t res) {
+  if (!B.updateColorLut)
+    return false;
+  const std::vector<uint8_t> data = grade_lut(g, res);
+  XrPassthroughColorLutUpdateInfoMETA ui{XR_TYPE_PASSTHROUGH_COLOR_LUT_UPDATE_INFO_META};
+  ui.data = {static_cast<uint32_t>(data.size()), data.data()};
+  return XR_SUCCEEDED(B.updateColorLut(lut, &ui));
+}
+
 void grade_main() {
   const GradeSettings& set = grade_settings();
   uint32_t lutRes = set.lut;
   XrPassthroughColorLutMETA identity = XR_NULL_HANDLE, target = XR_NULL_HANDLE;
-  RoomGrade built;               // the grade the target LUT (or the fallback) is for, strength applied
+  // The look the target LUT (or the fallback) shows, strength applied: the
+  // last grade that wasn't none, kept so a grade going to none fades out.
+  RoomGrade built;
+  bool lookOn = false; // the current grade isn't none
   uint64_t builtSeq = UINT64_MAX;
+  int64_t builtNs = 0, loggedNs = 0; // a new grade at most every 100 ms
   float weight = 0.f;            // faded toward 1 while a fight shows, 0 otherwise
   float appliedWeight = 0.f;     // in the style last set (0: a plain one)
   bool force = false;
@@ -4451,9 +4470,10 @@ void grade_main() {
     float room;
     {
       std::unique_lock lock{g_grade.mutex};
-      const bool fading = weight != (g_grade.on && !built.none() ? g_grade.roomWeight : 0.f);
-      if (!g_grade.stop && g_grade.seq == builtSeq)
-        g_grade.cv.wait_for(lock, fading ? std::chrono::milliseconds(33) : std::chrono::milliseconds(1000));
+      const bool fading = weight != (g_grade.on && lookOn ? g_grade.roomWeight : 0.f);
+      if (!g_grade.stop && (g_grade.seq == builtSeq || monotonic_ns() - builtNs < 100 * kMsNs))
+        g_grade.cv.wait_for(lock, fading || g_grade.seq != builtSeq ? std::chrono::milliseconds(33)
+                                                                    : std::chrono::milliseconds(1000));
       if (g_grade.stop)
         break;
       grade = g_grade.grade;
@@ -4464,29 +4484,38 @@ void grade_main() {
     const auto now = std::chrono::steady_clock::now();
     const float dt = std::min(std::chrono::duration<float>(now - last).count(), 0.25f);
     last = now;
-    if (seq != builtSeq) {
+    if (const int64_t t0 = monotonic_ns(); seq != builtSeq && t0 - builtNs >= 100 * kMsNs) {
       builtSeq = seq;
-      built = grade.scaled(set.strength);
-      if (target) {
-        B.destroyColorLut(target); // kept by the runtime while a style still uses it
-        target = XR_NULL_HANDLE;
-      }
-      if (lutRes > 0 && !built.none()) {
-        const int64_t t0 = monotonic_ns();
-        if (!identity)
-          identity = create_lut({}, lutRes);
-        target = identity ? create_lut(built, lutRes) : XR_NULL_HANDLE;
-        if (!target) {
-          lutRes = 0; // brightness and saturation from now on
-          Log.warn("Room grade: no colour LUTs, brightness and saturation instead");
-        } else if (set.log) {
-          Log.info("Room grade {:.2f},{:.2f},{:.2f} saturation {:.2f}: two {}^3 LUTs in {:.1f} ms", built.r,
-                   built.g, built.b, built.saturation, lutRes, static_cast<double>(monotonic_ns() - t0) / 1e6);
+      builtNs = t0;
+      const RoomGrade g = grade.scaled(set.strength);
+      lookOn = !g.none();
+      if (lookOn) {
+        built = g;
+        const char* how = "updated";
+        if (lutRes > 0) {
+          if (!identity)
+            identity = create_lut({}, lutRes);
+          if (!target || !update_lut(target, built, lutRes)) {
+            if (target)
+              B.destroyColorLut(target); // kept by the runtime while a style still uses it
+            target = identity ? create_lut(built, lutRes) : XR_NULL_HANDLE;
+            how = "built";
+          }
+          if (!target) {
+            lutRes = 0; // brightness and saturation from now on
+            Log.warn("Room grade: no colour LUTs, brightness and saturation instead");
+          }
         }
+        if (set.log && t0 - loggedNs >= 1000 * kMsNs) {
+          loggedNs = t0;
+          Log.info("Room grade {:.2f},{:.2f},{:.2f} saturation {:.2f}: {} in {:.1f} ms", built.r, built.g, built.b,
+                   built.saturation, lutRes > 0 ? fmt::format("{}^3 LUT {}", lutRes, how) : std::string{"no LUT"},
+                   static_cast<double>(monotonic_ns() - t0) / 1e6);
+        }
+        force = weight > 0.f;
       }
-      force = weight > 0.f;
     }
-    const float want = on && !built.none() ? room : 0.f;
+    const float want = on && lookOn ? room : 0.f;
     if (set.log && want != loggedWant && (want == 0.f || loggedWant == 0.f)) {
       Log.info("Room grade fading {} (to {:.2f})", want > weight ? "in" : "out", want);
       loggedWant = want;

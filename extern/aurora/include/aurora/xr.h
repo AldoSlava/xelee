@@ -132,7 +132,9 @@ void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin, float zma
 /* The room's colour grade for the current stage's fights in mixed reality:
  * passthrough tinted toward the stage's palette, a gain per channel (linear
  * light) and a saturation; 1, 1, 1, 1 is none. It fades in as a fight starts
- * (or its placing hold is let go) and out as the fight ends.
+ * (or its placing hold is let go) and out as the fight ends. It may change
+ * during a fight, as often as every frame (a stage whose own lighting
+ * changes): the room follows within about 100 ms.
  * aurora_xr_set_stage resets it to none. Any thread. */
 void aurora_xr_set_room_grade(float r, float g, float b, float saturation);
 

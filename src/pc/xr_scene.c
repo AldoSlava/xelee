@@ -22,6 +22,7 @@
 #include <melee/cm/camera.h>
 #include <sysdolphin/baselib/dobj.h>
 #include <sysdolphin/baselib/jobj.h>
+#include <sysdolphin/baselib/lobj.h>
 
 #include <math.h>
 #include <stdint.h>
@@ -566,6 +567,74 @@ static const StageLuminance s_luminances[] = {
 };
 #define LUMINANCE_COUNT ((int)(sizeof s_luminances / sizeof s_luminances[0]))
 
+/* Stages whose own lighting changes during a fight, which the room's grade
+ * then follows: Venom, whose Great Fox flies through caves where the
+ * stage's lights dim and redden. Each frame the 3D view draws, the stage's
+ * lights (its light objects as their animations leave them; read only) are
+ * summed per channel and set against the brightest they have been this
+ * fight, and the room takes MELEE_XR_GRADE_DYNAMIC (0.6; 0: off) of that
+ * change, within 0.55 to 1.1 per channel, on top of the stage's own grade.
+ * MELEE_XR_LIGHT_LOG=1 logs the lights once a second. */
+static const int s_dynamic_grades[] = {0x0F /* Venom */};
+#define DYNAMIC_GRADE_COUNT ((int)(sizeof s_dynamic_grades / sizeof s_dynamic_grades[0]))
+
+static RoomGrade s_grade; /* the current stage's own */
+static bool s_grade_dynamic;
+static float s_light_base[3]; /* the stage's lights at their brightest this fight */
+static float s_light_sent[3]; /* the gains last sent */
+
+static void dynamic_grade_reset(void) {
+    for (int c = 0; c < 3; c++) {
+        s_light_base[c] = 0.f;
+        s_light_sent[c] = 1.f;
+    }
+    aurora_xr_set_room_grade(s_grade.r, s_grade.g, s_grade.b, s_grade.saturation);
+}
+
+static void dynamic_grade(void) {
+    static float strength = -1.f;
+    static int log = -1;
+    if (strength < 0.f) {
+        const char* v = getenv("MELEE_XR_GRADE_DYNAMIC");
+        strength = v != NULL ? (float)atof(v) : 0.6f;
+        strength = strength < 0.f ? 0.f : strength > 1.f ? 1.f : strength;
+        log = getenv("MELEE_XR_LIGHT_LOG") != NULL;
+    }
+    HSD_GObj* lights = s_grade_dynamic && strength > 0.f ? Ground_801C498C() : NULL;
+    if (lights == NULL) {
+        return;
+    }
+    float sum[3] = {0.f, 0.f, 0.f};
+    for (HSD_LObj* l = (HSD_LObj*)lights->hsd_obj; l != NULL; l = HSD_LObjGetNext(l)) {
+        sum[0] += l->color.r / 255.f;
+        sum[1] += l->color.g / 255.f;
+        sum[2] += l->color.b / 255.f;
+    }
+    const float lum = 0.2126f * sum[0] + 0.7152f * sum[1] + 0.0722f * sum[2];
+    if (lum > 0.2126f * s_light_base[0] + 0.7152f * s_light_base[1] + 0.0722f * s_light_base[2]) {
+        memcpy(s_light_base, sum, sizeof sum);
+    }
+    float gain[3];
+    bool changed = false;
+    for (int c = 0; c < 3; c++) {
+        const float ratio = s_light_base[c] > 0.01f ? sum[c] / s_light_base[c] : 1.f;
+        gain[c] = 1.f + strength * (ratio - 1.f);
+        gain[c] = gain[c] < 0.55f ? 0.55f : gain[c] > 1.1f ? 1.1f : gain[c];
+        changed |= fabsf(gain[c] - s_light_sent[c]) >= 0.02f || (gain[c] == 1.f && s_light_sent[c] != 1.f);
+    }
+    if (changed) {
+        memcpy(s_light_sent, gain, sizeof gain);
+        aurora_xr_set_room_grade(s_grade.r * gain[0], s_grade.g * gain[1], s_grade.b * gain[2], s_grade.saturation);
+    }
+    static Uint64 logged;
+    if (log && SDL_GetTicks() - logged >= 1000) {
+        logged = SDL_GetTicks();
+        pc_log_line("xr: stage lights %.2f,%.2f,%.2f (brightest %.2f,%.2f,%.2f): room grade x%.2f,%.2f,%.2f", sum[0],
+                    sum[1], sum[2], s_light_base[0], s_light_base[1], s_light_base[2], s_light_sent[0],
+                    s_light_sent[1], s_light_sent[2]);
+    }
+}
+
 static void room_grade(int grkind) {
     RoomGrade g = {grkind, 1.f, 1.f, 1.f, 1.f};
     for (int i = 0; i < GRADE_COUNT; i++) {
@@ -577,7 +646,12 @@ static void room_grade(int grkind) {
     if (env != NULL) {
         sscanf(env, "%f,%f,%f,%f", &g.r, &g.g, &g.b, &g.saturation);
     }
-    aurora_xr_set_room_grade(g.r, g.g, g.b, g.saturation);
+    s_grade = g;
+    s_grade_dynamic = false;
+    for (int i = 0; i < DYNAMIC_GRADE_COUNT; i++) {
+        s_grade_dynamic |= s_dynamic_grades[i] == grkind;
+    }
+    dynamic_grade_reset();
     float luminance = 0.f;
     for (int i = 0; i < LUMINANCE_COUNT; i++) {
         if (s_luminances[i].grkind == grkind) {
@@ -1012,6 +1086,7 @@ void pc_xr_world_camera(const float view[3][4]) {
     aurora_xr_camera(AURORA_XR_WORLD, view);
     follow_update();
     base_clip();
+    dynamic_grade();
 }
 
 void pc_xr_hud_camera(void) {
@@ -1319,6 +1394,9 @@ static float s_floors_left = NAN, s_floors_right = NAN;
 
 void pc_xr_stage_load(void) {
     s_top_grkind = -1;
+    if (s_grade_dynamic) {
+        dynamic_grade_reset(); /* the next fight starts out of the caves */
+    }
     s_follow_placed = false; /* the next fight's window starts on its focus */
     /* And a held one holds again: a Home-Run retry reloads the same stage,
      * and its window started out released, following the camera. */

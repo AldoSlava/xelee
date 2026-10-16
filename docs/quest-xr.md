@@ -1556,6 +1556,8 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_GRADE_LUT` | 16 | Colour LUT size (power of two, up to 32 and the runtime's limit); 0 uses brightness and saturation instead (no tint) |
 | `AURORA_XR_GRADE_LOG` | 0 | 1 logs the grade's LUT builds and fades |
 | `MELEE_XR_GRADE` | per stage | Room grade for the stage played: `r,g,b,saturation` (gains in linear light; `1,1,1,1` is none) |
+| `MELEE_XR_GRADE_DYNAMIC` | 0.6 | Stages whose lighting changes mid-fight (Venom's caves): how much of their lights' change from their brightest the room grade follows; 0 turns it off |
+| `MELEE_XR_LIGHT_LOG` | unset | Log those stages' summed light colours and the room grade's gains once a second |
 | `AURORA_XR_ROOM_LIGHT` | 1 | 0: the 3D view isn't matched to the room's light (blind A/B) |
 | `AURORA_XR_ROOM_LIGHT_FIXED` | unset | `s` or `r,g,b`: a fixed colour scale on the 3D view instead (A/B of fixed scales) |
 | `AURORA_XR_ROOM_LIGHT_SOURCE` | any | `camera`, `sensor` or `normal` (no measurement: a normal room) |
