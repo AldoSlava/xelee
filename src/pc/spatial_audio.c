@@ -79,6 +79,10 @@ static const struct {
 #define SP_MUSIC_AZIMUTH 30.0f   /* degrees either side of straight at the stage */
 #define SP_MUSIC_ELEVATION 15.0f
 #define SP_SPEAKER_GAP 0.10f
+/* Fight music under spatial audio, in dB: placed sounds, the crowd and the
+ * stage's ambience need room the plain mix never gave them (the user, by
+ * ear, ran music at 30% with them). MELEE_SPATIAL_MUSIC_GAIN overrides. */
+#define SP_FIGHT_MUSIC_DB (-9.0f)
 /* Frames (5 ms) to cross between plain stereo and a speaker blend. */
 #define SP_SPEAKER_FADE 10
 #define SP_ROLLOFF 0.5f
@@ -1175,8 +1179,16 @@ void pc_spatial_output(float* out) {
     }
     const uint64_t t0 = now_ns();
     bool used = false;
-    /* Fights: the music, from ahead of the stage. */
+    /* Fights: the music, from ahead of the stage, turned down. */
     if (s_music_bus_on) {
+        static float trim = -1.f;
+        if (trim < 0.f) {
+            const char* v = getenv("MELEE_SPATIAL_MUSIC_GAIN");
+            trim = powf(10.f, (v != NULL && v[0] != '\0' ? (float)atof(v) : SP_FIGHT_MUSIC_DB) / 20.f);
+        }
+        for (int i = 0; i < SP_AX_FRAME * 2; i++) {
+            s_music_bus[i] *= trim;
+        }
         for (int k = 0; k < 2; k++) {
             const IPLVector3 d = stage_direction(k == 0 ? -SP_MUSIC_AZIMUTH : SP_MUSIC_AZIMUTH, SP_MUSIC_ELEVATION);
             s_music_spk.dir[k][0] = d.x;

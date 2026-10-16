@@ -43,7 +43,7 @@ struct Preferences {
     bool free_camera = false;
     bool ucf = true;             // UCF 0.84 rules (dashback, shield drop, SDI, tumble, cardinals)
     bool slippi_fixes = true;    // Slippi's other gameplay rules: no wobbling, neutral spawns, freeze-glitch fix
-    float music_volume = 0.8f;
+    float music_volume = 1.0f;
     float sfx_volume = 1.0f;
     bool spatial_audio = true;  // fighters' and items' sounds placed (src/pc/spatial_audio.h)
     bool stage_sounds = true;   // our own stage ambience (src/pc/stage_ambience.h); needs spatial audio
