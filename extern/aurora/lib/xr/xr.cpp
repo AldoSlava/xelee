@@ -310,6 +310,13 @@ bool g_multiview = false;
 
 // Latest predicted eye poses, from the XR thread for the render worker.
 std::mutex g_viewMutex;
+// The flat screen as audio sees it (aurora_xr_audio_screen): shown or not,
+// and where. Under g_viewMutex; written by the XR thread each frame.
+struct AudioScreen {
+  bool shown = false;
+  XrPosef pose{};
+  float width = 0.f;
+} g_audioScreen;
 std::array<XrView, 2> g_latestViews{};
 bool g_viewsValid = false;
 
@@ -3930,6 +3937,15 @@ bool render_xr_frame() {
   }
   // Held fights place the arena; menus place the screen.
   const bool screenShown = !fight && g_streams[kScreen].haveImage;
+  {
+    std::lock_guard lock{g_viewMutex};
+    g_audioScreen.shown = screenShown;
+    if (screenShown) {
+      const ScreenPose& s = screen_pose();
+      g_audioScreen.pose = {s.orientation, s.pos};
+      g_audioScreen.width = s.width;
+    }
+  }
   const bool pointing = fight && held && B.focused;
   const bool screenPointing = screenShown && B.focused;
   locate_hands(fs.predictedDisplayTime);
@@ -6858,6 +6874,29 @@ extern "C" bool aurora_xr_audio_listener(float m[3][4]) {
   for (int r = 0; r < 3; ++r)
     for (int c = 0; c < 4; ++c)
       m[r][c] = t[r * 4 + c];
+  return true;
+}
+
+extern "C" bool aurora_xr_audio_screen(float center[3], float right[3], float* width) {
+  using namespace aurora::xr;
+  if (!active())
+    return false;
+  XrPosef head, screen;
+  {
+    std::lock_guard lock{g_viewMutex};
+    if (!g_viewsValid || !g_audioScreen.shown)
+      return false;
+    head.orientation = B.headOrientation;
+    head.position = B.head;
+    screen = g_audioScreen.pose;
+    *width = g_audioScreen.width;
+  }
+  const Mat4 v = view_from_pose(head);
+  const XrVector3f c = screen.position, x = qrot(screen.orientation, {1.f, 0.f, 0.f});
+  for (int r = 0; r < 3; ++r) {
+    center[r] = v[r * 4] * c.x + v[r * 4 + 1] * c.y + v[r * 4 + 2] * c.z + v[r * 4 + 3];
+    right[r] = v[r * 4] * x.x + v[r * 4 + 1] * x.y + v[r * 4 + 2] * x.z;
+  }
   return true;
 }
 

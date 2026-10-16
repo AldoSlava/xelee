@@ -22,7 +22,7 @@
  * (src/pc/melee_state.ld). */
 static struct {
     const void* gobj;
-    float pos[3];
+    float pos[2][3]; /* left and right voices */
 } pc_sm_emitter[0x60];
 #endif
 
@@ -270,7 +270,8 @@ void AXDriverExec(HSD_SM* v)
                             for (k = 0; k < n; k++) {
                                 pc_spatial_voice_tag(voices[k],
                                                      pc_sm_emitter[sm].gobj,
-                                                     pc_sm_emitter[sm].pos);
+                                                     pc_sm_emitter[sm].pos,
+                                                     n == 2 ? k : -1);
                             }
                         }
                     }
@@ -667,7 +668,7 @@ int HSD_AudioSFXStartParam(int sound_id, u8 volume, u8 pan, int track, int chann
     if (pc_net_sfx_on()) {
         int32_t h = net_sfx_start(sound_id, volume, pan, track, channel);
         /* Outside net_sfx.c: for a start it defers past a rollback. */
-        pc_spatial_note_handle(h);
+        pc_spatial_note_handle(h, sound_id, channel);
         return (int) h;
     }
     /* MELEE_NET_SFX_LOG=off: the engine's id, journalled per frame. */
@@ -762,11 +763,13 @@ int HSD_AudioSFXStartParam(int sound_id, u8 volume, u8 pan, int track,
     }
 
     sm_reject(0, sound_id); /* 0 = accepted */
+
 #ifdef TARGET_PC
     {
         int sm = (int) (v - AXDriver_804C45A0);
         if (sm >= 0 && sm < 0x60) {
-            pc_spatial_take_emitter(&pc_sm_emitter[sm].gobj,
+            pc_spatial_take_emitter(sound_id, channel,
+                                    &pc_sm_emitter[sm].gobj,
                                     pc_sm_emitter[sm].pos);
         }
     }

@@ -12,6 +12,7 @@
 #endif
 #include <melee/ft/forward.h>
 #include <melee/ft/ftlib.h>
+#include <melee/gr/ground.h>
 #include <melee/it/forward.h>
 /* it/it_26B1.h, declared here: its header pulls in every fighter type. */
 void it_8026B294(HSD_GObj* gobj, Vec3* pos);
@@ -45,6 +46,35 @@ void it_8026B294(HSD_GObj* gobj, Vec3* pos);
  * fighter at the far edge of a table stage is a little quieter, never lost.
  * Scaling ref with the arena keeps the balance the same at any table size. */
 #define SP_REF_UNITS 170.0f
+/* The crowd (sound groups 5 and 6, sfx/crowdsfx.c): heard from seats in a
+ * ring around the listener, fixed to the stage's axes, a little above ear
+ * height; its bus's left channel feeds the seats on the left, its right
+ * those on the right. Each seat hears the bus a little later than the last
+ * (milliseconds), as a stadium's stands would, or the same sound from six
+ * directions would fold back to the middle of the head. */
+#define SP_CROWD_SEATS 6
+#define SP_CROWD_ELEVATION 20.0f /* degrees */
+#define SP_CROWD_DELAY 4096      /* delay line, 48 kHz samples (85 ms) */
+static const struct {
+    float azimuth; /* degrees from straight at the stage; negative: left */
+    int side;      /* the bus channel it plays: 0 left, 1 right */
+    float delay_ms;
+} s_seats[SP_CROWD_SEATS] = {
+    {-30.f, 0, 5.f}, {-90.f, 0, 17.f}, {-150.f, 0, 29.f},
+    {30.f, 1, 11.f}, {90.f, 1, 23.f},  {150.f, 1, 37.f},
+};
+/* Speakers for music, which is not part of the fight's world: as VR games
+ * commonly do, most of it stays plain stereo and a share comes from a
+ * stereo pair out in the room (SP_PLACED_SHARE of the power). Fight music's
+ * pair stands ahead of the stage and up, fixed to its axes like the crowd's
+ * seats; in the XR menus the whole mix's pair stands beside the screen,
+ * SP_SPEAKER_GAP meters out from its sides. */
+#define SP_PLACED_SHARE 0.3f
+#define SP_MUSIC_AZIMUTH 30.0f   /* degrees either side of straight at the stage */
+#define SP_MUSIC_ELEVATION 15.0f
+#define SP_SPEAKER_GAP 0.10f
+/* Frames (5 ms) to cross between plain stereo and a speaker blend. */
+#define SP_SPEAKER_FADE 10
 #define SP_ROLLOFF 0.5f
 #define SP_MIN_GAIN 0.3f
 /* The built-in HRTF (RMS-normalized) comes out about 1.2 dB under the same
@@ -88,14 +118,14 @@ static uint64_t now_ns(void) {
 static const HSD_GObj* s_cur;      /* the fighter or item whose proc runs */
 static bool s_override_on;         /* a deferred netplay start: its noted emitter */
 static const void* s_override_gobj;
-static float s_override_pos[3];
+static float s_override_pos[2][3];
 static struct {
     int32_t handle;
     const void* gobj;
-    float pos[3];
+    float pos[2][3];
 } s_handles[SP_HANDLES];
 static unsigned s_handle_next;
-static unsigned s_starts_tagged, s_starts_plain, s_late_found, s_late_missed; /* stats */
+static unsigned s_starts_tagged, s_starts_plain, s_starts_crowd, s_late_found, s_late_missed; /* stats */
 
 void pc_spatial_proc(const void* gobj) {
     const HSD_GObj* g = gobj;
@@ -129,7 +159,83 @@ static bool emitter_pos(const HSD_GObj* g, float pos[3]) {
     return true;
 }
 
-bool pc_spatial_take_emitter(const void** gobj, float pos[3]) {
+/* Stage sounds that no fighter or item starts, placed. A stereo one's left
+ * and right voices each get a point (x[0] and x[1]); a mono one sits between
+ * them. Read only, like the rest: the lava's height is the game's own. */
+typedef struct StageSound {
+    int grkind;
+    int sfx[2];   /* the sounds placed so (0: unused) */
+    float x[2];   /* left voice, right voice; game units */
+    float z;
+    bool lava_y;  /* y follows the lava's surface (Ground_801C4368) */
+    float y;      /* otherwise fixed */
+    float gain;   /* over the game's own level */
+} StageSound;
+
+static const StageSound s_stage_sounds[] = {
+    /* Brinstar: the acid's stereo rumble as it starts to rise (0x61A80) or
+     * fall (0x61A81). Its channels a third and two thirds of the way across
+     * the stretch of acid the 3D view keeps (x -120 to 125, pc/xr_scene.c),
+     * at its surface (where it burns: the acid joint less 55, grzebes.c).
+     * Followed below where the 3D view shows it too (a rise starts about 300
+     * under the stage): from there it is a cue to where the acid is, a little
+     * quieter by the distance gain alone. The rumble is quiet in the game's
+     * own mix (-30 to -50 dB, about 2.5 s), and lost under the stage, so it
+     * is played 6 dB up. */
+    {0x08, {0x61A80, 0x61A81}, {-120.f + 245.f / 3.f, -120.f + 245.f * 2.f / 3.f}, 0.f, true, 0.f, 2.f},
+};
+#define SP_STAGE_SOUNDS ((int)(sizeof s_stage_sounds / sizeof s_stage_sounds[0]))
+
+static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
+    float y = r->y;
+    if (r->lava_y) {
+        float speed;
+        Ground_801C4368(&y, &speed);
+    }
+    for (int c = 0; c < 2; c++) {
+        pos[c][0] = r->x[c];
+        pos[c][1] = y;
+        pos[c][2] = r->z;
+    }
+}
+
+static const StageSound* stage_sound(int sound_id) {
+    for (int i = 0; i < SP_STAGE_SOUNDS; i++) {
+        const StageSound* r = &s_stage_sounds[i];
+        if (r->grkind == (int)stage_info.grkind && (r->sfx[0] == sound_id || r->sfx[1] == sound_id)) {
+            return r;
+        }
+    }
+    return NULL;
+}
+
+/* The crowd's emitter: it has no point (pc_spatial_voice_bus). */
+static const char s_crowd_tag;
+#define SP_CROWD ((const void*)&s_crowd_tag)
+
+static bool is_stage_sound(const void* gobj) {
+    const StageSound* r = (const StageSound*)gobj;
+    return r >= s_stage_sounds && r < s_stage_sounds + SP_STAGE_SOUNDS;
+}
+
+/* The emitter of a sound starting now, and its two points. */
+static const void* find_emitter(int sound_id, int group, float pos[2][3]) {
+    if (group == 5 || group == 6) { /* the crowd, though a fighter's proc starts it */
+        memset(pos, 0, sizeof(float) * 6);
+        return SP_CROWD;
+    }
+    if (s_cur != NULL && emitter_pos(s_cur, pos[0])) {
+        memcpy(pos[1], pos[0], sizeof(pos[0]));
+        return s_cur;
+    }
+    const StageSound* r = stage_sound(sound_id);
+    if (r != NULL) {
+        stage_sound_pos(r, pos);
+    }
+    return r;
+}
+
+bool pc_spatial_take_emitter(int sound_id, int group, const void** gobj, float pos[2][3]) {
     *gobj = NULL;
     if (!enabled()) {
         return false;
@@ -137,8 +243,11 @@ bool pc_spatial_take_emitter(const void** gobj, float pos[3]) {
     if (s_override_on) {
         *gobj = s_override_gobj;
         memcpy(pos, s_override_pos, sizeof(s_override_pos));
-    } else if (s_cur != NULL && emitter_pos(s_cur, pos)) {
-        *gobj = s_cur;
+    } else {
+        *gobj = find_emitter(sound_id, group, pos);
+    }
+    if (*gobj == SP_CROWD) {
+        s_starts_crowd++;
     }
     if (*gobj != NULL) {
         s_starts_tagged++;
@@ -148,14 +257,15 @@ bool pc_spatial_take_emitter(const void** gobj, float pos[3]) {
     return *gobj != NULL;
 }
 
-void pc_spatial_note_handle(int32_t handle) {
-    float pos[3];
-    if (!enabled() || s_cur == NULL || !emitter_pos(s_cur, pos)) {
+void pc_spatial_note_handle(int32_t handle, int sound_id, int group) {
+    float pos[2][3];
+    const void* gobj;
+    if (!enabled() || (gobj = find_emitter(sound_id, group, pos)) == NULL) {
         return;
     }
     unsigned i = s_handle_next++ % SP_HANDLES;
     s_handles[i].handle = handle;
-    s_handles[i].gobj = s_cur;
+    s_handles[i].gobj = gobj;
     memcpy(s_handles[i].pos, pos, sizeof(pos));
 }
 
@@ -190,7 +300,7 @@ typedef struct Snapshot {
     int n;
     struct {
         const void* gobj;
-        float pos[3];
+        float pos[2][3]; /* left and right voices (the same for a fighter or an item) */
     } e[SP_EMITTERS];
     int fighters, items; /* stats */
 } Snapshot;
@@ -200,10 +310,23 @@ static Snapshot s_snap;
 
 static void collect(Snapshot* s, int plink, int* count) {
     for (HSD_GObj* g = HSD_GObjPLinkHead[plink]; g != NULL && s->n < SP_EMITTERS; g = g->next) {
-        if (emitter_pos(g, s->e[s->n].pos)) {
+        if (emitter_pos(g, s->e[s->n].pos[0])) {
+            memcpy(s->e[s->n].pos[1], s->e[s->n].pos[0], sizeof(s->e[s->n].pos[0]));
             s->e[s->n].gobj = g;
             s->n++;
             (*count)++;
+        }
+    }
+}
+
+/* This stage's placed sounds, which move with the lava. */
+static void collect_stage(Snapshot* s) {
+    for (int i = 0; i < SP_STAGE_SOUNDS && s->n < SP_EMITTERS; i++) {
+        const StageSound* r = &s_stage_sounds[i];
+        if (r->grkind == (int)stage_info.grkind) {
+            stage_sound_pos(r, s->e[s->n].pos);
+            s->e[s->n].gobj = r;
+            s->n++;
         }
     }
 }
@@ -217,6 +340,7 @@ void pc_spatial_frame(const float view[3][4]) {
     s.n = s.fighters = s.items = 0;
     collect(&s, HSD_GOBJ_PLINK_FIGHTER, &s.fighters);
     collect(&s, HSD_GOBJ_PLINK_ITEM, &s.items);
+    collect_stage(&s);
     memcpy(s.view, view, sizeof(s.view));
     s.xr3d = pc_xr_world_3d();
     s.stamp = now_ns();
@@ -226,11 +350,11 @@ void pc_spatial_frame(const float view[3][4]) {
 
     if (stats_on() && s.stamp - last_log >= 2000000000ull) {
         last_log = s.stamp;
-        pc_log_line("spatial: game: starts tagged=%u plain=%u, rollback-late starts with emitter %u without %u;"
-                    " publishing %d fighters %d items, listener %s",
-                    s_starts_tagged, s_starts_plain, s_late_found, s_late_missed, s.fighters, s.items,
-                    s.xr3d ? "head (XR)" : "camera");
-        s_starts_tagged = s_starts_plain = s_late_found = s_late_missed = 0;
+        pc_log_line("spatial: game: starts tagged=%u (crowd %u) plain=%u, rollback-late starts with emitter %u"
+                    " without %u; publishing %d fighters %d items, listener %s",
+                    s_starts_tagged, s_starts_crowd, s_starts_plain, s_late_found, s_late_missed, s.fighters,
+                    s.items, s.xr3d ? "head (XR)" : "camera");
+        s_starts_tagged = s_starts_crowd = s_starts_plain = s_late_found = s_late_missed = 0;
     }
 }
 
@@ -255,6 +379,8 @@ void pc_spatial_frame(const float view[3][4]) {
 typedef struct SpVoice {
     const void* gobj;
     float pos[3]; /* game units, the newest known */
+    int channel;  /* the emitter's left (0) or right (1) point, or between them (-1) */
+    float boost;  /* over the game's own level (a placed stage sound's) */
     bool tagged;
     uint64_t last_frame; /* the AX frame it last rendered in; state resets after a gap */
     float hist[SP_UP_TAPS]; /* the upsampler's last input samples */
@@ -267,6 +393,31 @@ static IPLContext s_ctx;
 static IPLHRTF s_hrtf;
 static IPLAudioSettings s_settings;
 static bool s_ready;
+
+/* The crowd: its 32 kHz stereo bus this frame, the bus at 48 kHz in delay
+ * lines, and a binaural effect per seat. */
+static float s_crowd_in[SP_AX_FRAME * 2];
+static bool s_crowd_in_used;
+static float s_crowd_up_hist[2][SP_UP_TAPS];
+static float s_crowd_delay[2][SP_CROWD_DELAY];
+static unsigned s_crowd_write;
+static int s_crowd_tail; /* frames left to play out the delay lines */
+static IPLBinauralEffect s_seat_bin[SP_CROWD_SEATS];
+
+/* A stereo pair of virtual speakers: left channel from one, right from the
+ * other. */
+typedef struct Speakers {
+    float up_hist[2][SP_UP_TAPS];
+    float down_hist[2][SP_DOWN_TAPS];
+    IPLBinauralEffect bin[2];
+    float mix;       /* 0: plain stereo; 1: the full SP_PLACED_SHARE blend */
+    float dir[2][3]; /* the speakers' last directions, head space */
+} Speakers;
+static Speakers s_menu_spk;  /* XR menus: beside the screen, the whole mix */
+static Speakers s_music_spk; /* fights: ahead of the stage, the music */
+/* Fight music this frame (32 kHz stereo), apart from the rest of the mix. */
+static float s_music_bus[SP_AX_FRAME * 2];
+static bool s_music_bus_on;
 
 static float s_up[3][SP_UP_TAPS];     /* upsampler phases: offsets 0, 2/3, 1/3 */
 static float s_down[2][SP_DOWN_TAPS]; /* downsampler phases: offsets 0, 1/2 */
@@ -283,7 +434,7 @@ static uint64_t s_frame;        /* AX frames since start */
 
 /* Stats, MELEE_SPATIAL_AUDIO_STATS=1. */
 static struct {
-    unsigned tags, voice_frames, fallback_frames, frames;
+    unsigned tags, voice_frames, fallback_frames, frames, crowd_frames, speaker_frames;
     double energy_in, energy_out;
     uint64_t ns;
     float sample_pos[3];
@@ -331,9 +482,9 @@ static void make_filters(void) {
 }
 
 /* 160 samples at 32 kHz -> 240 at 48 kHz, with the voice's own history. */
-static void upsample(SpVoice* v, const float* in, float* out) {
+static void upsample_hist(float hist[SP_UP_TAPS], const float* in, float* out) {
     float b[SP_UP_TAPS + SP_AX_FRAME];
-    memcpy(b, v->hist, sizeof(v->hist));
+    memcpy(b, hist, sizeof(float) * SP_UP_TAPS);
     memcpy(b + SP_UP_TAPS, in, sizeof(float) * SP_AX_FRAME);
     for (int j = 0; j < SP_FRAME; j++) {
         /* Position SP_UP_HALF + j * 2/3 in b: floor and phase. */
@@ -346,15 +497,20 @@ static void upsample(SpVoice* v, const float* in, float* out) {
         }
         out[j] = acc;
     }
-    memcpy(v->hist, b + SP_AX_FRAME, sizeof(v->hist));
+    memcpy(hist, b + SP_AX_FRAME, sizeof(float) * SP_UP_TAPS);
 }
 
-/* The bus, 240 samples at 48 kHz -> 160 at 32 kHz, added to `out`. */
-static void downsample_bus(float* out) {
+static void upsample(SpVoice* v, const float* in, float* out) {
+    upsample_hist(v->hist, in, out);
+}
+
+/* A 48 kHz stereo bus (240 samples a side) -> 160 frames at 32 kHz, added
+ * to the interleaved `out`. */
+static void downsample(float hist[2][SP_DOWN_TAPS], float bus[2][SP_FRAME], float* out) {
     for (int c = 0; c < 2; c++) {
         float b[SP_DOWN_TAPS + SP_FRAME];
-        memcpy(b, s_bus_hist[c], sizeof(s_bus_hist[c]));
-        memcpy(b + SP_DOWN_TAPS, s_bus[c], sizeof(s_bus[c]));
+        memcpy(b, hist[c], sizeof(float) * SP_DOWN_TAPS);
+        memcpy(b + SP_DOWN_TAPS, bus[c], sizeof(float) * SP_FRAME);
         for (int i = 0; i < SP_AX_FRAME; i++) {
             const int n = SP_DOWN_HALF + (i * 3) / 2;
             const float* taps = s_down[i & 1];
@@ -365,8 +521,12 @@ static void downsample_bus(float* out) {
             }
             out[i * 2 + c] += acc;
         }
-        memcpy(s_bus_hist[c], b + SP_FRAME, sizeof(s_bus_hist[c]));
+        memcpy(hist[c], b + SP_FRAME, sizeof(float) * SP_DOWN_TAPS);
     }
+}
+
+static void downsample_bus(float* out) {
+    downsample(s_bus_hist, s_bus, out);
 }
 
 static void log_cb(IPLLogLevel level, const char* message) {
@@ -421,6 +581,16 @@ void pc_spatial_init(int rate, int frame) {
             return;
         }
     }
+    for (int i = 0; i < SP_CROWD_SEATS + 4; i++) {
+        IPLBinauralEffectSettings bs = {s_hrtf};
+        IPLBinauralEffect* e = i < SP_CROWD_SEATS     ? &s_seat_bin[i] :
+                               i < SP_CROWD_SEATS + 2 ? &s_menu_spk.bin[i - SP_CROWD_SEATS] :
+                                                        &s_music_spk.bin[i - SP_CROWD_SEATS - 2];
+        if (iplBinauralEffectCreate(s_ctx, &s_settings, &bs, e) != IPL_STATUS_SUCCESS) {
+            pc_log_line("spatial: Steam Audio crowd/speaker effect %d failed; off", i);
+            return;
+        }
+    }
     make_filters();
     s_ready = true;
     pc_log_line("spatial: on, Steam Audio %d.%d.%d, HRTF binaural at %d Hz (resampled from %d) in %d-sample frames"
@@ -429,13 +599,22 @@ void pc_spatial_init(int rate, int frame) {
                 SP_FRAME, (now_ns() - t0) / 1e6);
 }
 
-void pc_spatial_voice_tag(int voice, const void* gobj, const float pos[3]) {
+/* A voice's point of its emitter's two. */
+static void channel_pos(const float pos[2][3], int channel, float out[3]) {
+    for (int k = 0; k < 3; k++) {
+        out[k] = channel < 0 ? 0.5f * (pos[0][k] + pos[1][k]) : pos[channel & 1][k];
+    }
+}
+
+void pc_spatial_voice_tag(int voice, const void* gobj, const float pos[2][3], int channel) {
     if (!s_ready || voice < 0 || voice >= SP_VOICES || gobj == NULL) {
         return;
     }
     SpVoice* v = &s_v[voice];
     v->gobj = gobj;
-    memcpy(v->pos, pos, sizeof(v->pos));
+    v->channel = channel;
+    v->boost = is_stage_sound(gobj) ? ((const StageSound*)gobj)->gain : 1.f;
+    channel_pos(pos, channel, v->pos);
     v->tagged = true;
     v->last_frame = 0; /* a new sound: state resets at its first frame */
     st.tags++;
@@ -451,8 +630,13 @@ void pc_spatial_voice_clear(int voice) {
 void pc_spatial_frame_begin(void) {
     s_frame++;
     s_active = false;
+    s_music_bus_on = false;
     if (!s_ready) {
         return;
+    }
+    if (s_crowd_in_used) {
+        memset(s_crowd_in, 0, sizeof(s_crowd_in));
+        s_crowd_in_used = false;
     }
     pthread_mutex_lock(&s_snap_mutex);
     s_audio_snap = s_snap;
@@ -483,24 +667,39 @@ void pc_spatial_frame_begin(void) {
         return;
     }
     s_active = true;
-    /* Follow each tagged voice's emitter. One no longer published (an item
-     * gone, a fighter KO'd off the lists) keeps where it was last seen. */
+    memset(s_music_bus, 0, sizeof(s_music_bus));
+    s_music_bus_on = true;
+    /* Follow each tagged voice's emitter (Brinstar's lava rises and falls
+     * under its sound). One no longer published (an item gone, a fighter
+     * KO'd off the lists) keeps where it was last seen. */
     for (int i = 0; i < SP_VOICES; i++) {
         SpVoice* v = &s_v[i];
-        if (!v->tagged) {
+        if (!v->tagged || v->gobj == SP_CROWD) {
             continue;
         }
         for (int k = 0; k < s->n; k++) {
             if (s->e[k].gobj == v->gobj) {
-                memcpy(v->pos, s->e[k].pos, sizeof(v->pos));
+                channel_pos(s->e[k].pos, v->channel, v->pos);
                 break;
             }
         }
     }
 }
 
+float* pc_spatial_voice_bus(int voice) {
+    if (voice < 0 || voice >= SP_VOICES || !s_v[voice].tagged || s_v[voice].gobj != SP_CROWD) {
+        return NULL;
+    }
+    if (!s_active) {
+        st.fallback_frames++;
+        return NULL;
+    }
+    s_crowd_in_used = true;
+    return s_crowd_in;
+}
+
 bool pc_spatial_voice_active(int voice) {
-    if (voice < 0 || voice >= SP_VOICES || !s_v[voice].tagged) {
+    if (voice < 0 || voice >= SP_VOICES || !s_v[voice].tagged || s_v[voice].gobj == SP_CROWD) {
         return false;
     }
     if (!s_active) {
@@ -564,8 +763,8 @@ void pc_spatial_render(int voice, const float* mono) {
     iplBinauralEffectApply(v->bin, &bp, &inb, &outb);
 
     for (int i = 0; i < SP_FRAME; i++) {
-        left[i] *= SP_MAKEUP; /* past the direct effect, whose gain tops out at 1 */
-        right[i] *= SP_MAKEUP;
+        left[i] *= SP_MAKEUP * v->boost; /* past the direct effect, whose gain tops out at 1 */
+        right[i] *= SP_MAKEUP * v->boost;
         s_bus[0][i] += left[i];
         s_bus[1][i] += right[i];
     }
@@ -592,9 +791,85 @@ void pc_spatial_render(int voice, const float* mono) {
     }
 }
 
+/* A direction fixed to the stage's axes (x right, y up, +z toward the
+ * player; azimuth from straight at the stage, negative left), in head
+ * space: the listener's rotation, unscaled. */
+static IPLVector3 stage_direction(float azimuth_deg, float elevation_deg) {
+    const float deg = 3.14159265f / 180.f;
+    const float az = azimuth_deg * deg, el = elevation_deg * deg;
+    const float g[3] = {sinf(az) * cosf(el), sinf(el), -cosf(az) * cosf(el)};
+    float h[3];
+    for (int r = 0; r < 3; r++) {
+        h[r] = (s_listener[r][0] * g[0] + s_listener[r][1] * g[1] + s_listener[r][2] * g[2]) / s_scale;
+    }
+    IPLVector3 dir = {h[0], h[1], h[2]};
+    return dir;
+}
+
+/* The crowd's bus, from its seats, into the positional bus. */
+static void crowd_render(void) {
+    float up[2][SP_FRAME];
+    for (int c = 0; c < 2; c++) {
+        float in[SP_AX_FRAME];
+        for (int i = 0; i < SP_AX_FRAME; i++) {
+            in[i] = s_crowd_in[i * 2 + c];
+        }
+        upsample_hist(s_crowd_up_hist[c], in, up[c]);
+        for (int i = 0; i < SP_FRAME; i++) {
+            s_crowd_delay[c][(s_crowd_write + i) % SP_CROWD_DELAY] = up[c][i];
+        }
+    }
+    const float seat_gain = SP_MAKEUP / sqrtf(SP_CROWD_SEATS / 2.f); /* a side's power over its seats */
+    for (int k = 0; k < SP_CROWD_SEATS; k++) {
+        const IPLVector3 dir = stage_direction(s_seats[k].azimuth, SP_CROWD_ELEVATION);
+        const unsigned d = (unsigned)(s_seats[k].delay_ms * (SP_RATE / 1000.f));
+        float in[SP_FRAME], left[SP_FRAME], right[SP_FRAME];
+        for (int i = 0; i < SP_FRAME; i++) {
+            in[i] = s_crowd_delay[s_seats[k].side][(s_crowd_write + SP_CROWD_DELAY - d + i) % SP_CROWD_DELAY];
+        }
+        float* in_ch[1] = {in};
+        float* out_ch[2] = {left, right};
+        IPLAudioBuffer inb = {1, SP_FRAME, in_ch};
+        IPLAudioBuffer outb = {2, SP_FRAME, out_ch};
+        IPLBinauralEffectParams bp;
+        memset(&bp, 0, sizeof(bp));
+        bp.direction = dir;
+        bp.interpolation = IPL_HRTFINTERPOLATION_NEAREST;
+        bp.spatialBlend = 1.f;
+        bp.hrtf = s_hrtf;
+        iplBinauralEffectApply(s_seat_bin[k], &bp, &inb, &outb);
+        for (int i = 0; i < SP_FRAME; i++) {
+            s_bus[0][i] += left[i] * seat_gain;
+            s_bus[1][i] += right[i] * seat_gain;
+        }
+    }
+    s_crowd_write = (s_crowd_write + SP_FRAME) % SP_CROWD_DELAY;
+    s_bus_used = true;
+    s_bus_quiet = 0;
+}
+
 void pc_spatial_frame_end(float* out) {
     if (!s_ready) {
         return;
+    }
+    /* The crowd plays out its delay lines for a while after its last voice
+     * (silence going in), then stops costing anything. */
+    if (s_active && s_crowd_in_used) {
+        s_crowd_tail = (int)(SP_CROWD_DELAY / SP_FRAME) + 1;
+    }
+    if (s_active && s_crowd_tail > 0) {
+        const uint64_t t0 = now_ns();
+        crowd_render();
+        s_crowd_tail--;
+        st.crowd_frames++;
+        st.ns += now_ns() - t0;
+    } else if (s_crowd_tail > 0) {
+        s_crowd_tail = 0; /* the fight stopped drawing: start clean next time */
+        memset(s_crowd_delay, 0, sizeof(s_crowd_delay));
+        memset(s_crowd_up_hist, 0, sizeof(s_crowd_up_hist));
+        for (int k = 0; k < SP_CROWD_SEATS; k++) {
+            iplBinauralEffectReset(s_seat_bin[k]);
+        }
     }
     /* The bus drains through the downsampler for its length after the last
      * voice, then stops costing anything. */
@@ -621,14 +896,126 @@ void pc_spatial_frame_end(float* out) {
     }
     const double ratio = st.energy_in > 0.0 ? 10.0 * log10(st.energy_out / st.energy_in) : 0.0;
     pc_log_line("spatial: audio: %u voices tagged, %u voice-frames spatialized, %u fell back to stereo, %u tagged now;"
+                " crowd %u frames, menu speakers %u;"
                 " %.1f us per AX frame (%.2f%% of its 5 ms); out/in %+.1f dB; e.g. at %.2f,%.2f,%.2f m gain %.2f",
-                st.tags, st.voice_frames, st.fallback_frames, active, st.ns / 1e3 / 400.0,
+                st.tags, st.voice_frames, st.fallback_frames, active, st.crowd_frames, st.speaker_frames,
+                st.ns / 1e3 / 400.0,
                 st.ns / 1e9 / 400.0 / 0.005 * 100.0, ratio, st.sample_pos[0], st.sample_pos[1],
                 st.sample_pos[2], st.sample_gain);
-    st.tags = st.voice_frames = st.fallback_frames = 0;
+    st.tags = st.voice_frames = st.fallback_frames = st.crowd_frames = st.speaker_frames = 0;
     st.energy_in = st.energy_out = 0.0;
     st.ns = 0;
     st.sampled = false;
+}
+
+float* pc_spatial_music_bus(void) {
+    return s_ready && s_music_bus_on ? s_music_bus : NULL;
+}
+
+/* The interleaved 32 kHz stereo `in`, plain and from the pair at `sp->dir`,
+ * ramping sp->mix toward `want`: added to `out`, or replacing it when `out`
+ * is `in`. */
+static void speakers_blend(Speakers* sp, bool want, const float* in, float* out) {
+    if (sp->mix <= 0.f) { /* coming in: start the speakers clean */
+        memset(sp->up_hist, 0, sizeof(sp->up_hist));
+        memset(sp->down_hist, 0, sizeof(sp->down_hist));
+        iplBinauralEffectReset(sp->bin[0]);
+        iplBinauralEffectReset(sp->bin[1]);
+    }
+    float bus[2][SP_FRAME];
+    memset(bus, 0, sizeof(bus));
+    for (int k = 0; k < 2; k++) {
+        float in32[SP_AX_FRAME], up[SP_FRAME], left[SP_FRAME], right[SP_FRAME];
+        for (int i = 0; i < SP_AX_FRAME; i++) {
+            in32[i] = in[i * 2 + k];
+        }
+        upsample_hist(sp->up_hist[k], in32, up);
+        float* in_ch[1] = {up};
+        float* out_ch[2] = {left, right};
+        IPLAudioBuffer inb = {1, SP_FRAME, in_ch};
+        IPLAudioBuffer outb = {2, SP_FRAME, out_ch};
+        IPLBinauralEffectParams bp;
+        memset(&bp, 0, sizeof(bp));
+        bp.direction.x = sp->dir[k][0];
+        bp.direction.y = sp->dir[k][1];
+        bp.direction.z = sp->dir[k][2];
+        bp.interpolation = IPL_HRTFINTERPOLATION_NEAREST;
+        bp.spatialBlend = 1.f;
+        bp.hrtf = s_hrtf;
+        iplBinauralEffectApply(sp->bin[k], &bp, &inb, &outb);
+        for (int i = 0; i < SP_FRAME; i++) {
+            bus[0][i] += left[i] * SP_MAKEUP;
+            bus[1][i] += right[i] * SP_MAKEUP;
+        }
+    }
+    float placed[SP_AX_FRAME * 2];
+    memset(placed, 0, sizeof(placed));
+    downsample(sp->down_hist, bus, placed);
+    /* By power: plain keeps 1 - SP_PLACED_SHARE of it, the pair the rest;
+     * sp->mix ramps the blend in and out over SP_SPEAKER_FADE frames. */
+    const float dry = sqrtf(1.f - SP_PLACED_SHARE), wet = sqrtf(SP_PLACED_SHARE);
+    const float from = sp->mix;
+    float to = from + (want ? 1.f : -1.f) / SP_SPEAKER_FADE;
+    to = to < 0.f ? 0.f : to > 1.f ? 1.f : to;
+    for (int i = 0; i < SP_AX_FRAME; i++) {
+        const float m = from + (to - from) * (float)(i + 1) / SP_AX_FRAME;
+        const float gd = 1.f + m * (dry - 1.f), gw = m * wet;
+        for (int c = 0; c < 2; c++) {
+            const float y = gd * in[i * 2 + c] + gw * placed[i * 2 + c];
+            if (in == out) {
+                out[i * 2 + c] = y; /* the whole mix, replaced */
+            } else {
+                out[i * 2 + c] += y; /* a bus, added */
+            }
+        }
+    }
+    sp->mix = to;
+}
+
+void pc_spatial_output(float* out) {
+    if (!s_ready) {
+        return;
+    }
+    const uint64_t t0 = now_ns();
+    bool used = false;
+    /* Fights: the music, from ahead of the stage. */
+    if (s_music_bus_on) {
+        for (int k = 0; k < 2; k++) {
+            const IPLVector3 d = stage_direction(k == 0 ? -SP_MUSIC_AZIMUTH : SP_MUSIC_AZIMUTH, SP_MUSIC_ELEVATION);
+            s_music_spk.dir[k][0] = d.x;
+            s_music_spk.dir[k][1] = d.y;
+            s_music_spk.dir[k][2] = d.z;
+        }
+        speakers_blend(&s_music_spk, true, s_music_bus, out);
+        used = true;
+    } else {
+        s_music_spk.mix = 0.f; /* the music is back in the plain mix */
+    }
+#ifdef AURORA_ENABLE_OPENXR
+    /* XR menus: no fight is drawing and the flat screen is up. */
+    float c[3], r[3], w;
+    const bool want = !s_active && aurora_xr_audio_screen(c, r, &w);
+    if (want) {
+        for (int k = 0; k < 2; k++) {
+            const float side = (k == 0 ? -1.f : 1.f) * (0.5f * w + SP_SPEAKER_GAP);
+            float p[3] = {c[0] + r[0] * side, c[1] + r[1] * side, c[2] + r[2] * side};
+            const float d = sqrtf(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+            if (d > 1e-4f && isfinite(d)) {
+                for (int i = 0; i < 3; i++) {
+                    s_menu_spk.dir[k][i] = p[i] / d;
+                }
+            }
+        }
+    }
+    if (want || s_menu_spk.mix > 0.f) {
+        speakers_blend(&s_menu_spk, want, out, out);
+        st.speaker_frames++;
+        used = true;
+    }
+#endif
+    if (used) {
+        st.ns += now_ns() - t0;
+    }
 }
 
 #endif

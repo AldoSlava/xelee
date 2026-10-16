@@ -137,6 +137,11 @@ bool aurora_xr_active(void);
  * is not tracked. Any thread; cheap (two short locks), so an audio thread
  * may call it every audio frame. */
 bool aurora_xr_audio_listener(float m[3][4]);
+/* For audio in the menus: while the flat screen is shown (not a fight in 3D),
+ * its center, its unit right axis (both in the head's own space, as for
+ * aurora_xr_audio_listener) and its width in meters. False otherwise, or
+ * while the head pose is not tracked. Any thread; cheap. */
+bool aurora_xr_audio_screen(float center[3], float right[3], float* width);
 void aurora_xr_camera(int category, const float view[3][4]);
 
 /* Extra placement for the following AURORA_XR_WORLD draws in the 3D view

@@ -651,6 +651,8 @@ static void render_frame(float* out) {
 
     /* 2. Process voice mixing and aux effect routing under audio_lock. */
     pc_spatial_frame_begin();
+    /* In a fight the music mixes apart, to be placed (pc/spatial_audio.h). */
+    float* music_bus = pc_spatial_music_bus();
     int n_used = 0, n_running = 0, n_stopped = 0, n_zero_mix = 0;
     int n_zero_ratio = 0, n_loop = 0, n_old = 0;
     for (int i = 0; i < AX_VOICES; i++) {
@@ -694,7 +696,13 @@ static void render_frame(float* out) {
         if (v->vpb.pb.addr.loopFlag) {
             n_loop++;
         }
-        if (pc_spatial_voice_active(i)) {
+        float* bus = pc_spatial_voice_bus(i);
+        if (music_bus != NULL && is_music_stream(v)) {
+            mix_voice(v, music_bus, false);
+        } else if (bus != NULL) {
+            /* The crowd: into its own stereo bus, heard all around. */
+            mix_voice(v, bus, false);
+        } else if (pc_spatial_voice_active(i)) {
             /* Positional: mixed mono into its own frame, then placed. */
             float dry[AX_FRAME * 2];
             float mono[AX_FRAME];
@@ -719,8 +727,10 @@ static void render_frame(float* out) {
 
     /* 4. Music streaming and SIMD clamping run completely lock-free. */
     if (pc_music_stream_mix) {
-        pc_music_stream_mix(out, NULL, AX_FRAME);
+        pc_music_stream_mix(music_bus != NULL ? music_bus : out, NULL, AX_FRAME);
     }
+    /* The fight's music back in, partly placed; the XR menus' speakers. */
+    pc_spatial_output(out);
     /* MELEE_AUDIO_STATS=1: voice census against the output clock, so a
      * silent stretch in MELEE_AUDIO_DUMP can be explained -- were there no
      * voices, were they all stopped, or were they running at zero volume?
