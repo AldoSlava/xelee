@@ -248,6 +248,15 @@ static void fillDebugVs(GameModeState* state, UNUSED bool dummy)
     }
     /* MELEE_DEBUG_VS_CPU_LEVEL=<1-9>: the CPUs' level (strong CPUs end a
      * stock match quickly, for runs that need its results screen). */
+    /* MELEE_DEBUG_VS_TIME=<1-99>: the time match's length in minutes (a
+     * test reaching TIME! on cue). */
+    if (getenv("MELEE_DEBUG_VS_TIME") != NULL) {
+        int minutes = atoi(getenv("MELEE_DEBUG_VS_TIME"));
+        if (minutes >= 1 && minutes <= 99) {
+            start->rules.timer_enabled = 1;
+            start->rules.time_limit = (u32) minutes * 60; /* seconds */
+        }
+    }
     if (getenv("MELEE_DEBUG_VS_CPU_LEVEL") != NULL) {
         int level = atoi(getenv("MELEE_DEBUG_VS_CPU_LEVEL"));
         if (level >= 1 && level <= 9) {

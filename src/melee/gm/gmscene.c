@@ -3,6 +3,7 @@
 #include "pc/net.h"
 #include "pc/pc.h"
 #include "pc/slp.h"
+#include "pc/stage_ambience.h"
 #include "pc/widescreen.h"
 #include "pc/xr_place.h"
 #include "pc/xr_scene.h"
@@ -333,6 +334,7 @@ static bool gm_RunSimTick(void (*on_frame)(void), struct gm_80479D58_t* temp_r25
     HSD_GObj_RunProcs();
 #ifdef TARGET_PC
     pc_slp_tick_end(temp_r25->unk_10.unk_28);
+    pc_ambience_tick(temp_r25->unk_10.unk_28);
 #endif
     if (temp_r25->unk_0 != -2) {
         temp_r25->unk_0++;

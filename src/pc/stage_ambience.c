@@ -137,12 +137,23 @@ bool pc_ambience_kongo_jungle(void) {
     return true;
 }
 
+static bool s_frozen; /* game thread: the last tick held the stage's procs */
+
+void pc_ambience_tick(uint64_t proc_mask) {
+    s_frozen = (proc_mask >> HSD_GOBJ_PLINK_GROUND) & 1u;
+}
+
 void pc_ambience_frame(void) {
     if (!enabled()) {
         return;
     }
-    /* None while the stage is held for placing: they start with the fight. */
-    const int kind = pc_xr_place_holding()                 ? AMB_NONE
+    /* None while the stage is held for placing: they start with the fight.
+     * None once it's frozen for GAME! or TIME! (frozen in a pause, they
+     * duck with the music instead). */
+    float duck;
+    __atomic_load(&s_duck_target, &duck, __ATOMIC_RELAXED);
+    const bool over = s_frozen && duck >= 1.f;
+    const int kind = pc_xr_place_holding() || over         ? AMB_NONE
                      : stage_info.grkind == Gr_Kind_Corneria ? AMB_WIND
                      : stage_info.grkind == Gr_Kind_Kongo  ? AMB_FALLS
                      : stage_info.grkind == Gr_Kind_Izumi  ? AMB_FOUNTAIN

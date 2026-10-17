@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,6 +22,11 @@ void pc_ambience_set_enabled(bool on);
 /* Game thread, once per drawn fight frame (cm/camera.c): which stage's
  * ambience plays. Read only. */
 void pc_ambience_frame(void);
+
+/* Game thread, after each tick's procs: the GObj p_link mask they ran
+ * under. The stage's list masked outside a pause is GAME! or TIME!: the
+ * stage stands frozen, and its sounds fade out. */
+void pc_ambience_tick(uint64_t proc_mask);
 
 /* Game thread, as Kongo Jungle loads (grKongo_801D523C): true when the
  * expanded stage sounds take over its jungle sound (0x5A551, a recording
