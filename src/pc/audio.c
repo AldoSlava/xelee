@@ -22,6 +22,7 @@
 #include "pc/music_stream.h"
 #include "pc/spatial_audio.h"
 #include "pc/stage_ambience.h"
+#include "pc/stage_mix.h"
 #include <dolphin/ar.h>
 #include <dolphin/ax.h>
 #include <dolphin/axfx.h>
@@ -702,6 +703,7 @@ static void render_frame(float* out) {
     OSRestoreInterrupts(intr);
 
     /* 2. Process voice mixing and aux effect routing under audio_lock. */
+    pc_stage_mix_begin(AX_RATE);
     pc_spatial_frame_begin();
     /* In a fight the music mixes apart, to be placed (pc/spatial_audio.h). */
     float* music_bus = pc_spatial_music_bus();

@@ -45,6 +45,7 @@
 #include <initializer_list>
 #include <cstdio>
 #include <cstdlib>
+#include <complex>
 #include <cstring>
 #include <condition_variable>
 #include <deque>
@@ -52,6 +53,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -4855,6 +4857,14 @@ void build_placing_layers(PlacingLayers& out, int mode) {
 // spatial audio on, or bypassed for every sound to play plain stereo; the
 // music's level, to hear the rest without it.
 //
+// Stage, which the game applies too (aurora_xr_dev_mix; src/pc/stage_mix.c):
+// a mixer for the current stage's own sounds, a channel at a time picked
+// from the row of its names: its level, and a three-band parametric EQ on a
+// graph of the channel's response, each band a handle dragged across
+// (frequency) and up and down (gain), the last one grabbed taking the Q
+// slider. Reset puts the channel back. Each change is logged as a
+// MELEE_STAGE_MIX value for the whole stage, which the game reads at launch.
+//
 // AURORA_XR_GRADE_PANEL=1, its first name, is both: the panel and the grade.
 // AURORA_XR_DEV_TOOLS_POS "dx,dy,dz,width" (0.3,-0.15,-0.55,0.36): where it
 // floats against the head, in meters.
@@ -4926,6 +4936,7 @@ constexpr Glyph kGlyphs[] = {
     {'.', ".........................##...##..."}, {'-', "...............#####..............."},
     {'x', "..........#...#.#.#...#...#.#.#...#"}, {':', "......##...##.......##...##........"},
     {'_', "..............................#####"}, {'=', "..........#####.....#####.........."},
+    {'+', ".....""..#..""..#..""#####""..#..""..#.."".....",},
 };
 
 using Rgba = std::array<uint8_t, 4>;
@@ -4963,7 +4974,7 @@ Rgba linear_rgba(float r, float g, float b) {
           static_cast<uint8_t>(std::lround(srgb_encode(b) * 255.f)), 255};
 }
 
-constexpr int kPanelW = 768, kPanelH = 456;
+constexpr int kPanelW = 768, kPanelH = 480;
 constexpr int kTrackX0 = 170, kTrackX1 = 590, kTrackH = 30;
 constexpr int kRowY0 = 76, kRowStep = 86;
 constexpr int kResetX0 = 604, kResetX1 = 750, kResetY0 = 10, kResetY1 = 52;
@@ -4972,8 +4983,8 @@ constexpr std::array<const char*, kSliders> kSliderNames{"HUE", "TINT", "LIGHT",
 constexpr std::array<float, kSliders> kSliderMax{360.f, 1.f, 1.f, 1.5f};
 
 // The pages, as tabs left of Reset.
-enum { kPageTint, kPageAudio, kPages };
-constexpr std::array<const char*, kPages> kPageNames{"TINT", "AUDIO"};
+enum { kPageTint, kPageAudio, kPageMix, kPages };
+constexpr std::array<const char*, kPages> kPageNames{"TINT", "AUDIO", "STAGE"};
 constexpr int kTabX0 = 10, kTabW = 150, kTabGap = 10;
 
 // The Audio page: choices, a row each.
@@ -4982,9 +4993,22 @@ constexpr int kAudioRowY0 = 80, kAudioRowStep = 70, kChoiceX1 = 750;
 constexpr std::array<const char*, kAudioRows> kAudioNames{"SPATIAL", "MUSIC"};
 constexpr std::array<const char*, 2> kSpatialNames{"ON", "OFF"};
 
+// The Stage page: the channels' names in a row, the channel's level, the
+// graph of its EQ (20 Hz to 16 kHz across, +-18 dB up and down) with a
+// handle a band, and the Q of the band last grabbed.
+constexpr int kMixChanY0 = 64, kMixChanY1 = 102, kMixLevelY = 122, kMixQY = 390;
+constexpr int kGraphX0 = 64, kGraphX1 = 750, kGraphY0 = 172, kGraphY1 = 352;
+constexpr float kGraphFMin = 20.f, kGraphFMax = 16000.f, kGraphDb = 18.f;
+constexpr float kMixLevelMax = 18.f, kMixQMin = 0.3f, kMixQMax = 10.f;
+constexpr float kMixRate = 32000.f; // the game's mixing rate (AX's), for the graph
+constexpr std::array<const char*, AURORA_XR_MIX_BANDS> kBandNames{"LOW", "MID", "HIGH"};
+constexpr std::array<Rgba, AURORA_XR_MIX_BANDS> kBandColors{Rgba{255, 170, 80, 255}, Rgba{120, 220, 140, 255},
+                                                            Rgba{190, 150, 255, 255}};
+
 // What's under a laser: a tint slider (kHue..kSat), an Audio row (kAudio +
-// row), a tab (kTab + page), Reset, or -1.
-constexpr int kAudio = 10, kTab = 20, kReset = 30;
+// row), a tab (kTab + page), Reset, a Stage channel (kMixChan + channel),
+// its level, its graph or its Q, or -1.
+constexpr int kAudio = 10, kTab = 20, kReset = 30, kMixChan = 40, kMixLevel = 50, kMixGraph = 51, kMixQ = 52;
 
 struct DevPanel {
   bool shown = false;
@@ -4997,6 +5021,9 @@ struct DevPanel {
   int hover = -1;      // a target
   int active = -1;     // the slider being dragged (a target)
   int activeHand = -1; // the hand dragging it
+  int mixChannel = 0;  // the Stage page's channel
+  int mixBand = 1;     // its band last grabbed, which the Q slider sets
+  float grabDx = 0.f, grabDy = 0.f; // from the laser to the grabbed handle, in pixels
   bool dirty = true;   // the picture needs drawing
   std::chrono::steady_clock::time_point drawn{};
   PlacingImage image;
@@ -5010,6 +5037,20 @@ struct DevAudio {
   bool have = false;
   AuroraXrDevAudio defaults{}, value{};
 } g_devAudio;
+
+// The Stage page's mixer (aurora_xr_dev_mix_stage): each stage's channels,
+// the game's settings and the panel's, which the game reads
+// (aurora_xr_dev_mix); `stage` the one playing.
+struct DevMixStage {
+  int count = 0;
+  std::array<std::string, AURORA_XR_MIX_CHANNELS> names;
+  std::array<AuroraXrMixChannel, AURORA_XR_MIX_CHANNELS> defaults{}, value{};
+};
+struct DevMix {
+  std::mutex mutex;
+  int stage = -1;
+  std::map<int, DevMixStage> stages;
+} g_devMix;
 
 bool dev_tools_wanted() {
   static const bool on = env_flag("AURORA_XR_DEV_TOOLS", env_flag("AURORA_XR_GRADE_PANEL", false));
@@ -5143,14 +5184,199 @@ void draw_audio(Canvas& c) {
   c.text(18, kAudioRowY0 + kAudioRows * kAudioRowStep + 50, 3, "MUSIC: PERCENT OF ITS USUAL LEVEL.", dim);
 }
 
+// The Stage page's scales.
+float graph_freq(float px) {
+  const float t = std::clamp((px - kGraphX0) / static_cast<float>(kGraphX1 - kGraphX0), 0.f, 1.f);
+  return kGraphFMin * std::pow(kGraphFMax / kGraphFMin, t);
+}
+float graph_x(float freq) {
+  return kGraphX0 + std::log(std::clamp(freq, kGraphFMin, kGraphFMax) / kGraphFMin) /
+                        std::log(kGraphFMax / kGraphFMin) * (kGraphX1 - kGraphX0);
+}
+float graph_db(float py) {
+  return (0.5f - (py - kGraphY0) / static_cast<float>(kGraphY1 - kGraphY0)) * 2.f * kGraphDb;
+}
+float graph_y(float db) { return kGraphY0 + (0.5f - db / (2.f * kGraphDb)) * (kGraphY1 - kGraphY0); }
+float level_t(float db) { return (db - AURORA_XR_MIX_OFF) / (kMixLevelMax - AURORA_XR_MIX_OFF); }
+float q_t(float q) { return std::log(q / kMixQMin) / std::log(kMixQMax / kMixQMin); }
+
+std::string mix_freq(float f) { return f < 1000.f ? fmt::format("{:.0f}", f) : fmt::format("{:.1f}K", f / 1000.f); }
+std::string mix_db(float db) { return fmt::format("{:+.1f}", db); }
+std::string mix_level(float db) { return db <= AURORA_XR_MIX_OFF ? std::string{"OFF"} : mix_db(db); }
+
+// A band's filter as the game makes it (RBJ's cookbook; src/pc/stage_mix.c)
+// and its response in dB at `f`.
+struct MixBiquad {
+  double b0, b1, b2, a1, a2;
+};
+MixBiquad mix_biquad(int kind, const AuroraXrMixBand& m) {
+  const double rate = kMixRate;
+  const double f = std::clamp(static_cast<double>(m.freq), 10.0, rate * 0.45);
+  const double q = std::max(static_cast<double>(m.q), 0.1);
+  const double A = std::pow(10.0, m.gain / 40.0);
+  const double w0 = 6.283185307179586 * f / rate;
+  const double cw = std::cos(w0), alpha = std::sin(w0) / (2.0 * q);
+  double b0, b1, b2, a0, a1, a2;
+  if (kind == 1) {
+    b0 = 1.0 + alpha * A, b1 = -2.0 * cw, b2 = 1.0 - alpha * A;
+    a0 = 1.0 + alpha / A, a1 = -2.0 * cw, a2 = 1.0 - alpha / A;
+  } else {
+    const double sa = 2.0 * std::sqrt(A) * alpha, s = kind == 0 ? 1.0 : -1.0;
+    b0 = A * ((A + 1.0) - s * (A - 1.0) * cw + sa);
+    b1 = s * 2.0 * A * ((A - 1.0) - s * (A + 1.0) * cw);
+    b2 = A * ((A + 1.0) - s * (A - 1.0) * cw - sa);
+    a0 = (A + 1.0) + s * (A - 1.0) * cw + sa;
+    a1 = -s * 2.0 * ((A - 1.0) + s * (A + 1.0) * cw);
+    a2 = (A + 1.0) + s * (A - 1.0) * cw - sa;
+  }
+  return {b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
+}
+double mix_response_db(const MixBiquad& q, double f) {
+  const std::complex<double> z1 = std::polar(1.0, -6.283185307179586 * f / kMixRate), z2 = z1 * z1;
+  return 20.0 * std::log10(std::abs(q.b0 + q.b1 * z1 + q.b2 * z2) / std::abs(1.0 + q.a1 * z1 + q.a2 * z2));
+}
+
+// Each change, as the MELEE_STAGE_MIX value for the stage that keeps it.
+void mix_log() {
+  std::lock_guard lock{g_devMix.mutex};
+  const auto it = g_devMix.stages.find(g_devMix.stage);
+  if (it == g_devMix.stages.end() || it->second.count == 0)
+    return;
+  std::string env;
+  for (int c = 0; c < it->second.count; ++c) {
+    std::string name = it->second.names[c];
+    std::replace(name.begin(), name.end(), ' ', '_');
+    const AuroraXrMixChannel& m = it->second.value[c];
+    env += fmt::format("{}{}={:.1f}", c > 0 ? ";" : "", name, std::max(m.level, AURORA_XR_MIX_OFF));
+    for (const AuroraXrMixBand& b : m.band)
+      env += fmt::format("/{:.0f},{:.1f},{:.2f}", b.freq, b.gain, b.q);
+  }
+  Log.info("Dev tools: stage 0x{:02X} mix: MELEE_STAGE_MIX={}", g_devMix.stage, env);
+}
+
+void draw_mix(Canvas& c) {
+  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255}, lit{120, 200, 255, 255};
+  int stage;
+  DevMixStage st;
+  bool have;
+  {
+    std::lock_guard lock{g_devMix.mutex};
+    stage = g_devMix.stage;
+    const auto it = g_devMix.stages.find(stage);
+    have = it != g_devMix.stages.end();
+    if (have)
+      st = it->second;
+  }
+  if (!have) {
+    c.text(18, kMixChanY0 + 10, 3, "NO STAGE FROM THE GAME YET.", dim);
+    return;
+  }
+  if (st.count == 0) {
+    c.text(18, kMixChanY0 + 10, 3, "NOTHING TO MIX ON THIS STAGE.", dim);
+    return;
+  }
+  const int ch = std::clamp(P.mixChannel, 0, st.count - 1);
+  const int band = std::clamp(P.mixBand, 0, AURORA_XR_MIX_BANDS - 1);
+  const AuroraXrMixChannel& m = st.value[ch];
+
+  // The channels.
+  const int w = (kChoiceX1 - 18) / st.count;
+  for (int i = 0; i < st.count; ++i) {
+    const int x0 = 18 + i * w;
+    const bool on = i == ch;
+    c.fill(x0 + 2, kMixChanY0, x0 + w - 2, kMixChanY1,
+           on ? Rgba{70, 110, 150, 255} : P.hover == kMixChan + i ? Rgba{60, 66, 80, 255} : Rgba{36, 40, 50, 255});
+    const int tw = static_cast<int>(st.names[i].size()) * 18 - 3;
+    c.text(x0 + (w - tw) / 2, kMixChanY0 + 9, 3, st.names[i], on ? text : dim);
+  }
+
+  // Its level.
+  {
+    const int y = kMixLevelY;
+    c.text(18, y + 4, 3, "LEVEL", P.active == kMixLevel ? lit : P.hover == kMixLevel ? text : dim);
+    const int kx = kTrackX0 + static_cast<int>(std::lround(std::clamp(level_t(m.level), 0.f, 1.f) *
+                                                           (kTrackX1 - kTrackX0)));
+    const int k0 = kTrackX0 + static_cast<int>(std::lround(level_t(0.f) * (kTrackX1 - kTrackX0)));
+    c.fill(kTrackX0, y + 10, kTrackX1, y + kTrackH - 10, {52, 56, 68, 255});
+    c.fill(kTrackX0, y + 10, kx, y + kTrackH - 10, {70, 110, 150, 255});
+    c.fill(k0 - 1, y + 4, k0 + 1, y + kTrackH - 4, {150, 156, 168, 255}); // 0 dB
+    c.fill(kx - 6, y - 9, kx + 6, y + kTrackH + 9, {10, 10, 12, 255});
+    c.fill(kx - 3, y - 6, kx + 3, y + kTrackH + 6, P.active == kMixLevel ? lit : Rgba{250, 250, 250, 255});
+    c.text(kTrackX1 + 22, y + 4, 3, mix_level(m.level), text);
+  }
+
+  // The graph: its grid, the response, the handles.
+  c.fill(kGraphX0, kGraphY0, kGraphX1, kGraphY1, P.hover == kMixGraph ? Rgba{30, 34, 44, 255} : Rgba{26, 29, 37, 255});
+  for (const float f : {50.f, 100.f, 200.f, 500.f, 1000.f, 2000.f, 5000.f, 10000.f}) {
+    const int x = static_cast<int>(std::lround(graph_x(f)));
+    const bool major = f == 100.f || f == 1000.f || f == 10000.f;
+    c.fill(x, kGraphY0, x + 1, kGraphY1, major ? Rgba{62, 68, 82, 255} : Rgba{42, 46, 58, 255});
+    if (major) {
+      const std::string label = f == 100.f ? "100" : f == 1000.f ? "1K" : "10K";
+      c.text(x - static_cast<int>(label.size()) * 6 + 1, kGraphY1 + 5, 2, label, dim);
+    }
+  }
+  for (const float db : {-12.f, -6.f, 0.f, 6.f, 12.f}) {
+    const int y = static_cast<int>(std::lround(graph_y(db)));
+    c.fill(kGraphX0, y, kGraphX1, y + 1, db == 0.f ? Rgba{80, 86, 100, 255} : Rgba{42, 46, 58, 255});
+    if (db == 0.f || db == 12.f || db == -12.f) {
+      const std::string label = db == 0.f ? "0" : db > 0.f ? "+12" : "-12";
+      c.text(kGraphX0 - 8 - static_cast<int>(label.size()) * 12, y - 7, 2, label, dim);
+    }
+  }
+  std::array<MixBiquad, AURORA_XR_MIX_BANDS> bq;
+  for (int b = 0; b < AURORA_XR_MIX_BANDS; ++b)
+    bq[b] = mix_biquad(b, m.band[b]);
+  const int y0 = static_cast<int>(std::lround(graph_y(0.f)));
+  int prev = -1;
+  for (int x = kGraphX0; x < kGraphX1; ++x) {
+    double db = 0.0;
+    for (const MixBiquad& q : bq)
+      db += mix_response_db(q, graph_freq(x + 0.5f));
+    const int y = std::clamp(static_cast<int>(std::lround(graph_y(static_cast<float>(db)))), kGraphY0, kGraphY1 - 1);
+    c.fill(x, std::min(y, y0), x + 1, std::max(y, y0) + 1, {44, 70, 98, 255});
+    const int a = prev < 0 ? y : prev;
+    c.fill(x, std::min(a, y) - 1, x + 1, std::max(a, y) + 2, {140, 200, 255, 255});
+    prev = y;
+  }
+  for (int b = 0; b < AURORA_XR_MIX_BANDS; ++b) {
+    const int nx = static_cast<int>(std::lround(graph_x(m.band[b].freq)));
+    const int ny = std::clamp(static_cast<int>(std::lround(graph_y(m.band[b].gain))), kGraphY0, kGraphY1);
+    if (b == band)
+      c.fill(nx - 11, ny - 11, nx + 11, ny + 11, P.active == kMixGraph ? lit : Rgba{250, 250, 250, 255});
+    c.fill(nx - 8, ny - 8, nx + 8, ny + 8, {10, 10, 12, 255});
+    c.fill(nx - 6, ny - 6, nx + 6, ny + 6, kBandColors[b]);
+    const char letter[2] = {kBandNames[b][0], '\0'};
+    c.text(nx - 5, ny < kGraphY0 + 34 ? ny + 16 : ny - 30, 2, letter, kBandColors[b]);
+  }
+
+  // The Q of the band last grabbed, and where that band is.
+  {
+    const int y = kMixQY;
+    c.text(18, y + 4, 3, "Q", P.active == kMixQ ? lit : P.hover == kMixQ ? text : dim);
+    c.text(42, y + 4, 3, kBandNames[band], kBandColors[band]);
+    const int kx = kTrackX0 + static_cast<int>(std::lround(std::clamp(q_t(m.band[band].q), 0.f, 1.f) *
+                                                           (kTrackX1 - kTrackX0)));
+    c.fill(kTrackX0, y + 10, kTrackX1, y + kTrackH - 10, {52, 56, 68, 255});
+    c.fill(kx - 6, y - 9, kx + 6, y + kTrackH + 9, {10, 10, 12, 255});
+    c.fill(kx - 3, y - 6, kx + 3, y + kTrackH + 6, P.active == kMixQ ? lit : kBandColors[band]);
+    c.text(kTrackX1 + 22, y + 4, 3, fmt::format("{:.2f}", m.band[band].q), text);
+  }
+  const char* shape = band == 0 ? "LOW SHELF" : band == 1 ? "PEAK" : "HIGH SHELF";
+  c.text(18, kMixQY + 52, 3,
+         fmt::format("{}  {} HZ  {} DB", shape, mix_freq(m.band[band].freq), mix_db(m.band[band].gain)), dim);
+}
+
 void draw_panel(Canvas& c) {
   c.fill(0, 0, kPanelW, kPanelH, {18, 20, 26, 225});
   c.fill(0, 0, kPanelW, 3, {90, 96, 110, 255});
   draw_header(c);
   if (P.page == kPageTint)
     draw_tint(c);
-  else
+  else if (P.page == kPageAudio)
     draw_audio(c);
+  else
+    draw_mix(c);
 }
 
 // Where a laser meets the panel's plane: meters along it, and the point in
@@ -5194,6 +5420,25 @@ int panel_target(float px, float py) {
     }
     return -1;
   }
+  if (P.page == kPageMix) {
+    int count = 0;
+    {
+      std::lock_guard lock{g_devMix.mutex};
+      const auto it = g_devMix.stages.find(g_devMix.stage);
+      count = it != g_devMix.stages.end() ? it->second.count : 0;
+    }
+    if (count == 0)
+      return -1;
+    if (py >= kMixChanY0 && py < kMixChanY1 && px >= 18 && px < kChoiceX1)
+      return kMixChan + std::clamp(static_cast<int>((px - 18) / ((kChoiceX1 - 18) / count)), 0, count - 1);
+    if (px >= kTrackX0 - 24 && px < kTrackX1 + 24 && py >= kMixLevelY - 14 && py < kMixLevelY + kTrackH + 14)
+      return kMixLevel;
+    if (px >= kGraphX0 - 14 && px < kGraphX1 + 14 && py >= kGraphY0 - 14 && py < kGraphY1 + 14)
+      return kMixGraph;
+    if (px >= kTrackX0 - 24 && px < kTrackX1 + 24 && py >= kMixQY - 18 && py < kMixQY + kTrackH + 18)
+      return kMixQ;
+    return -1;
+  }
   for (int row = 0; row < kAudioRows; ++row) {
     const float y = static_cast<float>(kAudioRowY0 + row * kAudioRowStep);
     if (px >= kTrackX0 - 24 && px < kChoiceX1 && py >= y - 18 && py < y + kTrackH + 18)
@@ -5218,8 +5463,58 @@ void audio_choose(int row, float px) {
   audio_log();
 }
 
+// A press on the Stage page's graph at px, py: grabs the nearest band's
+// handle, to move with the laser from there.
+void mix_grab(float px, float py) {
+  std::lock_guard lock{g_devMix.mutex};
+  const auto it = g_devMix.stages.find(g_devMix.stage);
+  if (it == g_devMix.stages.end() || it->second.count == 0)
+    return;
+  const AuroraXrMixChannel& m = it->second.value[std::clamp(P.mixChannel, 0, it->second.count - 1)];
+  float best = std::numeric_limits<float>::max();
+  for (int b = 0; b < AURORA_XR_MIX_BANDS; ++b) {
+    const float dx = graph_x(m.band[b].freq) - px, dy = graph_y(m.band[b].gain) - py;
+    if (dx * dx + dy * dy < best) {
+      best = dx * dx + dy * dy;
+      P.mixBand = b;
+      P.grabDx = dx;
+      P.grabDy = dy;
+    }
+  }
+}
+
+// Dragging on the Stage page (a target) to px, py.
+void mix_drag(int target, float px, float py) {
+  std::lock_guard lock{g_devMix.mutex};
+  const auto it = g_devMix.stages.find(g_devMix.stage);
+  if (it == g_devMix.stages.end() || it->second.count == 0)
+    return;
+  AuroraXrMixChannel& m = it->second.value[std::clamp(P.mixChannel, 0, it->second.count - 1)];
+  const AuroraXrMixChannel was = m;
+  const float t = std::clamp((px - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0), 0.f, 1.f);
+  if (target == kMixLevel) {
+    const float v = std::round((AURORA_XR_MIX_OFF + t * (kMixLevelMax - AURORA_XR_MIX_OFF)) * 2.f) / 2.f;
+    m.level = v <= AURORA_XR_MIX_OFF + 0.5f ? AURORA_XR_MIX_OFF : v;
+  } else if (target == kMixGraph) {
+    AuroraXrMixBand& b = m.band[std::clamp(P.mixBand, 0, AURORA_XR_MIX_BANDS - 1)];
+    const float f = graph_freq(px + P.grabDx);
+    const float step = f < 100.f ? 1.f : f < 1000.f ? 5.f : f < 5000.f ? 50.f : 100.f;
+    b.freq = std::round(f / step) * step;
+    b.gain = std::clamp(std::round(graph_db(py + P.grabDy) * 2.f) / 2.f, -kGraphDb, kGraphDb);
+  } else if (target == kMixQ) {
+    AuroraXrMixBand& b = m.band[std::clamp(P.mixBand, 0, AURORA_XR_MIX_BANDS - 1)];
+    b.q = std::round(kMixQMin * std::pow(kMixQMax / kMixQMin, t) * 100.f) / 100.f;
+  }
+  if (std::memcmp(&was, &m, sizeof(m)) != 0)
+    P.dirty = true;
+}
+
 // Dragging a slider (a target) to px.
-void panel_drag(int target, float px) {
+void panel_drag(int target, float px, float py) {
+  if (target == kMixLevel || target == kMixGraph || target == kMixQ) {
+    mix_drag(target, px, py);
+    return;
+  }
   const float t = std::clamp((px - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0), 0.f, 1.f);
   if (target == kAudio + kMusic) {
     const float v = std::round(t * 20.f) / 20.f; // steps of 5%
@@ -5243,6 +5538,19 @@ void panel_drag(int target, float px) {
 }
 
 void panel_reset() {
+  if (P.page == kPageMix) {
+    {
+      std::lock_guard lock{g_devMix.mutex};
+      const auto it = g_devMix.stages.find(g_devMix.stage);
+      if (it == g_devMix.stages.end() || it->second.count == 0)
+        return;
+      const int c = std::clamp(P.mixChannel, 0, it->second.count - 1);
+      it->second.value[c] = it->second.defaults[c];
+    }
+    P.dirty = true;
+    mix_log();
+    return;
+  }
   if (P.page == kPageTint) {
     std::lock_guard lock{g_grade.mutex};
     g_grade.panel.erase(P.stage);
@@ -5264,6 +5572,8 @@ void panel_released() {
     panel_log("set");
   else if (P.active == kAudio + kMusic)
     audio_log();
+  else if (P.active == kMixLevel || P.active == kMixGraph || P.active == kMixQ)
+    mix_log();
 }
 
 // Each display frame, before the arena's grab: shows the panel while `show`,
@@ -5303,7 +5613,6 @@ void update_dev_panel(bool show, bool tintUsable) {
   P.shown = show;
   if (!show)
     return;
-  const ArenaPose a = arena_pose();
   int hover = -1;
   for (int h = 0; h < 2; ++h) {
     Hand& hand = G.hands[h];
@@ -5312,16 +5621,17 @@ void update_dev_panel(bool show, bool tintUsable) {
       continue;
     const bool dragging = P.activeHand == h;
     const bool on = px >= 0.f && px < kPanelW && py >= 0.f && py < kPanelH;
-    // The arena wins where it's nearer along the laser, or the hand is in it.
-    const float arena = hit_arena(a, hand.origin, hand.dir);
-    if (!dragging && (!hand.valid || !on || in_grab_box(a, hand.touch) || (arena >= 0.f && arena < t)))
+    // A laser on the panel is on it, though the arena is nearer along it or
+    // the hand is in the arena (the stage need not be moved aside first);
+    // only a hand already holding the arena keeps it.
+    if (!dragging && (!hand.valid || !on || hand.engaged))
       continue;
     hand.onPanel = true;
     hand.panelHit = t;
     const int target = dragging ? P.active : panel_target(px, py);
     hover = target;
     if (dragging) {
-      panel_drag(P.active, px);
+      panel_drag(P.active, px, py);
     } else if (panel_pressed(hand) && target == kReset) {
       panel_reset();
     } else if (panel_pressed(hand) && target >= kTab && target < kTab + kPages) {
@@ -5329,8 +5639,15 @@ void update_dev_panel(bool show, bool tintUsable) {
       P.dirty = true;
     } else if (panel_pressed(hand) && target == kAudio + kSpatial) {
       audio_choose(target - kAudio, px);
-    } else if (panel_pressed(hand) && (target == kAudio + kMusic || (target >= 0 && target < kSliders)) &&
+    } else if (panel_pressed(hand) && target >= kMixChan && target < kMixChan + AURORA_XR_MIX_CHANNELS) {
+      P.mixChannel = target - kMixChan;
+      P.dirty = true;
+    } else if (panel_pressed(hand) &&
+               (target == kAudio + kMusic || target == kMixLevel || target == kMixGraph || target == kMixQ ||
+                (target >= 0 && target < kSliders)) &&
                P.active < 0) {
+      if (target == kMixGraph)
+        mix_grab(px, py);
       P.active = target;
       P.activeHand = h;
       P.dirty = true;
@@ -8674,6 +8991,37 @@ extern "C" bool aurora_xr_dev_audio(AuroraXrDevAudio* audio) {
   if (!g_devAudio.have)
     return false;
   *audio = g_devAudio.value;
+  return true;
+}
+
+extern "C" void aurora_xr_dev_mix_stage(int stage, int count, const char* const names[],
+                                        const AuroraXrMixChannel defaults[]) {
+  using namespace aurora::xr;
+  if (!dev_tools_wanted())
+    return;
+  count = std::clamp(count, 0, static_cast<int>(AURORA_XR_MIX_CHANNELS));
+  std::lock_guard lock{g_devMix.mutex};
+  g_devMix.stage = stage;
+  const auto [it, fresh] = g_devMix.stages.try_emplace(stage);
+  if (!fresh)
+    return; // kept from the stage's last fight
+  DevMixStage& st = it->second;
+  st.count = count;
+  for (int c = 0; c < count; ++c) {
+    st.names[c] = names[c];
+    st.defaults[c] = st.value[c] = defaults[c];
+  }
+}
+
+extern "C" bool aurora_xr_dev_mix(int stage, int channel, AuroraXrMixChannel* out) {
+  using namespace aurora::xr;
+  if (!dev_tools_wanted() || channel < 0 || channel >= AURORA_XR_MIX_CHANNELS)
+    return false;
+  std::lock_guard lock{g_devMix.mutex};
+  const auto it = g_devMix.stages.find(stage);
+  if (it == g_devMix.stages.end() || channel >= it->second.count)
+    return false;
+  *out = it->second.value[channel];
   return true;
 }
 

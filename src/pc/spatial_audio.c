@@ -6,6 +6,7 @@
 #ifdef MELEE_SPATIAL_AUDIO
 
 #include "pc/pc.h"
+#include "pc/stage_mix.h"
 #include "pc/xr_scene.h"
 #ifdef AURORA_ENABLE_OPENXR
 #include <aurora/xr.h>
@@ -207,6 +208,7 @@ typedef struct StageSound {
     int joint;      /* depth first from the part's root, as pc/xr_scene.c counts */
     bool to_shot;   /* then with the Arwing laser the start fires, once it exists */
     bool lane;      /* with the car of the lane it starts for (pc_spatial_stage_lane) */
+    int mix;        /* its stage mixer channel (pc/stage_mix.h) */
 } StageSound;
 
 static const StageSound s_stage_sounds[] = {
@@ -229,24 +231,33 @@ static const StageSound s_stage_sounds[] = {
      * channel runs about 9 dB over its left (as plain stereo it sat in the
      * right ear), comes from its tail: x 233-262 at rest, drawn at 0.54
      * scale as the ship drifts. */
-    {.grkind = 0x0E, .sfx = {0x55737}, .x = {245.f, 245.f}, .y = 15.f, .gain = 1.f, .part = 3, .joint = 0},
+    {.grkind = 0x0E, .sfx = {0x55737}, .x = {245.f, 245.f}, .y = 15.f, .gain = 1.f, .part = 3, .joint = 0,
+     .mix = STAGE_MIX_GREAT_FOX},
     /* Its cannon under the nose (joints 3 and 4, 10 units apart): the
      * charge, one beam (0x55739) or a volley (0x5573A), and each shot. */
-    {.grkind = 0x0E, .sfx = {0x55739, 0x5573A, 0x55735}, .gain = 1.f, .part = 3, .joint = 3},
+    {.grkind = 0x0E, .sfx = {0x55739, 0x5573A, 0x55735}, .gain = 1.f, .part = 3, .joint = 3,
+     .mix = STAGE_MIX_GREAT_FOX},
     /* The Arwings (parts 1, 2 and 10; joint 3 carries the ship): the swoops
      * as one comes and goes, heard from it all the way past. */
-    {.grkind = 0x0E, .sfx = {0x55730, 0x55731, 0x55732}, .gain = 1.f, .from_proc = true, .joint = 3},
+    {.grkind = 0x0E, .sfx = {0x55730, 0x55731, 0x55732}, .gain = 1.f, .from_proc = true, .joint = 3,
+     .mix = STAGE_MIX_ARWINGS},
     /* An Arwing's laser shot: from the Arwing, then with the laser it makes
      * just after starting the sound (itarwinglaser.c) as it flies. */
-    {.grkind = 0x0E, .sfx = {0x55733, 0x55734}, .gain = 1.f, .from_proc = true, .joint = 3, .to_shot = true},
+    {.grkind = 0x0E, .sfx = {0x55733, 0x55734}, .gain = 1.f, .from_proc = true, .joint = 3, .to_shot = true,
+     .mix = STAGE_MIX_ARWINGS},
     /* Big Blue (grbigblue.c): the racers' engines, loops Melee starts as a
      * car takes one of the track's four lanes (four as the stage loads) and
      * never stops (a later one in the same sound slot replaces it). Plain,
      * they were a steady bed in both ears (-35 dBFS); each now rides its
      * lane's car, past the player and on as the lane takes new ones. Placed
      * they came to -42 in a flat desktop mix, the cars mostly away to the
-     * sides: 3 dB up, the racers being the point. */
-    {.grkind = 0x13, .sfx = {0x6DDD2, 0x6DDD3, 0x6DDD4, 0x6DDD5}, .gain = 1.4f, .lane = true},
+     * sides. On the headset they were barely heard under the rush of air:
+     * 9 dB up, the racers being the point. */
+    {.grkind = 0x13,
+     .sfx = {0x6DDD2, 0x6DDD3, 0x6DDD4, 0x6DDD5},
+     .gain = 2.8f,
+     .lane = true,
+     .mix = STAGE_MIX_ENGINES},
 };
 #define SP_STAGE_SOUNDS ((int)(sizeof s_stage_sounds / sizeof s_stage_sounds[0]))
 
@@ -654,6 +665,8 @@ typedef struct SpVoice {
     float pos[3]; /* game units, the newest known */
     int channel;  /* the emitter's left (0) or right (1) point, or between them (-1) */
     float boost;  /* over the game's own level (a placed stage sound's) */
+    int mix;      /* a placed stage sound's mixer channel, or -1 */
+    StageMixState mix_state;
     bool tagged;
     uint64_t last_frame; /* the AX frame it last rendered in; state resets after a gap */
     float hist[SP_UP_TAPS]; /* the upsampler's last input samples */
@@ -924,6 +937,7 @@ void pc_spatial_voice_tag(int voice, const void* gobj, const float pos[2][3], in
     v->channel = channel;
     const StageSound* r = stage_entry(gobj);
     v->boost = r != NULL ? r->gain : 1.f;
+    v->mix = r != NULL ? r->mix : -1;
     channel_pos(pos, channel, v->pos);
     v->tagged = true;
     v->last_frame = 0; /* a new sound: state resets at its first frame */
@@ -1049,8 +1063,15 @@ void pc_spatial_render(int voice, const float* mono) {
         iplBinauralEffectReset(v->bin);
         iplDirectEffectReset(v->dir);
         memset(v->hist, 0, sizeof(v->hist));
+        memset(&v->mix_state, 0, sizeof(v->mix_state));
     }
     v->last_frame = s_frame;
+    float mixed[SP_AX_FRAME];
+    if (v->mix >= 0) { /* a stage sound: through its mixer channel (its aux sends are as they were) */
+        memcpy(mixed, mono, sizeof(mixed));
+        pc_stage_mix_apply(v->mix, &v->mix_state, mixed, SP_AX_FRAME, 1);
+        mono = mixed;
+    }
     upsample(v, mono, in);
 
     /* Listener space: x right, y up, -z ahead, meters. */
@@ -1125,6 +1146,7 @@ bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono) {
     SpVoice* v = &s_v[SP_VOICES + slot];
     memcpy(v->pos, pos, sizeof(v->pos));
     v->boost = 1.f;
+    v->mix = -1; /* the ambience mixes its own */
     pc_spatial_render(SP_VOICES + slot, mono);
     return true;
 }

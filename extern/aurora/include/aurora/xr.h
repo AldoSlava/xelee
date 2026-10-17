@@ -159,6 +159,31 @@ void aurora_xr_dev_audio_defaults(const AuroraXrDevAudio* audio);
  * without dev tools or before the defaults came. Any thread; cheap. */
 bool aurora_xr_dev_audio(AuroraXrDevAudio* audio);
 
+/* Dev tools' Stage page: a mixer for the current stage's own sounds, a few
+ * channels a stage, each a level and a three-band parametric EQ (a low
+ * shelf, a peak, a high shelf), which the game applies. */
+enum { AURORA_XR_MIX_CHANNELS = 4, AURORA_XR_MIX_BANDS = 3 };
+#define AURORA_XR_MIX_OFF (-40.f) /* a level at or under it: muted */
+typedef struct AuroraXrMixBand {
+  float freq; /* Hz: the shelf's corner, the peak's centre */
+  float gain; /* dB */
+  float q;
+} AuroraXrMixBand;
+typedef struct AuroraXrMixChannel {
+  float level; /* dB over the usual */
+  AuroraXrMixBand band[AURORA_XR_MIX_BANDS];
+} AuroraXrMixChannel;
+/* The game, each fight frame: the stage now playing (any key) and its
+ * channels, `count` names (upper case) and their settings without the
+ * panel, which Reset goes back to; count 0: none to mix. A stage's settings
+ * on the panel are kept for the session. Any thread. */
+void aurora_xr_dev_mix_stage(int stage, int count, const char* const names[],
+                             const AuroraXrMixChannel defaults[]);
+/* The game: the panel's settings for `stage`'s channel `channel`; false,
+ * leaving `out` untouched, without dev tools or before the stage came. Any
+ * thread; cheap. */
+bool aurora_xr_dev_mix(int stage, int channel, AuroraXrMixChannel* out);
+
 /* True while an OpenXR session is presenting the game. Any thread. */
 bool aurora_xr_active(void);
 /* For positional audio: the transform from the current stage's game world

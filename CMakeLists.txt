@@ -243,6 +243,7 @@ set(PC_SOURCES
         src/pc/slp.c
         src/pc/spatial_audio.c
         src/pc/stage_ambience.c
+        src/pc/stage_mix.c
         src/pc/slp_format.c
         # Slippi netplay protocol (docs/slippi-migration-plan.md). slp_proto.h is
         # the constants header; slp_packet.c is the wire codec (M1); slp_msg.c

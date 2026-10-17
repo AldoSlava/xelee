@@ -5,6 +5,7 @@
 
 #include "pc/pc.h"
 #include "pc/spatial_audio.h"
+#include "pc/stage_mix.h"
 #include "pc/xr_place.h"
 #include <melee/gr/forward.h>
 #include <melee/gr/ground.h>
@@ -144,6 +145,7 @@ void pc_ambience_tick(uint64_t proc_mask) {
 }
 
 void pc_ambience_frame(void) {
+    pc_stage_mix_frame(stage_info.grkind); /* Melee's own placed stage sounds mix there too */
     if (!enabled()) {
         return;
     }
@@ -303,6 +305,7 @@ typedef struct FallsSource {
     float bp_low, bp_band;
     float fz_hp, fz_env, fz_target; /* the fizz */
     int fz_hold;
+    StageMixState mix;
 } FallsSource;
 
 static struct {
@@ -348,8 +351,9 @@ static void falls_mix(float* out, int frames, int rate, bool on) {
         gust_step(&f->swell, dt * 0.5f); /* half speed: a slow breath */
         /* About -34.5 dBFS each before placing; placed, the pair came to
          * about -32 in a flat desktop mix (fight and music about -23): a
-         * little over the wind, the waterfall being right there. */
-        const float amp = (0.75f + 0.25f * f->swell.value) * 0.066f * volume;
+         * little over the wind, the waterfall being right there. On the
+         * headset it was a bit quiet against the jungle: 3 dB up. */
+        const float amp = (0.75f + 0.25f * f->swell.value) * 0.093f * volume;
         for (int i = 0; i < frames; i++) {
             const float n = rnd_unit(&f->seed) * 2.f - 1.f;
             f->p0 = 0.99765f * f->p0 + n * 0.0990460f;
@@ -376,6 +380,7 @@ static void falls_mix(float* out, int frames, int rate, bool on) {
             const float lv = (level0 + (s_falls.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
             mono[i] = (roar + 0.35f * f->bp_band + 0.18f * fizz) * amp * lv;
         }
+        pc_stage_mix_apply(STAGE_MIX_FALLS, &f->mix, mono, frames, 1);
         if (!pc_spatial_render_placed(c, s_falls_pos[c], mono)) {
             for (int i = 0; i < frames; i++) { /* not placed (spatial audio bypassed): plain, centred */
                 out[i * 2] += mono[i] * 0.7071f;
@@ -412,6 +417,7 @@ typedef struct CurtainSource {
     int sp_hold;
     Drop drop[DROPS];
     float next_drop; /* samples */
+    StageMixState mix;
 } CurtainSource;
 
 typedef struct JetSource {
@@ -421,6 +427,7 @@ typedef struct JetSource {
     float bp_low, bp_band;     /* the hiss */
     float g_lp, g_env, g_target; /* the gurgle */
     int g_hold;
+    StageMixState mix;
 } JetSource;
 
 static struct {
@@ -545,6 +552,7 @@ static void fountain_mix(float* out, int frames, int rate, bool on) {
             const float lv = (level0 + (s_fountain.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
             mono[i] = curtain_sample(f, a, (float)rate) * amp * lv;
         }
+        pc_stage_mix_apply(STAGE_MIX_FOUNTAIN, &f->mix, mono, frames, 1);
         if (!pc_spatial_render_placed(c, s_curtain_pos[c], mono)) {
             for (int i = 0; i < frames; i++) { /* not placed (spatial audio bypassed): plain, centred */
                 out[i * 2] += mono[i] * 0.7071f;
@@ -579,6 +587,7 @@ static void fountain_mix(float* out, int frames, int rate, bool on) {
                              (jl0 + (j->level - jl0) * t);
             mono[i] = jet_sample(j, f_bp, a_lp) * amp * lv;
         }
+        pc_stage_mix_apply(STAGE_MIX_JETS, &j->mix, mono, frames, 1);
         if (!pc_spatial_render_placed(CURTAIN_SOURCES + k, j->pos, mono)) {
             for (int i = 0; i < frames; i++) {
                 out[i * 2] += mono[i] * 0.7071f;
@@ -800,7 +809,27 @@ static void rush_mix(float* out, int frames, int rate, bool on) {
     }
 }
 
+/* A layer heard all around (into the ambient bus), through its stage mixer
+ * channel: made into a frame of its own, mixed, then added. */
+typedef void (*BusLayer)(float* out, int frames, int rate, bool on);
+
+static void bus_layer(BusLayer layer, int channel, StageMixState st[2], float* out, int frames, int rate, bool on) {
+    float tmp[2 * 160];
+    if (frames > 160) {
+        frames = 160;
+    }
+    memset(tmp, 0, sizeof(float) * 2 * (size_t)frames);
+    layer(tmp, frames, rate, on);
+    for (int c = 0; c < 2; c++) {
+        pc_stage_mix_apply(channel, &st[c], tmp + c, frames, 2);
+    }
+    for (int i = 0; i < 2 * frames; i++) {
+        out[i] += tmp[i];
+    }
+}
+
 void pc_ambience_mix(float* out, int frames, int rate) {
+    static StageMixState wind[2], jungle[2], rush[2];
     if (!enabled()) {
         return;
     }
@@ -816,9 +845,9 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     const float step = (float)frames / (float)rate / AMB_DUCK_S;
     s_duck0 = s_duck;
     s_duck = s_duck < target ? fminf(target, s_duck + step) : fmaxf(target, s_duck - step);
-    wind_mix(out, frames, rate, fresh && kind == AMB_WIND);
+    bus_layer(wind_mix, STAGE_MIX_WIND, wind, out, frames, rate, fresh && kind == AMB_WIND);
     falls_mix(out, frames, rate, fresh && kind == AMB_FALLS);
-    jungle_mix(out, frames, rate, fresh && kind == AMB_FALLS);
+    bus_layer(jungle_mix, STAGE_MIX_JUNGLE, jungle, out, frames, rate, fresh && kind == AMB_FALLS);
     fountain_mix(out, frames, rate, fresh && kind == AMB_FOUNTAIN);
-    rush_mix(out, frames, rate, fresh && kind == AMB_RUSH);
+    bus_layer(rush_mix, STAGE_MIX_RUSH, rush, out, frames, rate, fresh && kind == AMB_RUSH);
 }
