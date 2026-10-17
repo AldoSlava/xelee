@@ -2784,6 +2784,13 @@ struct ScreenPose {
 };
 ScreenPose g_screen;
 bool g_screenInit = false;
+bool g_screenMoved = false; // the player has moved or sized it (a grab): the room survey leaves it be
+// The room survey's screen (room_survey_apply), glided to over 0.8 s.
+struct ScreenGlide {
+  bool on = false;
+  ScreenPose from, to;
+  int64_t startNs = 0;
+} g_screenGlide;
 constexpr float kMinScreenWidth = 0.4f, kMaxScreenWidth = 8.f;
 // One controller's reach along its laser while dragging the screen.
 constexpr float kMinScreenDist = 0.3f, kMaxScreenDist = 10.f;
@@ -3031,6 +3038,8 @@ void end_grab() {
   G.twoHands = false;
   if (G.target == Target::Screen) {
     const ScreenPose& s = screen_pose();
+    g_screenMoved = true;
+    g_screenGlide.on = false;
     Log.info("Screen placed at {:.2f},{:.2f},{:.2f}, width {:.2f} m", s.pos.x, s.pos.y, s.pos.z, s.width);
     return;
   }
@@ -3729,11 +3738,34 @@ const char* surface_state_name(SurfaceEstimate::State s) {
   return s == SurfaceEstimate::State::Unknown ? "unknown" : s == SurfaceEstimate::State::Known ? "known" : "frozen";
 }
 
+// What the room survey found (room_survey_*): a desk or table in front of
+// and below the eyes, the floor, and how far the room is clear ahead.
+// Heights in LOCAL; distances level from the head, meters.
+struct RoomSurvey {
+  enum class Kind { Unknown, Desk, Couch, Room };
+  bool done = false;
+  Kind kind = Kind::Unknown;
+  bool desk = false, floor = false;
+  float deskY = 0.f, deskNear = 0.f, deskFar = 0.f; // its height, and its near and far reach
+  float floorY = 0.f;
+  float clearance = -1.f; // to the nearest wall or obstacle ahead; -1: unknown; kRoomReach: open
+  float headY = 0.f, yaw = 0.f;
+  XrVector3f head{};
+  int rays = 0, informed = 0;
+};
+const char* room_kind_name(RoomSurvey::Kind k) {
+  return k == RoomSurvey::Kind::Desk ? "desk" : k == RoomSurvey::Kind::Couch ? "couch" : k == RoomSurvey::Kind::Room ? "room" : "unknown";
+}
+
 // Between the XR thread (and the game's setters) and the worker.
 struct SurfaceShared {
   std::mutex mutex;
   std::condition_variable cv;
   SurfaceEstimate estimate;         // the worker's latest
+  bool surveyWanted = false;        // a room survey: cast from the head until it's done
+  XrPosef head{{0.f, 0.f, 0.f, 1.f}, {}};
+  bool headValid = false;
+  RoomSurvey survey;                // the worker's, once done
   bool placing = false;             // the stage is being placed: cast all along
   int64_t burstUntilNs = 0;         // cast until then (monotonic_ns)
   bool reset = false;               // forget the estimate first (another stage, a recenter)
@@ -4143,12 +4175,154 @@ void surface_log(SurfaceWorker& w, int64_t now, const ArenaSnapshot& a) {
   }
 }
 
+// ---------------------------------------------------------------- the room survey
+//
+// Where a stage and the screen start depends on where the player is: at a
+// desk the stage stands on it within reach, on a couch it floats farther
+// out and larger, standing in a living room larger still, and the screen
+// likewise. Once a launch, as soon as the head is tracked, a fan of rays
+// from the head (5 across, +-30 degrees, 4 down, 5 to 50 degrees under
+// level) against the headset's depth, for up to 6 s (the player looking
+// about the menus fills it in): level hits a short way below the eyes and
+// within reach are a desk or table; the lowest level surface (or
+// XR_EXT_local_floor's floor) says seated or standing; walls in the forward
+// rays say how much room there is ahead. The result seeds the defaults the
+// player hasn't set (room_survey_apply); every placement is still theirs.
+// AURORA_XR_ROOM_SURVEY=0: none.
+constexpr float kRoomReach = 5.f;
+struct RoomSamples {
+  struct Level {
+    float y, d;
+  };
+  std::vector<Level> level;
+  std::vector<float> walls;
+  int rays = 0, informed = 0, open = 0, passes = 0;
+  int64_t startNs = 0;
+};
+
+void room_cast(SurfaceWorker& w, RoomSamples& rs, const XrPosef& head, XrTime time) {
+  const XrVector3f fwd = qrot(head.orientation, {0.f, 0.f, -1.f});
+  const float yaw = std::atan2(-fwd.x, -fwd.z);
+  XrEnvironmentRaycastFilterDistanceMETA reach{XR_TYPE_ENVIRONMENT_RAYCAST_FILTER_DISTANCE_META};
+  reach.maxDistance = kRoomReach;
+  const XrEnvironmentRaycastFilterBaseHeaderMETA* filters[] = {
+      reinterpret_cast<const XrEnvironmentRaycastFilterBaseHeaderMETA*>(&reach)};
+  constexpr float kDeg = 3.14159265f / 180.f;
+  for (const float across : {-30.f, -15.f, 0.f, 15.f, 30.f})
+    for (const float down : {5.f, 20.f, 35.f, 50.f}) {
+      const XrVector3f dir = rot_y({0.f, -std::sin(down * kDeg), -std::cos(down * kDeg)}, yaw + across * kDeg);
+      XrEnvironmentRaycastHitGetInfoMETA gi{XR_TYPE_ENVIRONMENT_RAYCAST_HIT_GET_INFO_META};
+      gi.baseSpace = B.space;
+      gi.time = time;
+      gi.origin = head.position;
+      gi.direction = dir;
+      gi.filterCount = 1;
+      gi.filters = filters;
+      XrEnvironmentRaycastHitMETA hit{XR_TYPE_ENVIRONMENT_RAYCAST_HIT_META};
+      const XrResult r = B.performRaycast(w.raycaster, &gi, &hit);
+      ++rs.rays;
+      if (XR_FAILED(r) || hit.status == XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_POINT_OUTSIDE_OF_FOV_META ||
+          hit.status == XR_ENVIRONMENT_RAYCAST_HIT_STATUS_RAY_OCCLUDED_META)
+        continue; // out of the depth cameras' view, or a hand in the way
+      ++rs.informed;
+      const bool forward = down <= 20.f;
+      if (hit.status != XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_META &&
+          hit.status != XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_POINT_OCCLUDED_META &&
+          hit.status != XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_INVALID_ORIENTATION_META) {
+        rs.open += forward ? 1 : 0; // nothing within reach
+        continue;
+      }
+      if (hit.status == XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_INVALID_ORIENTATION_META)
+        continue; // where, but not which way it faces
+      const XrVector3f p = hit.pose.position;
+      const float d = std::hypot(p.x - head.position.x, p.z - head.position.z);
+      const float up = qrot(hit.pose.orientation, {0.f, 0.f, 1.f}).y;
+      if (up >= 0.94f)
+        rs.level.push_back({p.y, d});
+      else if (up < 0.5f && forward)
+        rs.walls.push_back(d);
+    }
+  ++rs.passes;
+}
+
+RoomSurvey room_finish(const RoomSamples& rs, const XrPosef& head, XrTime time) {
+  RoomSurvey out;
+  out.done = true;
+  out.rays = rs.rays;
+  out.informed = rs.informed;
+  out.head = head.position;
+  out.headY = head.position.y;
+  const XrVector3f fwd = qrot(head.orientation, {0.f, 0.f, -1.f});
+  out.yaw = std::atan2(-fwd.x, -fwd.z);
+  // Level hits by height, in clusters within +-3 cm.
+  std::vector<RoomSamples::Level> lv = rs.level;
+  std::sort(lv.begin(), lv.end(), [](const auto& a, const auto& b) { return a.y < b.y; });
+  struct Cluster {
+    float y, near, far;
+    int n;
+  };
+  std::vector<Cluster> clusters;
+  for (size_t i = 0; i < lv.size();) {
+    size_t j = i;
+    float near = lv[i].d, far = lv[i].d;
+    while (j + 1 < lv.size() && lv[j + 1].y - lv[i].y < 0.06f) {
+      ++j;
+      near = std::min(near, lv[j].d);
+      far = std::max(far, lv[j].d);
+    }
+    clusters.push_back({lv[(i + j) / 2].y, near, far, static_cast<int>(j - i + 1)});
+    i = j + 1;
+  }
+  if (float y; locate_floor(time, y)) {
+    out.floor = true;
+    out.floorY = y;
+  } else {
+    for (const Cluster& c : clusters) // the lowest well-seen level surface a seat's height or more down
+      if (c.n >= 3 && c.y < out.headY - 0.8f) {
+        out.floor = true;
+        out.floorY = c.y;
+        break;
+      }
+  }
+  // The desk: the best-seen level surface 10-80 cm under the eyes, within
+  // reach, and clear of the floor.
+  const Cluster* desk = nullptr;
+  for (const Cluster& c : clusters) {
+    const float dy = c.y - out.headY;
+    if (c.n >= 4 && dy > -0.8f && dy < -0.1f && c.near < 1.4f && (!out.floor || c.y > out.floorY + 0.3f) &&
+        (!desk || c.n > desk->n))
+      desk = &c;
+  }
+  if (desk) {
+    out.desk = true;
+    out.deskY = desk->y;
+    out.deskNear = desk->near;
+    out.deskFar = desk->far;
+  }
+  // Room ahead: the nearer walls the forward rays found, or open when they
+  // mostly found nothing within reach.
+  if (!rs.walls.empty()) {
+    std::vector<float> w = rs.walls;
+    std::sort(w.begin(), w.end());
+    out.clearance = w[w.size() / 5];
+  } else if (rs.open > 0) {
+    out.clearance = kRoomReach;
+  }
+  const bool standing = out.floor && out.headY - out.floorY >= 1.4f;
+  out.kind = out.desk && !standing ? RoomSurvey::Kind::Desk
+           : standing              ? RoomSurvey::Kind::Room
+           : out.floor             ? RoomSurvey::Kind::Couch
+                                   : RoomSurvey::Kind::Unknown;
+  return out;
+}
+
 void surface_main() {
   using State = SurfaceEstimate::State;
   SurfaceWorker w;
   w.lineNs = w.timingNs = monotonic_ns();
   for (;;) {
-    bool placing, reset;
+    bool placing, reset, surveying, headValid;
+    XrPosef head;
     int64_t burstUntil;
     XrTime time;
     std::array<XrVector3f, 2> hands;
@@ -4158,12 +4332,16 @@ void surface_main() {
       // 15 casts a second while casting, the raycaster's future polled every
       // 50 ms while it's created; otherwise asleep until asked (waking each
       // second to let an idle raycaster go).
+      const bool surveyDue = g_surface.surveyWanted && !g_surface.survey.done;
       if (!g_surface.stop && !g_surface.reset)
         g_surface.cv.wait_for(lock, w.caster == Caster::Creating ? std::chrono::milliseconds(50)
-                                    : w.active                   ? std::chrono::milliseconds(66)
+                                    : w.active || surveyDue      ? std::chrono::milliseconds(66)
                                                                  : std::chrono::milliseconds(1000));
       if (g_surface.stop)
         break;
+      surveying = g_surface.surveyWanted && !g_surface.survey.done;
+      head = g_surface.head;
+      headValid = g_surface.headValid;
       placing = g_surface.placing;
       reset = std::exchange(g_surface.reset, false);
       burstUntil = g_surface.burstUntilNs;
@@ -4176,6 +4354,26 @@ void surface_main() {
       w.est = {};
       w.recent.clear();
       surface_publish(w.est);
+    }
+    if (surveying && headValid && time != 0) {
+      static RoomSamples rs;
+      if (rs.startNs == 0)
+        rs.startNs = now;
+      bool canCast = false;
+      if (B.envRaycast && (w.caster == Caster::Off || w.caster == Caster::Creating || w.caster == Caster::Ready)) {
+        raycaster_step(w);
+        canCast = w.caster == Caster::Ready;
+        if (canCast) {
+          room_cast(w, rs, head, time);
+          w.lastCastNs = now;
+        }
+      }
+      const bool creating = w.caster == Caster::Creating && now - rs.startNs < 3000 * kMsNs;
+      if ((!canCast && !creating) || (rs.passes >= 10 && rs.informed >= 60) || now - rs.startNs > 6000 * kMsNs) {
+        const RoomSurvey r = room_finish(rs, head, time);
+        std::lock_guard lock{g_surface.mutex};
+        g_surface.survey = r;
+      }
     }
     const bool active = placing || now < burstUntil;
     if (active && !w.active) {
@@ -4261,9 +4459,21 @@ void surface_frame(bool fight, bool placing, XrTime time) {
   const bool changed = placing != wasPlacing || burstMs > 0;
   wasFight = fight;
   wasPlacing = placing;
+  bool viewsValid;
+  {
+    std::lock_guard lock{g_viewMutex};
+    viewsValid = g_viewsValid;
+  }
+  static const bool survey = env_flag("AURORA_XR_ROOM_SURVEY", true);
   std::lock_guard lock{g_surface.mutex};
   g_surface.displayTime = time;
   g_surface.placing = placing;
+  g_surface.head = {B.headOrientation, B.head};
+  g_surface.headValid = viewsValid;
+  if (survey && viewsValid && B.focused && !g_surface.surveyWanted) {
+    g_surface.surveyWanted = true;
+    g_surface.cv.notify_one();
+  }
   for (int h = 0; h < 2; ++h) {
     g_surface.hands[h] = G.hands[h].touch;
     g_surface.handValid[h] = G.hands[h].valid;
@@ -4272,6 +4482,116 @@ void surface_frame(bool fight, bool placing, XrTime time) {
     g_surface.burstUntilNs = std::max(g_surface.burstUntilNs, monotonic_ns() + burstMs * kMsNs);
   if (changed)
     g_surface.cv.notify_one();
+}
+
+// XR thread, every frame: once the room survey is done, the defaults it
+// suggests for what the player hasn't placed yet, and the screen's glide.
+//   desk:  the stage on the desk, within reach (today's desk scale, 0.0035);
+//          the screen as it is (0.7 m at 0.85 m);
+//   couch: seated with no desk ahead: the stage 0.007 at 1.4 m, 35 cm under
+//          the eyes; the screen 1.3 m wide at 1.5 m;
+//   room:  standing: the stage 0.011 at 2 m, 60 cm under; the screen 1.7 m
+//          at 2 m;
+// each brought in, and shrunk with it (the same size to the eye), to stay
+// clear of a wall ahead. Unknown (no raycast and no floor): as it is. Not
+// over an adopted spot, a stage already placed or up, a screen the player
+// moved, or AURORA_XR_ARENA_POS/_SCALE and AURORA_XR_SCREEN_DISTANCE/_WIDTH.
+void room_survey_apply() {
+  static bool applied = false;
+  if (g_screenGlide.on && G.target == Target::Screen && (G.oneHand >= 0 || G.twoHands)) {
+    g_screenGlide.on = false; // the player took it first
+    g_screenMoved = true;
+  }
+  if (g_screenGlide.on) {
+    ScreenPose& s = screen_pose();
+    const float t = smoothstep(0.f, 1.f, static_cast<float>(monotonic_ns() - g_screenGlide.startNs) / (800.f * kMsNs));
+    const ScreenPose &a = g_screenGlide.from, &b = g_screenGlide.to;
+    s.pos = a.pos + (b.pos - a.pos) * t;
+    s.width = a.width + (b.width - a.width) * t;
+    XrQuaternionf q{a.orientation.x + (b.orientation.x - a.orientation.x) * t,
+                    a.orientation.y + (b.orientation.y - a.orientation.y) * t,
+                    a.orientation.z + (b.orientation.z - a.orientation.z) * t,
+                    a.orientation.w + (b.orientation.w - a.orientation.w) * t};
+    const float n = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    if (n > 1e-6f)
+      s.orientation = {q.x / n, q.y / n, q.z / n, q.w / n};
+    if (t >= 1.f)
+      g_screenGlide.on = false;
+  }
+  if (applied)
+    return;
+  RoomSurvey r;
+  {
+    std::lock_guard lock{g_surface.mutex};
+    if (!g_surface.survey.done)
+      return;
+    r = g_surface.survey;
+  }
+  applied = true;
+  using Kind = RoomSurvey::Kind;
+  float scale = 0.0035f, dist = 0.7f, y = r.headY - 0.25f, screenW = 0.7f, screenD = 0.85f;
+  switch (r.kind) {
+  case Kind::Desk:
+    dist = std::clamp(r.deskNear + 0.3f, 0.55f, 0.95f);
+    y = std::max(r.headY - 0.25f, r.deskY + 0.15f);
+    break;
+  case Kind::Couch:
+    scale = 0.007f, dist = 1.4f, y = r.headY - 0.35f, screenW = 1.3f, screenD = 1.5f;
+    break;
+  case Kind::Room:
+    scale = 0.011f, dist = 2.f, y = r.headY - 0.6f, screenW = 1.7f, screenD = 2.f;
+    break;
+  case Kind::Unknown:
+    break;
+  }
+  if (r.clearance > 0.f) {
+    const float maxDist = r.clearance - (0.2f + 60.f * scale); // the stage's depth this side of it
+    if (dist > maxDist) {
+      const float f = std::max(maxDist, 0.5f) / dist;
+      dist *= f;
+      scale = std::max(scale * f, 0.0035f);
+    }
+    const float maxScreen = r.clearance - 0.25f;
+    if (screenD > maxScreen && screenD > 0.85f) {
+      const float f = std::max(maxScreen, 0.85f) / screenD;
+      screenD *= f;
+      screenW = std::max(screenW * f, 0.7f);
+    }
+  }
+  const auto clearance = r.clearance < 0.f ? std::string{"unknown"}
+                         : r.clearance >= kRoomReach ? fmt::format("open past {:.0f} m", kRoomReach)
+                                                     : fmt::format("{:.2f} m", r.clearance);
+  Log.info("Room survey: {}/{} rays seen; desk {}; floor {}; clear ahead {}: {}",
+           r.informed, r.rays,
+           r.desk ? fmt::format("{:.2f} m under the eyes, {:.2f}-{:.2f} m out", r.headY - r.deskY, r.deskNear, r.deskFar)
+                  : std::string{"none"},
+           r.floor ? fmt::format("{:.2f} m under the eyes", r.headY - r.floorY) : std::string{"unknown"}, clearance,
+           room_kind_name(r.kind));
+  if (r.kind == Kind::Unknown)
+    return;
+  const bool arenaEnv = std::getenv("AURORA_XR_ARENA_POS") || std::getenv("AURORA_XR_ARENA_SCALE");
+  {
+    std::lock_guard lock{g_arenaMutex};
+    init_arena();
+    if (!arenaEnv && !g_adoptedSet && g_stageArenas.empty() && g_stage < 0) {
+      g_defaultArena.pos = {0.f, y, -dist};
+      g_defaultArena.scale = scale;
+      g_arena = g_defaultArena;
+      g_arena.scale *= g_stageScale;
+      Log.info("Room survey: stages start {:.3f} m a unit, {:.2f} m out, {:.2f} m under the eyes", scale, dist,
+               r.headY - y);
+    }
+  }
+  const bool screenEnv = std::getenv("AURORA_XR_SCREEN_DISTANCE") || std::getenv("AURORA_XR_SCREEN_WIDTH");
+  if (!screenEnv && !g_screenMoved && (screenD != 0.85f || screenW != 0.7f)) {
+    g_screenGlide.from = screen_pose();
+    g_screenGlide.to.pos = XrVector3f{r.head.x, g_screenGlide.from.pos.y, r.head.z} + rot_y({0.f, 0.f, -screenD}, r.yaw);
+    g_screenGlide.to.orientation = yaw_quat(r.yaw);
+    g_screenGlide.to.width = screenW;
+    g_screenGlide.startNs = monotonic_ns();
+    g_screenGlide.on = true;
+    Log.info("Room survey: the screen to {:.2f} m wide at {:.2f} m", screenW, screenD);
+  }
 }
 
 constexpr uint32_t kShadowSize = 128;
@@ -6085,6 +6405,7 @@ bool render_xr_frame() {
   // hold before a fight, or a grab in a pause.
   surface_frame(fight, fight && (placing > 0 || (G.target == Target::Arena && (G.oneHand >= 0 || G.twoHands))),
                 fs.predictedDisplayTime);
+  room_survey_apply();
 
   // The passthrough, the shadow, the HUD and the 3D view, the HUD on top in
   // full VR, then the placing cards and the lasers.

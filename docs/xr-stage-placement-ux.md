@@ -413,6 +413,38 @@ Row descriptions:
 4. Presets and caption in the Place Stage scene; pause legend; launcher rows.
 5. Anchors (`horizonos.permission.USE_ANCHOR_API`), the file, Forget.
 
+### C.11 Room survey (built 2026-10-17, the user's idea)
+
+Instead of asking with presets (C.3, D3), measure. Once a launch, as soon as
+the head is tracked, the surface worker casts a fan of rays from the head (5
+across, +-30 degrees; 4 down, 5-50 degrees under level) against the
+headset's depth for up to 6 s, while the player looks about the menus:
+
+- a **desk or table**: level hits 10-80 cm under the eyes, within 1.4 m, not
+  the floor;
+- the **floor**: `XR_EXT_local_floor`, or the lowest level surface 80 cm or
+  more down; eyes 1.4 m or more over it is **standing**;
+- **room ahead**: walls in the forward rays (their 20th percentile), or open
+  when those rays find nothing within 5 m.
+
+It picks **Desk** (a desk ahead, seated), **Couch** (seated, no desk) or
+**Room** (standing), and seeds the defaults the player hasn't set:
+
+| | Stage | Screen |
+|---|---|---|
+| Desk | 0.0035 m/unit, 0.3 m past the desk's near edge (0.55-0.95 m), 15 cm over it (at least 25 cm under the eyes) | as today: 0.7 m at 0.85 m |
+| Couch | 0.007 at 1.4 m, 35 cm under the eyes | 1.3 m wide at 1.5 m |
+| Room | 0.011 at 2 m, 60 cm under | 1.7 m at 2 m |
+
+Each is pulled in and shrunk with it (the same size to the eye) to stay clear
+of a wall ahead. The screen glides there over 0.8 s. Never over an adopted
+spot, a stage already placed or up, a screen the player moved, or the
+`AURORA_XR_ARENA_*` / `AURORA_XR_SCREEN_*` knobs; `AURORA_XR_ROOM_SURVEY=0`
+turns it off. It needs the spatial data permission (as the shadow does);
+without it only the floor is known, so standing is Room and seated Couch is
+never guessed (Unknown keeps today's desk defaults). Logged as "Room survey:
+...". Not yet tried on the headset.
+
 ---
 
 ## Part D: decisions for the user
