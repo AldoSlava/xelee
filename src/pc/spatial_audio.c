@@ -57,11 +57,14 @@ ItemKind itGetKind(HSD_GObj* gobj);
  * ring around the listener, fixed to the stage's axes, a little above ear
  * height; its bus's left channel feeds the seats on the left, its right
  * those on the right. Each seat hears the bus a little later than the last
- * (milliseconds), as a stadium's stands would, or the same sound from six
- * directions would fold back to the middle of the head. */
+ * (milliseconds), as a stadium's stands would, and through its own
+ * decorrelator (SP_SEAT_TAPS), or the same sound from six directions would
+ * fold back to the middle of the head. Delays alone made it ring: copies
+ * 12 ms apart summed at each ear into a comb (peaks every 83 Hz, nulls
+ * between), "metallic and harsh". */
 #define SP_CROWD_SEATS 6
 #define SP_CROWD_ELEVATION 20.0f /* degrees */
-#define SP_CROWD_DELAY 4096      /* delay line, 48 kHz samples (85 ms) */
+#define SP_CROWD_DELAY 4096      /* delay line, 48 kHz samples (85 ms); a power of two */
 static const struct {
     float azimuth; /* degrees from straight at the stage; negative: left */
     int side;      /* the bus channel it plays: 0 left, 1 right */
@@ -627,6 +630,39 @@ static unsigned s_crowd_write;
 static int s_crowd_tail; /* frames left to play out the delay lines */
 static IPLBinauralEffect s_seat_bin[SP_CROWD_SEATS];
 
+/* Each seat's decorrelator: velvet noise, a sparse filter of taps of random
+ * sign, one at a random point in each SP_SEAT_SPAN_MS / SP_SEAT_TAPS ms,
+ * decaying over SP_SEAT_DECAY_MS, of unit energy. Different noise per seat,
+ * so the seats' copies of the bus don't line up into peaks at an ear. */
+#define SP_SEAT_TAPS 24
+#define SP_SEAT_SPAN_MS 24.0f
+#define SP_SEAT_DECAY_MS 8.0f
+static struct {
+    unsigned delay[SP_SEAT_TAPS]; /* samples at SP_RATE */
+    float gain[SP_SEAT_TAPS];
+} s_seat_fir[SP_CROWD_SEATS];
+
+static void seat_fir_init(void) {
+    for (int k = 0; k < SP_CROWD_SEATS; k++) {
+        uint32_t seed = 0x9E3779B9u * (uint32_t)(k + 1);
+        float energy = 0.f;
+        for (int t = 0; t < SP_SEAT_TAPS; t++) {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            const float where = (float)(seed >> 8) / 16777216.f;
+            const float ms = ((float)t + where) * (SP_SEAT_SPAN_MS / SP_SEAT_TAPS);
+            s_seat_fir[k].delay[t] = (unsigned)(ms * (SP_RATE / 1000.f));
+            const float g = ((seed & 1u) ? 1.f : -1.f) * expf(-ms / SP_SEAT_DECAY_MS);
+            s_seat_fir[k].gain[t] = g;
+            energy += g * g;
+        }
+        for (int t = 0; t < SP_SEAT_TAPS; t++) {
+            s_seat_fir[k].gain[t] /= sqrtf(energy);
+        }
+    }
+}
+
 /* A stereo pair of virtual speakers: left channel from one, right from the
  * other. */
 typedef struct Speakers {
@@ -816,6 +852,7 @@ void pc_spatial_init(int rate, int frame) {
         }
     }
     make_filters();
+    seat_fir_init();
     s_ready = true;
     pc_log_line("spatial: on, Steam Audio %d.%d.%d, HRTF binaural at %d Hz (resampled from %d) in %d-sample frames"
                 " (set up in %.1f ms)",
@@ -1077,8 +1114,14 @@ static void crowd_render(void) {
         const IPLVector3 dir = stage_direction(s_seats[k].azimuth, SP_CROWD_ELEVATION);
         const unsigned d = (unsigned)(s_seats[k].delay_ms * (SP_RATE / 1000.f));
         float in[SP_FRAME], left[SP_FRAME], right[SP_FRAME];
-        for (int i = 0; i < SP_FRAME; i++) {
-            in[i] = s_crowd_delay[s_seats[k].side][(s_crowd_write + SP_CROWD_DELAY - d + i) % SP_CROWD_DELAY];
+        const float* line = s_crowd_delay[s_seats[k].side];
+        memset(in, 0, sizeof(in));
+        for (int t = 0; t < SP_SEAT_TAPS; t++) {
+            const unsigned at = s_crowd_write + SP_CROWD_DELAY - d - s_seat_fir[k].delay[t];
+            const float g = s_seat_fir[k].gain[t];
+            for (int i = 0; i < SP_FRAME; i++) {
+                in[i] += g * line[(at + (unsigned)i) & (SP_CROWD_DELAY - 1)];
+            }
         }
         float* in_ch[1] = {in};
         float* out_ch[2] = {left, right};
