@@ -5,11 +5,17 @@
 
 #include "pc/pc.h"
 #include "pc/spatial_audio.h"
+#include <melee/gr/forward.h>
 #include <melee/gr/ground.h>
+#include <melee/gr/types.h>
+#include <melee/lb/lb_00B0.h>
+#include <sysdolphin/baselib/gobj.h>
+#include <sysdolphin/baselib/jobj.h>
 
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 /* Without a drawn fight frame for this long, the ambience fades out. */
@@ -17,7 +23,7 @@
 #define AMB_FADE_S 1.0f /* in or out, full scale */
 #define AMB_DUCK_S 0.15f /* the pause duck's glide, full scale */
 
-enum { AMB_NONE, AMB_WIND, AMB_FALLS };
+enum { AMB_NONE, AMB_WIND, AMB_FALLS, AMB_FOUNTAIN };
 
 static uint64_t s_stamp; /* game thread writes, audio thread reads (__atomic) */
 static int s_kind;
@@ -46,13 +52,58 @@ void pc_ambience_set_duck(float gain) {
     __atomic_store(&s_duck_target, &gain, __ATOMIC_RELAXED);
 }
 
+/* Fountain of Dreams' side platforms ride jets of water (grizumi.c: part 4,
+ * one gobj each): the root at the jet's foot in the stage's floor, its
+ * child the column, scaled in height with the platform (scale.y 0.01 to
+ * about 1), its grandchild under the platform. Sunk, the root is hidden.
+ * Published by the game thread each drawn frame, read by the audio thread
+ * (a sequence count around the copy). */
+#define JETS 2
+typedef struct Jets {
+    float pos[JETS][3]; /* game units: on the column, a little up from its foot */
+    float height[JETS]; /* the column's scale, 0 sunk; left jet first */
+} Jets;
+static Jets s_jets;
+static unsigned s_jets_seq;
+
+static void jets_frame(void) {
+    Jets j = {0};
+    for (HSD_GObj* g = HSD_GObjPLinkHead[HSD_GOBJ_PLINK_GROUND]; g != NULL; g = g->next) {
+        const Ground* gp = g->user_data;
+        HSD_JObj* root = g->hsd_obj;
+        if (gp == NULL || root == NULL || gp->map_id != 4) {
+            continue;
+        }
+        HSD_JObj* column = root->child;
+        HSD_JObj* top = column != NULL ? column->child : NULL;
+        Vec3 foot, under;
+        lb_8000B1CC(root, NULL, &foot);
+        const int k = foot.x < 0.f ? 0 : 1;
+        if (top == NULL || (root->flags & JOBJ_HIDDEN)) {
+            continue;
+        }
+        lb_8000B1CC(top, NULL, &under);
+        j.pos[k][0] = foot.x;
+        j.pos[k][1] = foot.y + 0.4f * (under.y - foot.y);
+        j.pos[k][2] = foot.z;
+        j.height[k] = fmaxf(column->scale.y, 0.f);
+    }
+    __atomic_add_fetch(&s_jets_seq, 1, __ATOMIC_ACQ_REL);
+    s_jets = j;
+    __atomic_add_fetch(&s_jets_seq, 1, __ATOMIC_RELEASE);
+}
+
 void pc_ambience_frame(void) {
     if (!enabled()) {
         return;
     }
     const int kind = stage_info.grkind == Gr_Kind_Corneria ? AMB_WIND
                      : stage_info.grkind == Gr_Kind_Kongo  ? AMB_FALLS
+                     : stage_info.grkind == Gr_Kind_Izumi  ? AMB_FOUNTAIN
                                                            : AMB_NONE;
+    if (kind == AMB_FOUNTAIN) {
+        jets_frame();
+    }
     __atomic_store_n(&s_kind, kind, __ATOMIC_RELAXED);
     __atomic_store_n(&s_stamp, now_ns(), __ATOMIC_RELEASE);
 }
@@ -276,6 +327,209 @@ static void falls_mix(float* out, int frames, int rate, bool on) {
     }
 }
 
+/* Fountain of Dreams' fountain, which the stage has no sound for: a basin
+ * behind the stage (part 3, joint 38: x 0, z -20.2, its rim at y 20.4)
+ * whose water falls all around it as a curtain onto the stage's pool
+ * (ripples at y 0.6). Heard from two points across the curtain's foot,
+ * each its own noise: a soft pour, a patter of spray and the plinks of
+ * drops and bubbles (Minnaert's: a sine whose pitch rises as it dies).
+ * Gentler than Kongo's waterfall: a garden fountain at night. And the jets
+ * the side platforms ride, a hiss with a low gurgle, as loud as the jet is
+ * tall, gone when the platform sinks. Placed sounds, slots 0-1 the curtain,
+ * 2-3 the jets. */
+#define CURTAIN_SOURCES 2
+static const float s_curtain_pos[CURTAIN_SOURCES][3] = {{-11.f, 4.f, -20.2f}, {11.f, 4.f, -20.2f}};
+#define DROPS 6
+
+typedef struct Drop {
+    float phase, freq, amp, env, decay, rise; /* decay: per sample; rise: pitch per sample */
+} Drop;
+
+typedef struct CurtainSource {
+    uint32_t seed;
+    Gust swell;
+    float p0, p1, p2;     /* pink noise */
+    float pour_hp, pour_lp;
+    float sp_hp, sp_lp, sp_env, sp_target; /* the patter */
+    int sp_hold;
+    Drop drop[DROPS];
+    float next_drop; /* samples */
+} CurtainSource;
+
+typedef struct JetSource {
+    uint32_t seed;
+    float level;               /* glides to the jet's height */
+    float pos[3];              /* where it was last seen, to fade out there */
+    float bp_low, bp_band;     /* the hiss */
+    float g_lp, g_env, g_target; /* the gurgle */
+    int g_hold;
+} JetSource;
+
+static struct {
+    bool init;
+    float level;
+    CurtainSource src[CURTAIN_SOURCES];
+    JetSource jet[JETS];
+} s_fountain;
+
+static void fountain_init(void) {
+    for (int c = 0; c < CURTAIN_SOURCES; c++) {
+        CurtainSource* f = &s_fountain.src[c];
+        *f = (CurtainSource){0};
+        f->seed = c == 0 ? 0x68E31DA4u : 0xB5297A4Du;
+        f->swell = (Gust){.seed = c == 0 ? 0x1B56C4E9u : 0x7FB5D329u, .value = 0.7f, .target = 0.7f};
+    }
+    for (int k = 0; k < JETS; k++) {
+        s_fountain.jet[k] = (JetSource){.seed = k == 0 ? 0x2C1B3C6Du : 0x297A2D39u};
+    }
+    s_fountain.init = true;
+}
+
+static float curtain_sample(CurtainSource* f, const float a[4], float rate) {
+    const float n = rnd_unit(&f->seed) * 2.f - 1.f;
+    f->p0 = 0.99765f * f->p0 + n * 0.0990460f;
+    f->p1 = 0.96300f * f->p1 + n * 0.2965164f;
+    f->p2 = 0.57000f * f->p2 + n * 1.0526913f;
+    const float pink = (f->p0 + f->p1 + f->p2 + n * 0.1848f) * 0.25f;
+    /* The pour: pink noise, 250 Hz to 1.6 kHz. */
+    f->pour_lp += a[0] * (pink - f->pour_lp);
+    f->pour_hp += a[1] * (f->pour_lp - f->pour_hp);
+    const float pour = f->pour_lp - f->pour_hp;
+    /* The patter: white noise, 1.5 to 7 kHz, through an envelope that
+     * jumps every millisecond or few. */
+    if (--f->sp_hold <= 0) {
+        const float r = rnd_unit(&f->seed);
+        f->sp_target = 0.2f + 0.8f * r * r;
+        f->sp_hold = 24 + (int)(rnd_unit(&f->seed) * 96.f);
+    }
+    f->sp_env += (f->sp_target - f->sp_env) * 0.02f;
+    f->sp_lp += a[2] * (n - f->sp_lp);
+    f->sp_hp += a[3] * (f->sp_lp - f->sp_hp);
+    const float patter = (f->sp_lp - f->sp_hp) * f->sp_env;
+    /* The drops: about 30 a second, 700 Hz to 3 kHz, 4 to 18 ms. */
+    if (--f->next_drop <= 0.f) {
+        for (int d = 0; d < DROPS; d++) {
+            Drop* p = &f->drop[d];
+            if (p->env < 1e-3f) {
+                const float tau = (0.004f + 0.014f * rnd_unit(&f->seed)) * rate;
+                p->freq = (700.f + 2300.f * rnd_unit(&f->seed) * rnd_unit(&f->seed)) / rate;
+                p->decay = expf(-1.f / tau);
+                p->rise = p->freq * 1.5f / tau;
+                p->amp = 0.3f + 0.7f * rnd_unit(&f->seed);
+                p->env = 1.f;
+                p->phase = 0.f;
+                break;
+            }
+        }
+        f->next_drop = -logf(1.f - rnd_unit(&f->seed) * 0.999f) * rate / 30.f;
+    }
+    float drops = 0.f;
+    for (int d = 0; d < DROPS; d++) {
+        Drop* p = &f->drop[d];
+        if (p->env < 1e-3f) {
+            continue;
+        }
+        drops += sinf(6.2831853f * p->phase) * p->env * p->amp;
+        p->phase += p->freq;
+        p->phase -= floorf(p->phase);
+        p->freq += p->rise;
+        p->env *= p->decay;
+    }
+    return pour * 1.1f + patter * 0.55f + drops * 0.09f;
+}
+
+static float jet_sample(JetSource* j, float f_bp, float a_lp) {
+    const float n = rnd_unit(&j->seed) * 2.f - 1.f;
+    /* The hiss: white noise through a soft band around 2.2 kHz. */
+    const float high = n - j->bp_low - 0.9f * j->bp_band;
+    j->bp_band += f_bp * high;
+    j->bp_low += f_bp * j->bp_band;
+    /* The gurgle: noise under 350 Hz, in uneven bursts. */
+    if (--j->g_hold <= 0) {
+        const float r = rnd_unit(&j->seed);
+        j->g_target = r * r;
+        j->g_hold = 200 + (int)(rnd_unit(&j->seed) * 900.f);
+    }
+    j->g_env += (j->g_target - j->g_env) * 0.004f;
+    j->g_lp += a_lp * (n - j->g_lp);
+    return j->bp_band * 0.5f + j->g_lp * j->g_env * 2.2f;
+}
+
+static void fountain_mix(float* out, int frames, int rate, bool on) {
+    const float dt = (float)frames / (float)rate;
+    if (!on && s_fountain.level <= 0.f) {
+        s_fountain.init = false;
+        return;
+    }
+    if (!s_fountain.init) {
+        fountain_init();
+    }
+    const float level0 = s_fountain.level;
+    s_fountain.level = on ? fminf(1.f, level0 + dt / AMB_FADE_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    const float volume = pc_get_sfx_volume() * ambience_gain();
+    const float duck0 = s_duck0, duck1 = s_duck;
+    const float w = 6.2831853f / (float)rate;
+    const float a[4] = {1.f - expf(-w * 1600.f), 1.f - expf(-w * 250.f), 1.f - expf(-w * 7000.f),
+                        1.f - expf(-w * 1500.f)};
+    float mono[160];
+    if (frames > 160) {
+        frames = 160;
+    }
+    for (int c = 0; c < CURTAIN_SOURCES; c++) {
+        CurtainSource* f = &s_fountain.src[c];
+        gust_step(&f->swell, dt * 0.4f);
+        /* With the jets, about -37.5 dBFS in a flat desktop mix between the
+         * fight's sounds (music muted): over Corneria's wind, under Kongo's
+         * waterfall. */
+        const float amp = (0.8f + 0.2f * f->swell.value) * 0.045f * volume;
+        for (int i = 0; i < frames; i++) {
+            const float t = (float)i / (float)frames;
+            const float lv = (level0 + (s_fountain.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
+            mono[i] = curtain_sample(f, a, (float)rate) * amp * lv;
+        }
+        if (!pc_spatial_render_placed(c, s_curtain_pos[c], mono)) {
+            for (int i = 0; i < frames; i++) { /* not placed (spatial audio bypassed): plain, centred */
+                out[i * 2] += mono[i] * 0.7071f;
+                out[i * 2 + 1] += mono[i] * 0.7071f;
+            }
+        }
+    }
+    /* The jets, where the game last drew them. */
+    Jets jets;
+    unsigned seq;
+    do {
+        seq = __atomic_load_n(&s_jets_seq, __ATOMIC_ACQUIRE);
+        jets = s_jets;
+    } while ((seq & 1u) != 0 || seq != __atomic_load_n(&s_jets_seq, __ATOMIC_ACQUIRE));
+    const float f_bp = 2.f * sinf(3.14159265f * 2200.f / (float)rate);
+    const float a_lp = 1.f - expf(-w * 350.f);
+    for (int k = 0; k < JETS; k++) {
+        JetSource* j = &s_fountain.jet[k];
+        const float want = sqrtf(fminf(jets.height[k], 1.f));
+        if (jets.height[k] > 0.f) {
+            memcpy(j->pos, jets.pos[k], sizeof(j->pos));
+        }
+        const float jl0 = j->level;
+        j->level += (want - j->level) * (1.f - expf(-dt / 0.25f));
+        if (jl0 < 1e-3f && j->level < 1e-3f) {
+            continue; /* sunk */
+        }
+        const float amp = 0.024f * volume;
+        for (int i = 0; i < frames; i++) {
+            const float t = (float)i / (float)frames;
+            const float lv = (level0 + (s_fountain.level - level0) * t) * (duck0 + (duck1 - duck0) * t) *
+                             (jl0 + (j->level - jl0) * t);
+            mono[i] = jet_sample(j, f_bp, a_lp) * amp * lv;
+        }
+        if (!pc_spatial_render_placed(CURTAIN_SOURCES + k, j->pos, mono)) {
+            for (int i = 0; i < frames; i++) {
+                out[i * 2] += mono[i] * 0.7071f;
+                out[i * 2 + 1] += mono[i] * 0.7071f;
+            }
+        }
+    }
+}
+
 void pc_ambience_mix(float* out, int frames, int rate) {
     if (!enabled()) {
         return;
@@ -294,4 +548,5 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     s_duck = s_duck < target ? fminf(target, s_duck + step) : fmaxf(target, s_duck - step);
     wind_mix(out, frames, rate, fresh && kind == AMB_WIND);
     falls_mix(out, frames, rate, fresh && kind == AMB_FALLS);
+    fountain_mix(out, frames, rate, fresh && kind == AMB_FOUNTAIN);
 }

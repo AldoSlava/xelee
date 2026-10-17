@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Stage ambience: sounds the stages lack, made here (docs: the expanded
  * stage sounds idea). Corneria's wind on the Great Fox's deck, heard all
- * around, and Kongo Jungle's waterfall, heard from where it falls.
+ * around; Kongo Jungle's waterfall, and Fountain of Dreams' fountain and
+ * the jets its side platforms ride, heard from where they are.
  * Output only: nothing here is read back by the game, so netplay and
  * rollback never see it. MELEE_AMBIENCE_GAIN (dB) sets its level. */
 #pragma once
