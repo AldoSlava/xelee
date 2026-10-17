@@ -24,7 +24,9 @@ pads (MELEE_NET_RECORD) to the app's files dir; --replay NAME plays them back
 summary says whether the replay stayed in step.
 
 The game reads its knobs from melee-env.txt (src/pc/main.c,
-pc_env_file_bootstrap), which this rewrites on every run. The disc comes from
+pc_env_file_bootstrap), which this rewrites on every run; the player's own
+is kept aside (melee-env.txt.player) and put back after each run and at
+hand-back. The disc comes from
 the launcher's own launcher.cfg (debug builds only: run-as), or MELEE_DISC.
 With more than one adb device and no ANDROID_SERIAL, the first device listed
 by address is used: a wireless headset shows up under both its address and
@@ -106,12 +108,40 @@ def wake_headset(tries=36):
     sys.exit("the headset didn't wake")
 
 
+# A run's melee-env.txt starts with this line; any other is the player's
+# own, kept aside as ENV_SAVED while runs replace it and put back after.
+RUN_ENV_MARK = "# quest_perf run\n"
+ENV_SAVED = ENV_FILE + ".player"
+
+
+def save_player_env():
+    """Before a run writes its env: the player's own melee-env.txt (one
+    without the run mark), if any and not saved already, aside."""
+    current = adb("shell", "cat", ENV_FILE, check=False)
+    if not current or current.startswith(RUN_ENV_MARK.strip()) or "No such file" in current:
+        return
+    if adb("shell", "ls", ENV_SAVED, check=False).strip() == ENV_SAVED:
+        return
+    adb("shell", "cp", ENV_FILE, ENV_SAVED, check=False)
+
+
+def remove_run_files():
+    """The run's env and control files gone, the player's env back."""
+    adb("shell", "rm", "-f", CTL_FILE, check=False)
+    if adb("shell", "ls", ENV_SAVED, check=False).strip() == ENV_SAVED:
+        adb("shell", f"mv {ENV_SAVED} {ENV_FILE} && chmod 666 {ENV_FILE}", check=False)
+    else:
+        current = adb("shell", "cat", ENV_FILE, check=False)
+        if current.startswith(RUN_ENV_MARK.strip()):
+            adb("shell", "rm", "-f", ENV_FILE, check=False)
+
+
 def hand_back():
-    """The end of a batch: the game stopped, its run files gone, proximity
-    back to the sensor and the usual screen timeout, so the unworn headset
-    sleeps."""
+    """The end of a batch: the game stopped, its run files gone (the
+    player's own melee-env.txt back), proximity back to the sensor and the
+    usual screen timeout, so the unworn headset sleeps."""
     adb("shell", "am", "force-stop", PKG, check=False)
-    adb("shell", "rm", "-f", ENV_FILE, CTL_FILE, check=False)
+    remove_run_files()
     adb("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_disable", check=False)
     adb("shell", "settings", "put", "system", "screen_off_timeout", str(IDLE_SCREEN_TIMEOUT_MS), check=False)
 
@@ -257,7 +287,7 @@ def run(args):
         run_phases(args)
     finally:
         adb("shell", "am", "force-stop", PKG, check=False)
-        adb("shell", "rm", "-f", ENV_FILE, CTL_FILE, check=False)
+        remove_run_files()
         if args.cpu_level is not None or args.gpu_level is not None:
             set_levels(None, None)
         if args.hand_back:
@@ -301,7 +331,8 @@ def run_phases(args):
     if "AURORA_XR_DUMP" in env:
         adb("shell", "mkdir", "-p", env["AURORA_XR_DUMP"])
     wake_headset()
-    shell_write(ENV_FILE, "".join(f"{k}={v}\n" for k, v in env.items()))
+    save_player_env()
+    shell_write(ENV_FILE, RUN_ENV_MARK + "".join(f"{k}={v}\n" for k, v in env.items()))
     shell_write(CTL_FILE, phases[0][0] + "\n")
     # Keep the display running with nobody wearing it, for the run.
     adb("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.prox_close")
