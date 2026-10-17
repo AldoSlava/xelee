@@ -121,6 +121,11 @@ float pc_audio_get_sfx_volume(void);
 /* false bypasses the aux effects (stage reverb and echo); the dry mix is
  * unchanged. On by default. */
 void pc_audio_set_reverb(bool on);
+/* A DSP-ADPCM sample in ARAM, decoded whole as the mixer plays it: from its
+ * AXPBADDR and AXPBADPCM blocks as a sound bank holds them (big-endian;
+ * HSD_SynthSFXSample), into `out`, at most `max` samples. Returns how many;
+ * 0 for another format or an address outside ARAM. Any thread. */
+int pc_audio_decode_sample(const void* addr, const void* adpcm, int16_t* out, int max);
 
 /* Texture replacements (src/pc/textures.cpp) */
 void pc_textures_init(void);

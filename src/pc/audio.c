@@ -243,6 +243,44 @@ static bool next_sample(Voice* v, s16* out) {
     return true;
 }
 
+int pc_audio_decode_sample(const void* addr_be, const void* adpcm_be, int16_t* out, int max) {
+    const AXPBADDR* addr = addr_be;
+    const AXPBADPCM* adpcm = adpcm_be;
+    const u8* aram = aurora_aram_base();
+    if (aram == NULL || be16(addr->format) != AX_FORMAT_ADPCM) {
+        return 0;
+    }
+    u32 cur = addr32(be16(addr->currentAddressHi), be16(addr->currentAddressLo));
+    const u32 end = addr32(be16(addr->endAddressHi), be16(addr->endAddressLo));
+    if (end < cur || (end >> 1) >= PC_ARAM_SIZE) {
+        return 0;
+    }
+    s32 yn1 = (s16)be16(adpcm->yn1), yn2 = (s16)be16(adpcm->yn2);
+    u8 pred_scale = (u8)be16(adpcm->pred_scale);
+    int n = 0;
+    while (n < max) {
+        if ((cur & 15) == 0) { /* a frame's header: 2 nibbles */
+            pred_scale = aram[cur >> 1];
+            cur += 2;
+        }
+        const u8 byte = aram[cur >> 1];
+        s32 nibble = (cur & 1) ? (byte & 0xF) : (byte >> 4);
+        nibble = nibble >= 8 ? nibble - 16 : nibble;
+        const u32 coef = (pred_scale >> 4) & 7;
+        const s64 acc = (s64)nibble * (1 << (pred_scale & 0xF)) * 2048 + 1024 +
+                        (s64)(s16)be16(adpcm->a[coef][0]) * yn1 + (s64)(s16)be16(adpcm->a[coef][1]) * yn2;
+        const s32 sample = clamp16(acc >> 11);
+        yn2 = yn1;
+        yn1 = sample;
+        out[n++] = (int16_t)sample;
+        if (cur >= end) { /* inclusive */
+            break;
+        }
+        cur++;
+    }
+    return n;
+}
+
 /* ---- aux busses -------------------------------------------------------- */
 
 /* AX has two auxiliary send busses. Voices send into them with the vAuxA and

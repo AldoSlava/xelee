@@ -111,6 +111,10 @@ static bool enabled(void) {
     return s_on != 0;
 }
 
+bool pc_spatial_enabled(void) {
+    return enabled();
+}
+
 static int stats_on(void) {
     static int cached = -1;
     if (cached < 0) {

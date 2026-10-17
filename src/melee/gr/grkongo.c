@@ -11,6 +11,10 @@
 #include "inlines.h"
 #include "stage.h"
 #include "types.h"
+
+#ifdef TARGET_PC
+#include "pc/stage_ambience.h"
+#endif
 #include <melee/ef/efsync.h>
 #include <melee/ft/ftdevice.h>
 #include <melee/ft/ftlib.h>
@@ -164,7 +168,11 @@ void grKongo_801D523C(void)
     mpLib_80057BC0(0);
     mpLib_80057BC0(1);
     if ((Stage_80225194() != 0x3D) && (gm_8016B238() == 0)) {
-        Ground_801C53EC(0x5A551U);
+#ifdef TARGET_PC
+        /* The expanded stage sounds play the jungle through the fight. */
+        if (!pc_ambience_kongo_jungle())
+#endif
+            Ground_801C53EC(0x5A551U);
     }
 }
 

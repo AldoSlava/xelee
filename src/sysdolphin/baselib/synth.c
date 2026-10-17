@@ -1650,3 +1650,27 @@ void HSD_SynthInit(int dsp_size, int voices, int stream_size, int bank_size)
 /// @remarks Nothing in the DOL references this; it is recovered from the tail
 /// of this TU's `.data`.
 static u8 HSD_Synth_804080FC[0x44] = { 0 };
+
+#ifdef TARGET_PC
+bool HSD_SynthSFXSample(int sfx_id, int voice, const void** addr, const void** adpcm, int* rate,
+                        int* voices)
+{
+    struct foo* sfx_entry;
+    for (sfx_entry = hsd_SynthSFXDataHash[sfx_id & 0x1F]; sfx_entry != NULL;
+         sfx_entry = DP(struct foo, sfx_entry->next))
+    {
+        if (sfx_entry->unk4 != sfx_id) {
+            continue;
+        }
+        if (voice < 0 || voice >= sfx_entry->unk8) {
+            return false;
+        }
+        *addr = &SFX_VOICE(voice)->x10;
+        *adpcm = &SFX_VOICE(voice)->x20;
+        *rate = sfx_entry->unkC;
+        *voices = sfx_entry->unk8;
+        return true;
+    }
+    return false;
+}
+#endif

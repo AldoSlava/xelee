@@ -22,6 +22,12 @@ void pc_ambience_set_enabled(bool on);
  * ambience plays. Read only. */
 void pc_ambience_frame(void);
 
+/* Game thread, as Kongo Jungle loads (grKongo_801D523C): true when the
+ * expanded stage sounds take over its jungle sound (0x5A551, a recording
+ * that plays once and fades out in 18 s), to play it through the fight;
+ * the stage then doesn't start its own. */
+bool pc_ambience_kongo_jungle(void);
+
 /* Any thread: the pause menu's duck (lbAudioAx_80024E84), which takes the
  * music down to 0.2; the ambience follows it, gliding. It lifts by itself
  * once no fight draws, so a match left paused can't leave the next one

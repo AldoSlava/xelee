@@ -70,4 +70,14 @@ void HSD_SynthSFXKeyOff(int);
 /* 38B81C */ void HSD_SynthStreamSetVolume(float);
 /* 38B938 */ void HSD_SynthInit(int, int, int, int);
 
+#ifdef TARGET_PC
+/* PC: a loaded sound's sample for voice `voice` (0, or 1 of a stereo
+ * pair): its AXPBADDR and AXPBADPCM blocks as the bank holds them
+ * (big-endian, as AXSetVoiceAddr and AXSetVoiceAdpcm take them), its
+ * sample rate and its voice count. False when the sound isn't loaded or
+ * has no such voice. */
+bool HSD_SynthSFXSample(int sfx_id, int voice, const void** addr, const void** adpcm, int* rate,
+                        int* voices);
+#endif
+
 #endif

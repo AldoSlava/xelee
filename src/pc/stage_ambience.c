@@ -11,6 +11,7 @@
 #include <melee/lb/lb_00B0.h>
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/jobj.h>
+#include <sysdolphin/baselib/synth.h>
 
 #include <math.h>
 #include <stdint.h>
@@ -91,6 +92,47 @@ static void jets_frame(void) {
     __atomic_add_fetch(&s_jets_seq, 1, __ATOMIC_ACQ_REL);
     s_jets = j;
     __atomic_add_fetch(&s_jets_seq, 1, __ATOMIC_RELEASE);
+}
+
+/* Kongo Jungle's jungle: Melee plays a stereo recording (sound 0x55D, 16
+ * kHz, 18.4 s) once as the stage loads; it rises over half a second, holds
+ * to about 7.5 s (a louder call at 5.8 to 6.5 s) and fades over the rest.
+ * Here it plays from its start to 7 s, then on through the fight from
+ * stretches of its steady part picked at random, each crossfading into the
+ * next, so nothing comes round on a cycle; the call comes back now and
+ * then. Decoded from the bank as the stage loads (a few ms, in the load),
+ * into whichever of two buffers the audio thread isn't on. */
+#define JUNGLE_SFX 0x55D
+#define JUNGLE_MAX 300000 /* samples a channel: 18.75 s at 16 kHz */
+static int16_t s_jungle_buf[2][2][JUNGLE_MAX];
+static int s_jungle_len[2];
+static int s_jungle_rate[2];
+static int s_jungle_ready = -1; /* the buffer last decoded (__atomic); -1: none */
+static unsigned s_jungle_serial; /* bumped each load (__atomic): play it from the start */
+static int s_jungle_playing = -1; /* audio thread writes: the buffer it's on (__atomic) */
+
+bool pc_ambience_kongo_jungle(void) {
+    if (!enabled() || !pc_spatial_enabled()) {
+        return false;
+    }
+    const int b = __atomic_load_n(&s_jungle_playing, __ATOMIC_ACQUIRE) == 0 ? 1 : 0;
+    int n[2] = {0, 0}, rate = 0;
+    for (int c = 0; c < 2; c++) {
+        const void *addr, *adpcm;
+        int voices;
+        if (!HSD_SynthSFXSample(JUNGLE_SFX, c, &addr, &adpcm, &rate, &voices) || voices != 2) {
+            return false;
+        }
+        n[c] = pc_audio_decode_sample(addr, adpcm, s_jungle_buf[b][c], JUNGLE_MAX);
+    }
+    if (n[0] < rate * 8 || n[0] != n[1] || rate <= 0) {
+        return false; /* not the recording expected: the stage plays its own */
+    }
+    s_jungle_len[b] = n[0];
+    s_jungle_rate[b] = rate;
+    __atomic_store_n(&s_jungle_ready, b, __ATOMIC_RELEASE);
+    __atomic_add_fetch(&s_jungle_serial, 1, __ATOMIC_RELEASE);
+    return true;
 }
 
 void pc_ambience_frame(void) {
@@ -530,6 +572,120 @@ static void fountain_mix(float* out, int frames, int rate, bool on) {
     }
 }
 
+/* The jungle's playing (audio thread): up to two stretches of the
+ * recording at once, the newer crossfading in over the older. */
+#define JUNGLE_INTRO_S 7.0f      /* from the start, as Melee plays it */
+#define JUNGLE_STEADY_S 0.75f    /* the steady part: from here... */
+#define JUNGLE_STEADY_END_S 5.6f /* ...to here, short of the call */
+#define JUNGLE_CALL_S 4.4f       /* a stretch with the call starts here */
+#define JUNGLE_CALL_P 0.15f      /* that often */
+#define JUNGLE_SEG_S 2.5f
+#define JUNGLE_XFADE_S 0.8f
+/* Its level as Melee plays it: 10 dB under the decoded recording, measured
+ * against the original in a flat desktop mix. */
+#define JUNGLE_GAIN 0.31f
+
+typedef struct JungleSeg {
+    bool on;
+    double pos;   /* source samples */
+    double end;   /* where it has faded out */
+    double fade_in_end; /* where its fade-in is done (pos at start + crossfade) */
+    double fade_out_start;
+} JungleSeg;
+
+static struct {
+    unsigned serial;
+    int buf;
+    float level;
+    uint32_t seed;
+    JungleSeg seg[2];
+} s_jungle = {.buf = -1};
+
+static void jungle_seg(JungleSeg* g, double start, double len, double xf, bool fade_in) {
+    g->on = true;
+    g->pos = start;
+    g->end = start + len;
+    g->fade_in_end = fade_in ? start + xf : start;
+    g->fade_out_start = g->end - xf;
+}
+
+static void jungle_mix(float* out, int frames, int rate, bool on) {
+    const unsigned serial = __atomic_load_n(&s_jungle_serial, __ATOMIC_ACQUIRE);
+    if (on && serial != s_jungle.serial) {
+        /* A new load: from the start, on its buffer. */
+        s_jungle.serial = serial;
+        s_jungle.buf = __atomic_load_n(&s_jungle_ready, __ATOMIC_ACQUIRE);
+        __atomic_store_n(&s_jungle_playing, s_jungle.buf, __ATOMIC_RELEASE);
+        if (s_jungle.buf >= 0) {
+            const double sr = s_jungle_rate[s_jungle.buf];
+            s_jungle.seed = 0x3C6EF372u ^ serial;
+            s_jungle.seg[1].on = false;
+            jungle_seg(&s_jungle.seg[0], 0.0, JUNGLE_INTRO_S * sr, JUNGLE_XFADE_S * sr, false);
+            s_jungle.level = 1.f; /* the recording rises by itself */
+        }
+    }
+    const int b = s_jungle.buf;
+    if (b < 0 || (!s_jungle.seg[0].on && !s_jungle.seg[1].on)) {
+        return;
+    }
+    const float dt = (float)frames / (float)rate;
+    const float level0 = s_jungle.level;
+    s_jungle.level = on ? fminf(1.f, level0 + dt / AMB_FADE_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    if (!on && s_jungle.level <= 0.f) {
+        s_jungle.seg[0].on = s_jungle.seg[1].on = false;
+        s_jungle.buf = -1;
+        __atomic_store_n(&s_jungle_playing, -1, __ATOMIC_RELEASE);
+        return;
+    }
+    const double sr = s_jungle_rate[b];
+    const double step = sr / (double)rate;
+    const double xf = JUNGLE_XFADE_S * sr;
+    const int len = s_jungle_len[b];
+    const float volume = pc_get_sfx_volume() * ambience_gain() * JUNGLE_GAIN;
+    const float duck0 = s_duck0, duck1 = s_duck;
+    for (int i = 0; i < frames; i++) {
+        float l = 0.f, r = 0.f;
+        for (int k = 0; k < 2; k++) {
+            JungleSeg* g = &s_jungle.seg[k];
+            if (!g->on) {
+                continue;
+            }
+            /* The next stretch starts as this one starts fading out. */
+            if (g->pos >= g->fade_out_start && !s_jungle.seg[k ^ 1].on) {
+                double start = (JUNGLE_STEADY_S + (JUNGLE_STEADY_END_S - JUNGLE_STEADY_S - JUNGLE_SEG_S) *
+                                                      rnd_unit(&s_jungle.seed)) * sr;
+                if (rnd_unit(&s_jungle.seed) < JUNGLE_CALL_P) {
+                    start = JUNGLE_CALL_S * sr;
+                }
+                jungle_seg(&s_jungle.seg[k ^ 1], start, JUNGLE_SEG_S * sr, xf, true);
+            }
+            float gain = 1.f;
+            if (g->pos < g->fade_in_end) {
+                gain = sinf(1.5707963f * (float)((g->pos - (g->fade_in_end - xf)) / xf));
+            } else if (g->pos >= g->fade_out_start) {
+                gain = cosf(1.5707963f * (float)((g->pos - g->fade_out_start) / xf));
+            }
+            const int p = (int)g->pos;
+            if (p + 1 < len) {
+                const float f = (float)(g->pos - p);
+                const int16_t* bl = s_jungle_buf[b][0];
+                const int16_t* br = s_jungle_buf[b][1];
+                l += ((float)bl[p] + ((float)bl[p + 1] - (float)bl[p]) * f) * gain;
+                r += ((float)br[p] + ((float)br[p + 1] - (float)br[p]) * f) * gain;
+            }
+            g->pos += step;
+            if (g->pos >= g->end || p + 1 >= len) {
+                g->on = false;
+            }
+        }
+        const float t = (float)i / (float)frames;
+        const float lv = (level0 + (s_jungle.level - level0) * t) * (duck0 + (duck1 - duck0) * t) * volume *
+                         (1.f / 32768.f);
+        out[i * 2] += l * lv;
+        out[i * 2 + 1] += r * lv;
+    }
+}
+
 void pc_ambience_mix(float* out, int frames, int rate) {
     if (!enabled()) {
         return;
@@ -548,5 +704,6 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     s_duck = s_duck < target ? fminf(target, s_duck + step) : fmaxf(target, s_duck - step);
     wind_mix(out, frames, rate, fresh && kind == AMB_WIND);
     falls_mix(out, frames, rate, fresh && kind == AMB_FALLS);
+    jungle_mix(out, frames, rate, fresh && kind == AMB_FALLS);
     fountain_mix(out, frames, rate, fresh && kind == AMB_FOUNTAIN);
 }
