@@ -122,7 +122,8 @@ float pc_audio_get_sfx_volume(void);
  * unchanged. On by default. */
 void pc_audio_set_reverb(bool on);
 /* The dev tools' music level (0 to 1) over the player's, to hear the rest
- * of the mix without it. 1 by default. */
+ * of the mix without it, and up to 8 to lift the pause's duck while the
+ * Stage page is open. 1 by default. */
 void pc_audio_set_dev_music_gain(float gain);
 float pc_audio_dev_music_gain(void);
 /* A DSP-ADPCM sample in ARAM, decoded whole as the mixer plays it: from its

@@ -34,7 +34,7 @@ ItemKind itGetKind(HSD_GObj* gobj);
 #include <time.h>
 
 #define SP_VOICES 64       /* AX_VOICES */
-#define SP_PLACED 4        /* sounds made here, at points of the stage (pc_spatial_render_placed) */
+#define SP_PLACED 8        /* sounds made here, at points of the stage (pc_spatial_render_placed) */
 #define SP_EMITTERS 64     /* fighters and items published per frame */
 #define SP_HANDLES 256     /* netplay starts remembered by handle */
 #define SP_STALE_NS 250000000ull /* positions older than this: back to plain stereo */
@@ -91,6 +91,14 @@ static const struct {
  * -9 (the player's first pick by ear, 30%) cut it more than needed.
  * MELEE_SPATIAL_MUSIC_GAIN overrides. */
 #define SP_FIGHT_MUSIC_DB (-4.4f)
+/* Menus (no fight spatializing) under spatial audio, the whole mix in dB:
+ * the fight's music sits 4.4 dB down for its placed sounds, so menus at
+ * full came out louder than play (a flat desktop mix: character select
+ * -18.9 dBFS, a fight's music and stage -23.6), and on the headset "much
+ * louder". The same trim puts their music level with the fight's.
+ * MELEE_MENU_GAIN overrides. Glides over SP_MENU_GLIDE_S. */
+#define SP_MENU_DB (-4.4f)
+#define SP_MENU_GLIDE_S 0.5f
 /* Frames (5 ms) to cross between plain stereo and a speaker blend. */
 #define SP_SPEAKER_FADE 10
 #define SP_ROLLOFF 0.5f
@@ -1364,6 +1372,23 @@ void pc_spatial_output(float* out) {
     }
     const uint64_t t0 = now_ns();
     bool used = false;
+    /* Menus: all of it down a little, gliding in and out. */
+    static float menu_trim = -1.f, menu_gain = 1.f;
+    if (menu_trim < 0.f) {
+        const char* v = getenv("MELEE_MENU_GAIN");
+        menu_trim = powf(10.f, (v != NULL && v[0] != '\0' ? (float)atof(v) : SP_MENU_DB) / 20.f);
+    }
+    const float menu_want = s_active ? 1.f : menu_trim;
+    const float menu0 = menu_gain;
+    const float menu_step = (1.f - menu_trim) * (float)SP_AX_FRAME / (SP_MENU_GLIDE_S * (float)SP_AX_RATE);
+    menu_gain = menu_gain < menu_want ? fminf(menu_want, menu_gain + menu_step) : fmaxf(menu_want, menu_gain - menu_step);
+    if (menu0 != 1.f || menu_gain != 1.f) {
+        for (int i = 0; i < SP_AX_FRAME; i++) {
+            const float g = menu0 + (menu_gain - menu0) * ((float)i / (float)SP_AX_FRAME);
+            out[i * 2] *= g;
+            out[i * 2 + 1] *= g;
+        }
+    }
     /* Fights: the music, from ahead of the stage, turned down. */
     if (s_music_bus_on) {
         static float trim = -1.f;

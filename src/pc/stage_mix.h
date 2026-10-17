@@ -8,8 +8,9 @@
  * low shelf, the peak, the high shelf: Hz, dB, Q), NAME a channel below with
  * '_' for a space, e.g.
  *   MELEE_STAGE_MIX="ENGINES=+6/120,0,0.7/1500,4,1.2/6000,0,0.7 RUSH=-2"
- * The panel logs each change in that form. Flat (0 dB everywhere) without
- * either. Output only, like the sounds it mixes. */
+ * The panel logs each change in that form. Both start from the stage's
+ * preset, the mix tuned on the headset (pc/stage_mix.c's table), or flat
+ * (0 dB everywhere) without one. Output only, like the sounds it mixes. */
 #pragma once
 
 #include <stdbool.h>
@@ -30,6 +31,8 @@ enum {
     STAGE_MIX_JETS = 1,
     STAGE_MIX_ENGINES = 0, /* Big Blue */
     STAGE_MIX_RUSH = 1,
+    STAGE_MIX_CRAFT = 2,
+    STAGE_MIX_FLYER = 3,
 };
 
 /* One stream's filter state (a voice, a placed source, a bus's channel);

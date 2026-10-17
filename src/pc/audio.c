@@ -122,7 +122,10 @@ float pc_audio_get_music_volume(void) {
 static float s_dev_music_gain = 1.0f; /* __atomic: the dev tools' music level */
 
 void pc_audio_set_dev_music_gain(float gain) {
-    gain = gain < 0.0f ? 0.0f : (gain > 1.0f ? 1.0f : gain);
+    /* Over 1 only to lift the pause's duck (x5) while the dev tools' Stage
+     * page is open (pc/spatial_audio.c); clamped at 1 the music stayed
+     * ducked there. */
+    gain = gain < 0.0f ? 0.0f : (gain > 8.0f ? 8.0f : gain);
     __atomic_store(&s_dev_music_gain, &gain, __ATOMIC_RELAXED);
 }
 

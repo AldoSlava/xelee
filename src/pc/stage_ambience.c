@@ -128,6 +128,80 @@ static void racers_frame(void) {
     __atomic_add_fetch(&s_racers_seq, 1, __ATOMIC_RELEASE);
 }
 
+/* Big Blue's other craft: the passing ones fighters ride (part 32, depth
+ * first from its root: two hover platforms, bodies at joints 2 and 7, each
+ * on two jets, and a smaller round one at 12 on one), and the Falcon Flyer
+ * the fight starts on (part 35, its two rear engines at joints 6 and 9),
+ * which flies off after about 45 s. Where each is and whether it's there,
+ * published with the racers' sequence count. */
+#define CRAFT 4 /* the two platforms, the ball, the Flyer */
+typedef struct Craft {
+    float pos[CRAFT][3];
+    bool here[CRAFT];
+} Craft;
+static Craft s_craft;
+
+static HSD_JObj* joint_at(HSD_JObj* root, int want) {
+    HSD_JObj* stack[64];
+    int sp = 0, idx = 0;
+    stack[sp++] = root;
+    while (sp > 0) {
+        HSD_JObj* j = stack[--sp];
+        if (idx++ == want) {
+            return j;
+        }
+        if (j->next != NULL && sp < 64) {
+            stack[sp++] = j->next;
+        }
+        if (j->child != NULL && sp < 64) {
+            stack[sp++] = j->child;
+        }
+    }
+    return NULL;
+}
+
+static bool joint_shown(HSD_JObj* root, int k, float pos[3]) {
+    HSD_JObj* j = joint_at(root, k);
+    if (j == NULL || (j->flags & JOBJ_HIDDEN)) {
+        return false;
+    }
+    Vec3 w;
+    lb_8000B1CC(j, NULL, &w);
+    pos[0] = w.x;
+    pos[1] = w.y;
+    pos[2] = w.z;
+    return isfinite(w.x) && isfinite(w.y) && isfinite(w.z);
+}
+
+static void craft_frame(void) {
+    Craft c = {0};
+    for (HSD_GObj* g = HSD_GObjPLinkHead[HSD_GOBJ_PLINK_GROUND]; g != NULL; g = g->next) {
+        const Ground* gp = g->user_data;
+        HSD_JObj* root = g->hsd_obj;
+        if (gp == NULL || root == NULL) {
+            continue;
+        }
+        if (gp->map_id == 32) {
+            static const int bodies[3] = {2, 7, 12};
+            for (int k = 0; k < 3; k++) {
+                c.here[k] = joint_shown(root, bodies[k], c.pos[k]);
+                c.pos[k][1] -= 8.f; /* down at its jets */
+            }
+        } else if (gp->map_id == 35) {
+            float a[3], b[3];
+            if (joint_shown(root, 6, a) && joint_shown(root, 9, b)) {
+                for (int i = 0; i < 3; i++) {
+                    c.pos[3][i] = 0.5f * (a[i] + b[i]);
+                }
+                c.here[3] = true;
+            }
+        }
+    }
+    __atomic_add_fetch(&s_racers_seq, 1, __ATOMIC_ACQ_REL);
+    s_craft = c;
+    __atomic_add_fetch(&s_racers_seq, 1, __ATOMIC_RELEASE);
+}
+
 bool pc_ambience_racers(void) {
     return enabled() && pc_spatial_enabled();
 }
@@ -200,6 +274,7 @@ void pc_ambience_frame(void) {
         jets_frame();
     } else if (kind == AMB_RUSH) {
         racers_frame();
+        craft_frame();
     }
     __atomic_store_n(&s_kind, kind, __ATOMIC_RELAXED);
     __atomic_store_n(&s_stamp, now_ns(), __ATOMIC_RELEASE);
@@ -1016,6 +1091,124 @@ static void racers_mix(float* out, int frames, int rate, bool on) {
     }
 }
 
+/* The other craft's engines (craft_frame), slots 4-7, placed:
+ *  - the hover platforms and the ball: small jets, a hiss of thrust (noise
+ *    around 2.2 kHz, the ball's higher and lighter) over a little low rumble,
+ *    a faint whine, fluttering as it burns; the mixer's CRAFT channel;
+ *  - the Falcon Flyer: a deep rocket rumble from its rear engines (noise
+ *    under 120 Hz, a 46 Hz drone and its octave, a roar around 500 Hz),
+ *    surging slowly; its FLYER channel.
+ * Each fades in and out as the craft comes and goes. */
+typedef struct CraftSource {
+    uint32_t seed;
+    float level;
+    float pos[3];
+    Gust surge;
+    Flutter flicker;
+    float lp1, lp2, bp_low, bp_band, r_low, r_band;
+    float ph, ph2;
+    StageMixState mix;
+} CraftSource;
+
+static struct {
+    bool init;
+    float level;
+    CraftSource src[CRAFT];
+} s_craft_mix;
+
+static void craft_mix(float* out, int frames, int rate, bool on) {
+    const float dt = (float)frames / (float)rate;
+    if (!on && s_craft_mix.level <= 0.f) {
+        s_craft_mix.init = false;
+        return;
+    }
+    if (!s_craft_mix.init) {
+        for (int k = 0; k < CRAFT; k++) {
+            CraftSource* c = &s_craft_mix.src[k];
+            *c = (CraftSource){.seed = 0xB5297A4Du + 0x68E31DA4u * (uint32_t)k};
+            c->surge = (Gust){.seed = 0x1B873593u ^ (uint32_t)k, .value = 0.6f, .target = 0.6f};
+            c->flicker = (Flutter){.seed = 0xCC9E2D51u ^ (uint32_t)k, .value = 0.5f, .rate = k == 3 ? 7.f : 31.f};
+        }
+        s_craft_mix.init = true;
+    }
+    const float level0 = s_craft_mix.level;
+    s_craft_mix.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    const float volume = pc_get_sfx_volume() * ambience_gain();
+    const float duck0 = s_duck0, duck1 = s_duck;
+    Craft craft;
+    unsigned seq;
+    do {
+        seq = __atomic_load_n(&s_racers_seq, __ATOMIC_ACQUIRE);
+        craft = s_craft;
+    } while ((seq & 1u) != 0 || seq != __atomic_load_n(&s_racers_seq, __ATOMIC_ACQUIRE));
+    const float w = 6.2831853f / (float)rate;
+    const float inv_rate = 1.f / (float)rate;
+    float mono[160];
+    if (frames > 160) {
+        frames = 160;
+    }
+    for (int k = 0; k < CRAFT; k++) {
+        CraftSource* c = &s_craft_mix.src[k];
+        const bool flyer = k == 3, ball = k == 2;
+        if (craft.here[k]) {
+            memcpy(c->pos, craft.pos[k], sizeof(c->pos));
+        }
+        const float cl0 = c->level;
+        c->level += ((craft.here[k] ? 1.f : 0.f) - c->level) * (1.f - expf(-dt / 0.3f));
+        if (cl0 < 1e-3f && c->level < 1e-3f) {
+            continue;
+        }
+        gust_step(&c->surge, dt * (flyer ? 0.4f : 1.2f));
+        const float flick = flutter_step(&c->flicker, dt);
+        const float a_low = 1.f - expf(-w * (flyer ? 120.f : 160.f));
+        const float f_bp = 2.f * sinf(3.14159265f * (flyer ? 500.f : ball ? 3000.f : 2200.f) / (float)rate);
+        const float f_rb = 2.f * sinf(3.14159265f * (flyer ? 1100.f : 900.f) / (float)rate);
+        const float tone = flyer ? 46.f : ball ? 2400.f : 1650.f;
+        /* In a flat desktop mix against the stage's bed of about -30 dBFS
+         * (the racers and the rush as tuned): the Flyer about -36 while it's
+         * there, a platform about -40. */
+        float amp;
+        if (flyer) {
+            amp = (0.7f + 0.3f * c->surge.value) * 0.2f * volume;
+        } else {
+            amp = (0.75f + 0.25f * flick) * (ball ? 0.042f : 0.055f) * volume;
+        }
+        for (int i = 0; i < frames; i++) {
+            const float n = rnd_unit(&c->seed) * 2.f - 1.f;
+            c->lp1 += a_low * (n - c->lp1);
+            c->lp2 += a_low * (c->lp1 - c->lp2);
+            const float high = n - c->bp_low - 0.9f * c->bp_band;
+            c->bp_band += f_bp * high;
+            c->bp_low += f_bp * c->bp_band;
+            const float rh = n - c->r_low - 1.2f * c->r_band;
+            c->r_band += f_rb * rh;
+            c->r_low += f_rb * c->r_band;
+            c->ph += tone * inv_rate;
+            c->ph -= floorf(c->ph);
+            c->ph2 += 2.f * tone * inv_rate;
+            c->ph2 -= floorf(c->ph2);
+            float v;
+            if (flyer) {
+                const float drone = (2.f * c->ph - 1.f) * 0.5f + 0.3f * sinf(6.2831853f * c->ph2);
+                v = 5.f * c->lp2 + 0.25f * drone + 0.9f * c->bp_band + 0.2f * c->r_band;
+            } else {
+                v = 1.0f * c->bp_band + 2.5f * c->lp2 + 0.06f * sinf(6.2831853f * c->ph) + 0.2f * c->r_band;
+            }
+            const float t = (float)i / (float)frames;
+            const float lv = (level0 + (s_craft_mix.level - level0) * t) * (duck0 + (duck1 - duck0) * t) *
+                             (cl0 + (c->level - cl0) * t);
+            mono[i] = v * amp * lv;
+        }
+        pc_stage_mix_apply(flyer ? STAGE_MIX_FLYER : STAGE_MIX_CRAFT, &c->mix, mono, frames, 1);
+        if (!pc_spatial_render_placed(4 + k, c->pos, mono)) {
+            for (int i = 0; i < frames; i++) {
+                out[i * 2] += mono[i] * 0.7071f;
+                out[i * 2 + 1] += mono[i] * 0.7071f;
+            }
+        }
+    }
+}
+
 /* A layer heard all around (into the ambient bus), through its stage mixer
  * channel: made into a frame of its own, mixed, then added. */
 typedef void (*BusLayer)(float* out, int frames, int rate, bool on);
@@ -1058,4 +1251,5 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     fountain_mix(out, frames, rate, fresh && kind == AMB_FOUNTAIN);
     bus_layer(rush_mix, STAGE_MIX_RUSH, rush, out, frames, rate, fresh && kind == AMB_RUSH);
     racers_mix(out, frames, rate, fresh && kind == AMB_RUSH && pc_spatial_enabled());
+    craft_mix(out, frames, rate, fresh && kind == AMB_RUSH);
 }

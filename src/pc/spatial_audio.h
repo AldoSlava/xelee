@@ -118,7 +118,7 @@ bool pc_spatial_enabled(void);
 bool pc_spatial_bypassed(void);
 /* Audio thread, during a fight after pc_spatial_frame_begin: a sound made
  * here (stage ambience), `mono` (160 samples at 32 kHz), heard from `pos`
- * (game units) as a voice is, through its own slot (0-3: one per source,
+ * (game units) as a voice is, through its own slot (0-7: one per source,
  * each keeping its HRTF state from frame to frame). False, doing nothing,
  * when nothing is placed this frame. */
 bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono);

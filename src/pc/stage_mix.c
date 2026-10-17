@@ -25,15 +25,23 @@ typedef struct MixChannel {
     MixBand band[MIX_BANDS];
 } MixChannel;
 
+/* Each stage's channels, and the mix tuned for them on the headset (in
+ * MELEE_STAGE_MIX's form; flat where there's none), which MELEE_STAGE_MIX
+ * and the panel start from. */
 static const struct {
     int grkind;
     const char* names[MIX_CHANNELS];
+    const char* preset;
 } s_stages[] = {
-    {Gr_Kind_Zebes, {"ACID"}},
-    {Gr_Kind_Corneria, {"WIND", "GREAT FOX", "ARWINGS"}},
-    {Gr_Kind_Kongo, {"FALLS", "JUNGLE"}},
-    {Gr_Kind_Izumi, {"FOUNTAIN", "JETS"}},
-    {Gr_Kind_BigBlue, {"ENGINES", "RUSH"}},
+    {Gr_Kind_Zebes, {"ACID"}, NULL},
+    {Gr_Kind_Corneria, {"WIND", "GREAT FOX", "ARWINGS"}, NULL},
+    {Gr_Kind_Kongo, {"FALLS", "JUNGLE"}, NULL},
+    {Gr_Kind_Izumi, {"FOUNTAIN", "JETS"}, NULL},
+    /* 2026-10-17: loud against the fighters on purpose, the race being the
+     * point; the engines' body and the rush's middle brought up. */
+    {Gr_Kind_BigBlue,
+     {"ENGINES", "RUSH", "CRAFT", "FLYER"},
+     "ENGINES=6.5/190,8.0,1.30/715,4.0,1.00/1350,0.0,0.71;RUSH=6.0/205,1.5,0.71/965,6.0,1.00/3800,0.0,0.71"},
 };
 #define MIX_STAGES ((int)(sizeof s_stages / sizeof s_stages[0]))
 
@@ -71,13 +79,8 @@ static bool name_is(const char* name, const char* s, size_t n) {
     return i == n && name[i] == '\0';
 }
 
-static void parse_env(void) {
-    for (int s = 0; s < MIX_STAGES; s++) {
-        for (int c = 0; c < MIX_CHANNELS; c++) {
-            s_env[s][c] = s_flat;
-        }
-    }
-    const char* v = getenv("MELEE_STAGE_MIX");
+/* Entries in MELEE_STAGE_MIX's form into s_env, over what's there. */
+static void parse_mix(const char* v) {
     while (v != NULL && *v != '\0') {
         while (*v == ' ' || *v == ';') {
             v++;
@@ -115,6 +118,16 @@ static void parse_env(void) {
         }
         v = p;
     }
+}
+
+static void parse_env(void) {
+    for (int s = 0; s < MIX_STAGES; s++) {
+        for (int c = 0; c < MIX_CHANNELS; c++) {
+            s_env[s][c] = s_flat;
+        }
+        parse_mix(s_stages[s].preset);
+    }
+    parse_mix(getenv("MELEE_STAGE_MIX"));
 }
 
 static int s_grkind = -1; /* game thread writes, audio thread reads (__atomic) */
