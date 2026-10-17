@@ -203,6 +203,7 @@ void gm_801A4B88(struct GameSceneInfo* info)
      * cutscenes keep the original aspect. */
     pc_widescreen_set_scene(info && (info->scene_kind == GS_VS ||
         info->scene_kind == GS_SUDDEN_DEATH || info->scene_kind == GS_TRAINING));
+    pc_xr_place_set_scene(info != NULL ? (int) info->scene_kind : -1);
 #endif
 }
 

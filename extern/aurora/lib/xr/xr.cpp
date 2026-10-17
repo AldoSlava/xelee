@@ -530,6 +530,18 @@ struct Bridge {
   PFN_xrPollFutureEXT pollFuture = nullptr;
   PFN_xrCancelFutureEXT cancelFuture = nullptr;
   XrSpace floorSpace = XR_NULL_HANDLE; // LOCAL_FLOOR
+  // The stage spot's spatial anchor (the stage spot's anchor):
+  // XR_FB_spatial_entity to make and locate it, XR_META_spatial_entity_
+  // persistence to save it, XR_META_spatial_entity_discovery to find it again.
+  bool hasSpatialEntityExt = false, hasSpacePersistenceExt = false, hasSpaceDiscoveryExt = false;
+  bool anchors = false; // all three, and the system says it can
+  PFN_xrCreateSpatialAnchorFB createSpatialAnchor = nullptr;
+  PFN_xrSetSpaceComponentStatusFB setComponentStatus = nullptr;
+  PFN_xrGetSpaceComponentStatusFB getComponentStatus = nullptr;
+  PFN_xrSaveSpacesMETA saveSpaces = nullptr;
+  PFN_xrEraseSpacesMETA eraseSpaces = nullptr;
+  PFN_xrDiscoverSpacesMETA discoverSpaces = nullptr;
+  PFN_xrRetrieveSpaceDiscoveryResultsMETA retrieveDiscovery = nullptr;
   XrSwapchain shadowSwapchain = XR_NULL_HANDLE;
   // The most composition layers a frame may have (XrSystemGraphicsProperties).
   uint32_t maxLayers = 16;
@@ -732,6 +744,9 @@ bool create_instance() {
     B.hasEnvRaycastExt |= !std::strcmp(p.extensionName, XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME);
     B.hasLocalFloorExt |= !std::strcmp(p.extensionName, XR_EXT_LOCAL_FLOOR_EXTENSION_NAME);
     B.hasColorLutExt |= !std::strcmp(p.extensionName, XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
+    B.hasSpatialEntityExt |= !std::strcmp(p.extensionName, XR_FB_SPATIAL_ENTITY_EXTENSION_NAME);
+    B.hasSpacePersistenceExt |= !std::strcmp(p.extensionName, XR_META_SPATIAL_ENTITY_PERSISTENCE_EXTENSION_NAME);
+    B.hasSpaceDiscoveryExt |= !std::strcmp(p.extensionName, XR_META_SPATIAL_ENTITY_DISCOVERY_EXTENSION_NAME);
   }
   if (!hasVk2) {
     Log.error("OpenXR runtime lacks XR_KHR_vulkan_enable2");
@@ -783,6 +798,18 @@ bool create_instance() {
                       env_float("AURORA_XR_GRADE_LUT", 16.f) >= 2.f;
   if (B.hasColorLutExt)
     exts.push_back(XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
+  // The stage spot kept in the room (offered to apps declaring
+  // USE_ANCHOR_API); AURORA_XR_ANCHORS=0 leaves it to the launch.
+  const bool anchorExts = B.hasSpatialEntityExt && B.hasSpacePersistenceExt && B.hasSpaceDiscoveryExt &&
+                          env_flag("AURORA_XR_ANCHORS", true);
+  B.hasSpatialEntityExt &= anchorExts;
+  B.hasSpacePersistenceExt &= anchorExts;
+  B.hasSpaceDiscoveryExt &= anchorExts;
+  if (anchorExts) {
+    exts.push_back(XR_FB_SPATIAL_ENTITY_EXTENSION_NAME);
+    exts.push_back(XR_META_SPATIAL_ENTITY_PERSISTENCE_EXTENSION_NAME);
+    exts.push_back(XR_META_SPATIAL_ENTITY_DISCOVERY_EXTENSION_NAME);
+  }
   XrInstanceCreateInfo ci{XR_TYPE_INSTANCE_CREATE_INFO};
 #ifdef __ANDROID__
   exts.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
@@ -914,6 +941,29 @@ bool create_instance() {
     B.requestBoundaryVisibility = xr_proc<PFN_xrRequestBoundaryVisibilityMETA>("xrRequestBoundaryVisibilityMETA");
   Log.info("XR_META_boundary_visibility {}", B.requestBoundaryVisibility ? "available" : "unavailable");
 #endif
+  if (B.hasSpatialEntityExt) {
+    XrSystemProperties sp{XR_TYPE_SYSTEM_PROPERTIES};
+    XrSystemSpatialEntityPropertiesFB se{XR_TYPE_SYSTEM_SPATIAL_ENTITY_PROPERTIES_FB};
+    XrSystemSpacePersistencePropertiesMETA sv{XR_TYPE_SYSTEM_SPACE_PERSISTENCE_PROPERTIES_META};
+    XrSystemSpaceDiscoveryPropertiesMETA sd{XR_TYPE_SYSTEM_SPACE_DISCOVERY_PROPERTIES_META};
+    sp.next = &se;
+    se.next = &sv;
+    sv.next = &sd;
+    const bool can = XR_SUCCEEDED(xrGetSystemProperties(B.instance, B.systemId, &sp)) && se.supportsSpatialEntity &&
+                     sv.supportsSpacePersistence && sd.supportsSpaceDiscovery;
+    B.createSpatialAnchor = xr_proc<PFN_xrCreateSpatialAnchorFB>("xrCreateSpatialAnchorFB");
+    B.setComponentStatus = xr_proc<PFN_xrSetSpaceComponentStatusFB>("xrSetSpaceComponentStatusFB");
+    B.getComponentStatus = xr_proc<PFN_xrGetSpaceComponentStatusFB>("xrGetSpaceComponentStatusFB");
+    B.saveSpaces = xr_proc<PFN_xrSaveSpacesMETA>("xrSaveSpacesMETA");
+    B.eraseSpaces = xr_proc<PFN_xrEraseSpacesMETA>("xrEraseSpacesMETA");
+    B.discoverSpaces = xr_proc<PFN_xrDiscoverSpacesMETA>("xrDiscoverSpacesMETA");
+    B.retrieveDiscovery = xr_proc<PFN_xrRetrieveSpaceDiscoveryResultsMETA>("xrRetrieveSpaceDiscoveryResultsMETA");
+    B.anchors = can && B.createSpatialAnchor && B.setComponentStatus && B.getComponentStatus && B.saveSpaces &&
+                B.eraseSpaces && B.discoverSpaces && B.retrieveDiscovery;
+  }
+  Log.info("Spatial anchors for the stage spot: {}", B.anchors ? "available"
+                                                   : B.hasSpatialEntityExt ? "offered but unsupported"
+                                                                           : "not offered (USE_ANCHOR_API?)");
   return true;
 }
 
@@ -4594,6 +4644,404 @@ void room_survey_apply() {
   }
 }
 
+// ---------------------------------------------------------------- XR thread: the stage spot's anchor
+//
+// The stage spot (aurora_xr_adopt_stage: where every stage starts) is kept
+// in the room with a spatial anchor (docs/xr-stage-placement-ux.md C.5):
+// made where the spot is as it's adopted, saved to the headset
+// (XR_META_spatial_entity_persistence), its id and the spot's size in
+// stage-spot.txt beside launcher.cfg, most recently used first, up to eight
+// rooms. At each launch the saved ones are looked for
+// (XR_META_spatial_entity_discovery); the first the headset finds in the
+// room becomes the spot, so the first fight mode needn't ask for it again.
+// Each frame the anchor is located, and when it moves in LOCAL (a recenter,
+// tracking settling) the stage, the spot and every stage placed this session
+// move with it: the stage stays where the player put it in the room.
+// Adopting a spot again where the old one is found replaces it; elsewhere
+// both are kept. The launcher's Forget renames the file stage-spot.forget,
+// and the next launch erases those anchors from the headset. Without anchors
+// (USE_ANCHOR_API not granted, AURORA_XR_ANCHORS=0), a recenter's own
+// report (XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING) keeps the stage
+// in place instead, and the spot lasts for the launch.
+struct SpotSaved {
+  XrUuidEXT uuid{};
+  float scale = 0.f;
+  int64_t used = 0; // seconds since the epoch
+};
+struct StageSpotAnchor {
+  bool started = false;
+  std::vector<SpotSaved> saved; // most recently used first
+  XrAsyncRequestIdFB discoverReq = 0, createReq = 0, statusReq = 0, saveReq = 0;
+  struct Candidate {
+    XrSpace space;
+    XrUuidEXT uuid;
+  };
+  std::vector<Candidate> candidates; // found, being located
+  XrSpace space = XR_NULL_HANDLE;   // the spot's
+  XrUuidEXT uuid{};
+  bool haveLast = false;
+  XrVector3f lastPos{};
+  float lastYaw = 0.f;
+  std::atomic<bool> createWanted{false};
+  XrSpace pending = XR_NULL_HANDLE; // made, being made storable and saved
+  XrUuidEXT pendingUuid{};
+  float pendingScale = 0.f;
+} g_spot;
+
+constexpr size_t kMaxSpots = 8;
+
+std::string spot_file(const char* name) {
+  return std::string(g_config.userPath ? g_config.userPath : ".") + "/" + name;
+}
+
+std::string uuid_hex(const XrUuidEXT& u) {
+  std::string s;
+  for (uint8_t b : u.data)
+    s += fmt::format("{:02x}", b);
+  return s;
+}
+
+bool uuid_parse(const std::string& s, XrUuidEXT& u) {
+  if (s.size() != 32)
+    return false;
+  for (int i = 0; i < 16; ++i)
+    u.data[i] = static_cast<uint8_t>(std::strtoul(s.substr(i * 2, 2).c_str(), nullptr, 16));
+  return true;
+}
+
+bool uuid_equal(const XrUuidEXT& a, const XrUuidEXT& b) { return std::memcmp(a.data, b.data, 16) == 0; }
+
+std::vector<SpotSaved> spot_read(const char* name) {
+  std::vector<SpotSaved> out;
+  FILE* f = std::fopen(spot_file(name).c_str(), "r");
+  if (!f)
+    return out;
+  char hex[64];
+  float scale;
+  long long used;
+  while (std::fscanf(f, "%63s %f %lld", hex, &scale, &used) == 3) {
+    SpotSaved s;
+    if (uuid_parse(hex, s.uuid) && scale > 0.f) {
+      s.scale = scale;
+      s.used = used;
+      out.push_back(s);
+    }
+  }
+  std::fclose(f);
+  return out;
+}
+
+void spot_write() {
+  std::sort(g_spot.saved.begin(), g_spot.saved.end(), [](const SpotSaved& a, const SpotSaved& b) { return a.used > b.used; });
+  FILE* f = std::fopen(spot_file("stage-spot.txt").c_str(), "w");
+  if (!f) {
+    Log.warn("Stage spot: can't write {}", spot_file("stage-spot.txt"));
+    return;
+  }
+  for (const SpotSaved& s : g_spot.saved)
+    std::fprintf(f, "%s %.6f %lld\n", uuid_hex(s.uuid).c_str(), s.scale, static_cast<long long>(s.used));
+  std::fclose(f);
+}
+
+int64_t now_seconds() {
+  return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+void spot_erase(std::vector<XrUuidEXT> uuids) {
+  if (uuids.empty())
+    return;
+  XrSpacesEraseInfoMETA ei{XR_TYPE_SPACES_ERASE_INFO_META};
+  ei.uuidCount = static_cast<uint32_t>(uuids.size());
+  ei.uuids = uuids.data();
+  XrAsyncRequestIdFB req = 0;
+  const XrResult r = B.eraseSpaces(B.session, &ei, &req);
+  Log.info("Stage spot: erasing {} anchor(s) from the headset: XrResult {}", uuids.size(), static_cast<int>(r));
+}
+
+// Turns a component on (or finds it on already). True when it's on now.
+bool spot_component(XrSpace space, XrSpaceComponentTypeFB type, XrAsyncRequestIdFB* req) {
+  XrSpaceComponentStatusFB st{XR_TYPE_SPACE_COMPONENT_STATUS_FB};
+  if (XR_SUCCEEDED(B.getComponentStatus(space, type, &st)) && st.enabled && !st.changePending)
+    return true;
+  XrSpaceComponentStatusSetInfoFB si{XR_TYPE_SPACE_COMPONENT_STATUS_SET_INFO_FB};
+  si.componentType = type;
+  si.enabled = XR_TRUE;
+  XrAsyncRequestIdFB r = 0;
+  const XrResult res = B.setComponentStatus(space, &si, &r);
+  if (req)
+    *req = r;
+  return res == XR_ERROR_SPACE_COMPONENT_STATUS_ALREADY_SET_FB;
+}
+
+void spot_save(XrSpace space) {
+  XrSpacesSaveInfoMETA si{XR_TYPE_SPACES_SAVE_INFO_META};
+  si.spaceCount = 1;
+  si.spaces = &space;
+  if (XR_FAILED(B.saveSpaces(B.session, &si, &g_spot.saveReq)))
+    Log.warn("Stage spot: the anchor couldn't be saved");
+}
+
+float pose_yaw(const XrQuaternionf& q) {
+  const XrVector3f fwd = qrot(q, {0.f, 0.f, -1.f});
+  return std::atan2(-fwd.x, -fwd.z);
+}
+
+// Every arena pose moved by the same rigid turn about +Y and shift: (p0,
+// y0) goes to (p1, y1). Under g_arenaMutex.
+void move_arenas(XrVector3f p0, float y0, XrVector3f p1, float y1) {
+  const float dy = y1 - y0;
+  auto move = [&](ArenaPose& a) {
+    a.pos = p1 + rot_y(a.pos - p0, dy);
+    a.yaw += dy;
+  };
+  move(g_adoptedArena);
+  move(g_arena);
+  for (auto& [stage, a] : g_stageArenas)
+    move(a);
+}
+
+// A recenter (LOCAL): the new origin, as a pose in the old space. The stage
+// keeps its place in the room: everything placed moves the other way.
+void spot_recentered(const XrEventDataReferenceSpaceChangePending& e) {
+  if (e.referenceSpaceType != XR_REFERENCE_SPACE_TYPE_LOCAL || !e.poseValid)
+    return;
+  const XrVector3f t = e.poseInPreviousSpace.position;
+  const float th = pose_yaw(e.poseInPreviousSpace.orientation);
+  // p_new = R^-1 (p_old - t): the old origin goes to rot_y(-t, -th).
+  std::lock_guard lock{g_arenaMutex};
+  if (!g_arenaInit)
+    return;
+  move_arenas(t, th, {0.f, 0.f, 0.f}, 0.f);
+  if (g_spot.haveLast) {
+    g_spot.lastPos = rot_y(g_spot.lastPos - t, -th);
+    g_spot.lastYaw -= th;
+  }
+  Log.info("Recentered: the stage kept its place in the room");
+}
+
+// XR thread: a spatial anchor event. True if it was one.
+bool spot_event(const XrEventDataBuffer& ev) {
+  switch (ev.type) {
+  case XR_TYPE_EVENT_DATA_SPACE_DISCOVERY_RESULTS_AVAILABLE_META: {
+    const auto& e = reinterpret_cast<const XrEventDataSpaceDiscoveryResultsAvailableMETA&>(ev);
+    if (e.requestId != g_spot.discoverReq)
+      return true;
+    XrSpaceDiscoveryResultsMETA res{XR_TYPE_SPACE_DISCOVERY_RESULTS_META};
+    if (XR_FAILED(B.retrieveDiscovery(B.session, e.requestId, &res)))
+      return true;
+    std::vector<XrSpaceDiscoveryResultMETA> found(res.resultCountOutput);
+    res.resultCapacityInput = static_cast<uint32_t>(found.size());
+    res.results = found.data();
+    if (XR_FAILED(B.retrieveDiscovery(B.session, e.requestId, &res)))
+      return true;
+    for (uint32_t i = 0; i < res.resultCountOutput; ++i) {
+      spot_component(found[i].space, XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB, nullptr);
+      g_spot.candidates.push_back({found[i].space, found[i].uuid});
+    }
+    Log.info("Stage spot: {} saved anchor(s) found, locating", res.resultCountOutput);
+    return true;
+  }
+  case XR_TYPE_EVENT_DATA_SPACE_DISCOVERY_COMPLETE_META: {
+    const auto& e = reinterpret_cast<const XrEventDataSpaceDiscoveryCompleteMETA&>(ev);
+    if (e.requestId == g_spot.discoverReq && XR_FAILED(e.result))
+      Log.info("Stage spot: discovery ended, XrResult {}", static_cast<int>(e.result));
+    return true;
+  }
+  case XR_TYPE_EVENT_DATA_SPATIAL_ANCHOR_CREATE_COMPLETE_FB: {
+    const auto& e = reinterpret_cast<const XrEventDataSpatialAnchorCreateCompleteFB&>(ev);
+    if (e.requestId != g_spot.createReq)
+      return true;
+    if (XR_FAILED(e.result)) {
+      Log.warn("Stage spot: the anchor wasn't made: XrResult {}", static_cast<int>(e.result));
+      return true;
+    }
+    g_spot.pending = e.space;
+    g_spot.pendingUuid = e.uuid;
+    if (spot_component(e.space, XR_SPACE_COMPONENT_TYPE_STORABLE_FB, &g_spot.statusReq))
+      spot_save(e.space);
+    return true;
+  }
+  case XR_TYPE_EVENT_DATA_SPACE_SET_STATUS_COMPLETE_FB: {
+    const auto& e = reinterpret_cast<const XrEventDataSpaceSetStatusCompleteFB&>(ev);
+    if (e.requestId == g_spot.statusReq && e.space == g_spot.pending) {
+      if (XR_SUCCEEDED(e.result) || e.result == XR_ERROR_SPACE_COMPONENT_STATUS_ALREADY_SET_FB)
+        spot_save(e.space);
+      else
+        Log.warn("Stage spot: the anchor can't be stored: XrResult {}", static_cast<int>(e.result));
+    }
+    return true;
+  }
+  case XR_TYPE_EVENT_DATA_SPACES_SAVE_RESULT_META: {
+    const auto& e = reinterpret_cast<const XrEventDataSpacesSaveResultMETA&>(ev);
+    if (e.requestId != g_spot.saveReq || g_spot.pending == XR_NULL_HANDLE)
+      return true;
+    if (XR_FAILED(e.result)) {
+      Log.warn("Stage spot: the anchor wasn't saved: XrResult {}", static_cast<int>(e.result));
+      xrDestroySpace(g_spot.pending);
+      g_spot.pending = XR_NULL_HANDLE;
+      return true;
+    }
+    // The old spot's anchor found here: the same room, so this replaces it.
+    std::vector<XrUuidEXT> erase;
+    if (g_spot.space != XR_NULL_HANDLE && g_spot.haveLast) {
+      erase.push_back(g_spot.uuid);
+      std::erase_if(g_spot.saved, [&](const SpotSaved& s) { return uuid_equal(s.uuid, g_spot.uuid); });
+    }
+    if (g_spot.space != XR_NULL_HANDLE)
+      xrDestroySpace(g_spot.space);
+    g_spot.space = g_spot.pending;
+    g_spot.uuid = g_spot.pendingUuid;
+    g_spot.pending = XR_NULL_HANDLE;
+    g_spot.haveLast = false;
+    g_spot.saved.insert(g_spot.saved.begin(), {g_spot.uuid, g_spot.pendingScale, now_seconds()});
+    while (g_spot.saved.size() > kMaxSpots) {
+      erase.push_back(g_spot.saved.back().uuid);
+      g_spot.saved.pop_back();
+    }
+    spot_write();
+    spot_erase(erase);
+    Log.info("Stage spot saved in the room (anchor {})", uuid_hex(g_spot.uuid));
+    return true;
+  }
+  case XR_TYPE_EVENT_DATA_SPACES_ERASE_RESULT_META:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// XR thread, every frame while the session runs.
+void spot_frame(XrTime time) {
+  if (!B.anchors || !B.running || time == 0)
+    return;
+  if (!g_spot.started) {
+    g_spot.started = true;
+    // Forgotten in the launcher: off the headset too.
+    std::vector<XrUuidEXT> forget;
+    for (const SpotSaved& s : spot_read("stage-spot.forget"))
+      forget.push_back(s.uuid);
+    if (!forget.empty()) {
+      spot_erase(forget);
+      std::remove(spot_file("stage-spot.forget").c_str());
+    }
+    g_spot.saved = spot_read("stage-spot.txt");
+    if (!g_spot.saved.empty()) {
+      std::vector<XrUuidEXT> uuids;
+      for (const SpotSaved& s : g_spot.saved)
+        uuids.push_back(s.uuid);
+      XrSpaceFilterUuidMETA fu{XR_TYPE_SPACE_FILTER_UUID_META};
+      fu.uuidCount = static_cast<uint32_t>(uuids.size());
+      fu.uuids = uuids.data();
+      const XrSpaceFilterBaseHeaderMETA* filters[] = {reinterpret_cast<const XrSpaceFilterBaseHeaderMETA*>(&fu)};
+      XrSpaceDiscoveryInfoMETA di{XR_TYPE_SPACE_DISCOVERY_INFO_META};
+      di.filterCount = 1;
+      di.filters = filters;
+      const XrResult r = B.discoverSpaces(B.session, &di, &g_spot.discoverReq);
+      Log.info("Stage spot: looking for {} saved spot(s) in the room: XrResult {}", uuids.size(), static_cast<int>(r));
+    }
+  }
+  // A spot just adopted: an anchor where it is.
+  if (g_spot.createWanted.exchange(false)) {
+    ArenaPose a;
+    {
+      std::lock_guard lock{g_arenaMutex};
+      a = g_adoptedArena;
+    }
+    XrSpatialAnchorCreateInfoFB ci{XR_TYPE_SPATIAL_ANCHOR_CREATE_INFO_FB};
+    ci.space = B.space;
+    ci.poseInSpace = {yaw_quat(a.yaw), a.pos};
+    ci.time = time;
+    g_spot.pendingScale = a.scale;
+    if (XR_FAILED(B.createSpatialAnchor(B.session, &ci, &g_spot.createReq)))
+      Log.warn("Stage spot: no anchor could be made");
+  }
+  auto locate = [&](XrSpace space, XrVector3f& pos, float& yaw) {
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    if (XR_FAILED(xrLocateSpace(space, B.space, time, &loc)))
+      return false;
+    constexpr XrSpaceLocationFlags kValid = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    if ((loc.locationFlags & kValid) != kValid)
+      return false;
+    pos = loc.pose.position;
+    yaw = pose_yaw(loc.pose.orientation);
+    return true;
+  };
+  // Saved spots, until one is found here (or the player places one first).
+  if (!g_spot.candidates.empty()) {
+    bool adopted;
+    {
+      std::lock_guard lock{g_arenaMutex};
+      adopted = g_adoptedSet;
+    }
+    for (size_t i = 0; i < g_spot.candidates.size() && !adopted; ++i) {
+      XrVector3f pos;
+      float yaw;
+      if (!locate(g_spot.candidates[i].space, pos, yaw))
+        continue;
+      auto it = std::find_if(g_spot.saved.begin(), g_spot.saved.end(),
+                             [&](const SpotSaved& s) { return uuid_equal(s.uuid, g_spot.candidates[i].uuid); });
+      if (it == g_spot.saved.end())
+        continue;
+      {
+        std::lock_guard lock{g_arenaMutex};
+        init_arena();
+        g_adoptedArena = {pos, yaw, it->scale};
+        g_adoptedSet = true;
+        g_stageArenas.clear();
+      }
+      it->used = now_seconds();
+      g_spot.space = g_spot.candidates[i].space;
+      g_spot.uuid = g_spot.candidates[i].uuid;
+      g_spot.candidates.erase(g_spot.candidates.begin() + static_cast<long>(i));
+      g_spot.haveLast = true;
+      g_spot.lastPos = pos;
+      g_spot.lastYaw = yaw;
+      spot_write();
+      adopted = true;
+      Log.info("Stage spot found in the room (anchor {}): {:.2f},{:.2f},{:.2f}, yaw {:.0f} deg, scale {:.5f}",
+               uuid_hex(g_spot.uuid), pos.x, pos.y, pos.z, yaw * 57.2958f, it->scale);
+    }
+    if (adopted) {
+      for (auto& c : g_spot.candidates)
+        xrDestroySpace(c.space);
+      g_spot.candidates.clear();
+    }
+  }
+  // The spot's anchor: where it is now; if it moved in LOCAL, everything
+  // placed moves with it.
+  if (g_spot.space != XR_NULL_HANDLE) {
+    XrVector3f pos;
+    float yaw;
+    if (locate(g_spot.space, pos, yaw)) {
+      if (g_spot.haveLast) {
+        const XrVector3f d = pos - g_spot.lastPos;
+        if (vlen(d) > 0.0005f || std::abs(yaw - g_spot.lastYaw) > 0.001f) {
+          std::lock_guard lock{g_arenaMutex};
+          move_arenas(g_spot.lastPos, g_spot.lastYaw, pos, yaw);
+          if (vlen(d) > 0.02f)
+            Log.info("Stage spot: the room moved {:.2f} m in tracking space; the stage kept its place", vlen(d));
+        }
+      }
+      g_spot.haveLast = true;
+      g_spot.lastPos = pos;
+      g_spot.lastYaw = yaw;
+    }
+  }
+}
+
+void spot_destroy() {
+  for (auto& c : g_spot.candidates)
+    xrDestroySpace(c.space);
+  g_spot.candidates.clear();
+  if (g_spot.space != XR_NULL_HANDLE)
+    xrDestroySpace(g_spot.space);
+  if (g_spot.pending != XR_NULL_HANDLE)
+    xrDestroySpace(g_spot.pending);
+  g_spot.space = g_spot.pending = XR_NULL_HANDLE;
+  g_spot.haveLast = false;
+  g_spot.started = false;
+}
+
 constexpr uint32_t kShadowSize = 128;
 // How far the shadow's texture reaches, against the footprint it's for (each
 // way): room for the penumbra, which fades out before the texture's edge.
@@ -6406,6 +6854,7 @@ bool render_xr_frame() {
   surface_frame(fight, fight && (placing > 0 || (G.target == Target::Arena && (G.oneHand >= 0 || G.twoHands))),
                 fs.predictedDisplayTime);
   room_survey_apply();
+  spot_frame(fs.predictedDisplayTime);
 
   // The passthrough, the shadow, the HUD and the 3D view, the HUD on top in
   // full VR, then the placing cards and the lasers.
@@ -6727,10 +7176,14 @@ bool poll_events() {
       }
       g_sessionRunning = B.running;
     } else if (ev.type == XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING) {
-      // A recenter moves LOCAL: whatever was measured in it is gone.
-      Log.info("Reference space {} recentered", static_cast<int>(
-          reinterpret_cast<const XrEventDataReferenceSpaceChangePending&>(ev).referenceSpaceType));
+      // A recenter moves LOCAL: whatever was measured in it is gone, and the
+      // stage keeps its place in the room.
+      const auto& e = reinterpret_cast<const XrEventDataReferenceSpaceChangePending&>(ev);
+      Log.info("Reference space {} recentered", static_cast<int>(e.referenceSpaceType));
+      spot_recentered(e);
       surface_request(1000, true);
+    } else if (B.anchors && spot_event(ev)) {
+      // the stage spot's anchor
     } else if (ev.type == XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB) {
       update_pacing();
     } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
@@ -6783,6 +7236,7 @@ bool setup() {
 // Destroy everything the XR thread created, newest first. Dawn owns the
 // device and instance; the OpenXR instance outlives them (release_instance).
 void teardown() {
+  spot_destroy();
   stop_surface_worker();
   stop_grade_worker();
   // Only our queue: Dawn may be submitting on its own, and vkDeviceWaitIdle
@@ -9284,6 +9738,7 @@ extern "C" void aurora_xr_adopt_stage(void) {
   g_adoptedArena.scale /= g_stageScale;
   g_adoptedSet = true;
   g_stageArenas.clear();
+  g_spot.createWanted = true; // kept in the room (the stage spot's anchor)
   Log.info("Arena adopted as every stage's start: {:.2f},{:.2f},{:.2f}, yaw {:.0f} deg, scale {:.5f}",
            g_adoptedArena.pos.x, g_adoptedArena.pos.y, g_adoptedArena.pos.z, g_adoptedArena.yaw * 57.2958f,
            g_adoptedArena.scale);

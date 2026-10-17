@@ -28,6 +28,9 @@ bool gmOnline_SlippiFlow(void);
 /* After a placement scene started by Unranked or Direct on a launch with no
  * placement yet, the mode goes on to that one instead of back to the menu. */
 void gmOnline_SetKindAfterPlace(OnlineKind kind);
+/* XR: the stage-placement scene, then on to game mode `mode` (a
+ * GameModeKind: the menu's fight mode that asked for it). */
+void gmOnline_SetModeAfterPlace(int mode);
 
 /* The online CSS's status text (src/melee/mn/mnonlinecss.c), drawn by the
  * Slippi flow's state in gmonlinemode.c. */

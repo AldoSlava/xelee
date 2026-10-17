@@ -851,11 +851,17 @@ void onExitSss(GameModeState* state)
  * stage (gmvs.c, xr_place.c); A or B ends it and the mode goes on to the
  * kind that asked, or back to the menu it was entered from. */
 static OnlineKind kind_after_place = ONLINE_KIND_PLACE;
+static int mode_after_place = -1;
 extern bool gm_vs_place_dummy;
 
 void gmOnline_SetKindAfterPlace(OnlineKind kind)
 {
     kind_after_place = kind;
+}
+
+void gmOnline_SetModeAfterPlace(int mode)
+{
+    mode_after_place = mode;
 }
 
 void onEnterPlace(GameModeState* state)
@@ -869,7 +875,11 @@ void onEnterPlace(GameModeState* state)
 void onExitPlace(UNUSED GameModeState* state)
 {
     gm_vs_place_dummy = false;
-    if (kind_after_place != ONLINE_KIND_PLACE) {
+    if (mode_after_place >= 0) {
+        const int mode = mode_after_place; /* straight on to VS, 1P... */
+        mode_after_place = -1;
+        gm_ChangeGameModeAfterCurrentScene(mode);
+    } else if (kind_after_place != ONLINE_KIND_PLACE) {
         online_kind = kind_after_place; /* straight on to Unranked or Direct */
         kind_after_place = ONLINE_KIND_PLACE;
         gm_ChangeGameModeAfterCurrentScene(GM_ONLINE);

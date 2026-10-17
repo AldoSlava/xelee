@@ -53,6 +53,7 @@ struct Preferences {
     bool xr_spacewarp = true;
     // Quest, mixed reality: the stage's contact shadow on the real surface.
     bool xr_shadow = true;
+    bool xr_place_hold = true; // XR: the stage is placed before each fight (off: fights start right away)
     uint64_t install_id = 0;  // random once per install (LAN host election); 0 = not yet
 };
 DiscInfo inspect_disc(const std::string& path);

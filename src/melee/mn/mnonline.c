@@ -123,11 +123,12 @@ static void enterOnline(OnlineKind kind)
     gm_801A4B60();
 }
 
-/* The first Unranked or Direct of a launch with a headset presenting places
- * the stage first (src/pc/xr_place.h), then goes on to the mode. */
+/* The first Unranked, Direct or LAN of a launch with a headset presenting
+ * and no stage spot places the stage first (src/pc/xr_place.h), then goes
+ * on to the mode. */
 static void enterAfterPlacing(OnlineKind kind)
 {
-    if (pc_xr_place_available() && !pc_xr_place_decided()) {
+    if (pc_xr_place_needed()) {
         gmOnline_SetKindAfterPlace(kind);
         enterOnline(ONLINE_KIND_PLACE);
         return;
@@ -162,7 +163,7 @@ void mnOnline_Think(HSD_GObj* gp)
             mn_80229894(MENU_KIND_ONLINE_SLIPPI, SEL_SLIPPI_UNRANKED, 1);
             break;
         case SEL_ONLINE_LAN:
-            enterOnline(ONLINE_KIND_LAN);
+            enterAfterPlacing(ONLINE_KIND_LAN);
             break;
         default:
             break;

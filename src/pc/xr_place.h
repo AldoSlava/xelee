@@ -40,11 +40,25 @@ int pc_xr_place_dummy_result(void);
 bool pc_xr_place_decided(void);
 /* A headset is presenting and placing is not turned off. */
 bool pc_xr_place_available(void);
+/* The first fight mode of a launch should place the stage first: a headset
+ * is presenting and there's no stage spot yet (none placed this launch,
+ * none found in the room). */
+bool pc_xr_place_needed(void);
+/* The launcher's "Before each fight": true holds every fight for placing;
+ * false starts it right away once a stage spot is set (this launch, or
+ * found in the room), holding only while there's none. */
+void pc_xr_place_set_hold(bool every_fight);
+/* gm/gmscene.c: the scene now running (GameSceneKind). Sudden Death is
+ * the fight just played, on its stage: no hold. */
+void pc_xr_place_set_scene(int kind);
 #else
+static inline void pc_xr_place_set_hold(bool every_fight) { (void)every_fight; }
+static inline void pc_xr_place_set_scene(int kind) { (void)kind; }
 static inline void pc_xr_place_dummy_start(void) {}
 static inline int pc_xr_place_dummy_result(void) { return 0; }
 static inline bool pc_xr_place_decided(void) { return true; }
 static inline bool pc_xr_place_available(void) { return false; }
+static inline bool pc_xr_place_needed(void) { return false; }
 static inline bool pc_xr_place_hold(void) { return false; }
 static inline bool pc_xr_place_holding(void) { return false; }
 static inline void pc_xr_place_stage_ready(int grkind) { (void)grkind; }

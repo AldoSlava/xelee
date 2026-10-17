@@ -11,6 +11,8 @@
 #include "pc.h"
 #include "spatial_audio.h"
 #include "stage_ambience.h"
+#include "xr_place.h"
+#include <fstream>
 #include "slippi/slp_user.h"
 #include <RmlUi/Core/Elements/ElementFormControl.h>
 #include <aurora/dvd.h>
@@ -42,6 +44,27 @@
 namespace {
 launcher::Preferences prefs;
 std::filesystem::path config_path;
+
+/* XR: the stage spot kept in the room (the game's stage-spot.txt beside
+ * launcher.cfg, extern/aurora/lib/xr/xr.cpp). Forget moves its anchors to
+ * stage-spot.forget, which the game erases from the headset at its next
+ * start. */
+bool stage_spot_saved() {
+    std::error_code ec;
+    const auto p = config_path.parent_path() / "stage-spot.txt";
+    return std::filesystem::exists(p, ec) && std::filesystem::file_size(p, ec) > 0;
+}
+
+void stage_spot_forget() {
+    const auto dir = config_path.parent_path();
+    std::ifstream in(dir / "stage-spot.txt");
+    std::ofstream out(dir / "stage-spot.forget", std::ios::app);
+    out << in.rdbuf();
+    in.close();
+    out.close();
+    std::error_code ec;
+    std::filesystem::remove(dir / "stage-spot.txt", ec);
+}
 
 /* ---- Slippi sign-in (the launcher's only online concern) --------------
  * The launcher overlay authenticates; it never starts or configures a match.
@@ -446,7 +469,7 @@ class Launcher final : public Rml::EventListener {
     std::vector<std::string> page_focus() const {
         switch (tab) {
         case 0:
-            return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "xr-shadow", "aspect",
+            return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "xr-shadow", "xr-place", "xr-spot", "aspect",
                 "hud-mode", "aa", "filter-mode", "fps", "custom-textures", "backend",
                 "performance", "defaults-graphics"};
         case 1:
@@ -713,6 +736,8 @@ class Launcher final : public Rml::EventListener {
         text("xr-resolution-val", xr_resolution_name(prefs.xr_resolution));
         text("spacewarp", prefs.xr_spacewarp ? "On" : "Off");
         text("xr-shadow", prefs.xr_shadow ? "On" : "Off");
+        text("xr-place", prefs.xr_place_hold ? "Place the stage" : "Start right away");
+        text("xr-spot", stage_spot_saved() ? "Saved (select to forget)" : "Not set");
         text("aspect", prefs.widescreen == 0 ? "Original (73:60)" :
                        prefs.widescreen == 1 ? "Widescreen 16:9" :
                                                "Auto (window aspect)");
@@ -843,6 +868,7 @@ class Launcher final : public Rml::EventListener {
             prefs.xr_resolution = d.xr_resolution;
             prefs.xr_spacewarp = d.xr_spacewarp;
             prefs.xr_shadow = d.xr_shadow;
+            prefs.xr_place_hold = d.xr_place_hold;
             message = "Graphics settings are back to their defaults.";
             if (restart)
                 message += " Anti-aliasing and the backend apply after a restart.";
@@ -1101,6 +1127,16 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("xr-shadow")->Focus();
+        } else if (id == "xr-spot") {
+            if (stage_spot_saved())
+                stage_spot_forget();
+            refresh_settings();
+            element("xr-spot")->Focus();
+        } else if (id == "xr-place") {
+            prefs.xr_place_hold = !prefs.xr_place_hold;
+            save();
+            refresh_settings();
+            element("xr-place")->Focus();
         } else if (id.rfind("defaults-", 0) == 0) {
             restore_defaults(id);
             element(id.c_str())->Focus();
@@ -2314,6 +2350,7 @@ extern "C" void pc_menu_init(SDL_Window* window) {
     pc_audio_set_reverb(prefs.reverb);
     pc_spatial_set_enabled(prefs.spatial_audio);
     pc_ambience_set_enabled(prefs.stage_sounds);
+    pc_xr_place_set_hold(prefs.xr_place_hold);
     auto* context = aurora::rmlui::get_context();
     if (!context) {
         SDL_Log("F1 menu: RmlUi context unavailable");

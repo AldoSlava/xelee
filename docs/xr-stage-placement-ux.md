@@ -413,6 +413,34 @@ Row descriptions:
 4. Presets and caption in the Place Stage scene; pause legend; launcher rows.
 5. Anchors (`horizonos.permission.USE_ANCHOR_API`), the file, Forget.
 
+### C.12 What was built from Part D (2026-10-17)
+
+The user's decisions: D1, a launcher setting, "Before each fight" (Place
+the stage / Start right away), the hold staying the default for now; D2,
+yes; D4, clear; D5, leave the stage in place (anchors); D7, yes.
+
+- **Before each fight** (`xr_place_hold` in launcher.cfg,
+  `pc_xr_place_set_hold`): "Start right away" skips the hold once there's a
+  spot (placed this launch, or found in the room); with none, the first
+  fight still holds.
+- **Sudden Death** never holds: it's the fight just played, on its stage
+  (`pc_xr_place_set_scene`, GS_SUDDEN_DEATH).
+- **Auto-run** (`pc_xr_place_needed`): every fight mode the main menu starts
+  (VS and its special modes, the 1P modes, Training, Home-Run, Event,
+  Tournament) and LAN go through the Place Stage scene first when there's no
+  spot, then on to the mode (gmmenumode.c, `gmOnline_SetModeAfterPlace`).
+- **Anchors** (`horizonos.permission.USE_ANCHOR_API`; xr.cpp "the stage
+  spot's anchor"): an adopted spot is anchored and saved (up to eight rooms,
+  `stage-spot.txt`); at launch the saved ones are looked for and the first
+  found becomes the spot. Placed stages follow the anchor as it moves in
+  tracking space, and without one a recenter's own report keeps them in
+  place (D5). Re-placing where the old spot is found replaces it (D4 clears
+  the grabs, as before).
+- **Launcher**: "Stage spot: Saved / Not set"; selecting it forgets the spot
+  (the game erases the anchors at its next start).
+- Not yet: tall stages re-centred (to tune in the headset), Target Test and
+  trophy stages surveyed, the pause legend (D6), the scene's caption.
+
 ### C.11 Room survey (built 2026-10-17, the user's idea)
 
 Instead of asking with presets (C.3, D3), measure. Once a launch, as soon as

@@ -15,6 +15,9 @@
 #include <sysdolphin/baselib/memory.h>
 #ifdef TARGET_PC
 #include "gmonlinemode.h"
+#ifdef TARGET_PC
+#include "pc/xr_place.h"
+#endif
 #endif
 
 struct DebugSoundTestData {
@@ -276,11 +279,57 @@ void onEnter(GameModeState* scene)
     }
 }
 
+#ifdef TARGET_PC
+static bool isFightMode(int mode)
+{
+    switch (mode) {
+    case GM_VS:
+    case GM_CLASSIC:
+    case GM_ADVENTURE:
+    case GM_ALLSTAR:
+    case GM_CAMERA_MODE:
+    case GM_TARGET_TEST:
+    case GM_SUPER_SUDDEN_DEATH_VS:
+    case GM_INVISIBLE_VS:
+    case GM_SLOMO_VS:
+    case GM_LIGHTNING_VS:
+    case GM_TOURNAMENT:
+    case GM_TRAINING:
+    case GM_TINY_VS:
+    case GM_GIANT_VS:
+    case GM_STAMINA_VS:
+    case GM_HOME_RUN_CONTEST:
+    case GM_10MAN_VS:
+    case GM_100MAN_VS:
+    case GM_3MIN_VS:
+    case GM_15MIN_VS:
+    case GM_ENDLESS_VS:
+    case GM_CRUEL_VS:
+    case GM_CAMERA_VS:
+    case GM_EVENT:
+    case GM_SINGLE_BUTTON_VS:
+        return true;
+    default:
+        return false;
+    }
+}
+#endif
+
 void onExit(GameModeState* arg0)
 {
     MenuExitData* data = arg0->info.exit_data;
 
     if (data != NULL && data->pending_mode < GM_COUNT) {
+#ifdef TARGET_PC
+        /* XR: the first fight mode of a launch with no stage spot places
+         * the stage first (the online mode's placement scene), then goes
+         * on to it (src/pc/xr_place.h). */
+        if (isFightMode(data->pending_mode) && pc_xr_place_needed()) {
+            gmOnline_SetModeAfterPlace(data->pending_mode);
+            gmOnline_SetKind(ONLINE_KIND_PLACE);
+            data->pending_mode = GM_ONLINE;
+        }
+#endif
         gm_SetPendingGameMode(data->pending_mode);
         gm_SetNewGameModePending();
     }

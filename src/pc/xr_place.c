@@ -42,6 +42,16 @@ static uint32_t s_down;
 static bool s_dummy;
 static int s_dummy_result; /* 0 running, 1 adopted */
 static bool s_decided;     /* placed or skipped once this launch */
+static bool s_every_fight = true; /* the launcher's "Before each fight" */
+static int s_scene = -1;          /* the GameSceneKind running */
+
+void pc_xr_place_set_hold(bool every_fight) {
+    s_every_fight = every_fight;
+}
+
+void pc_xr_place_set_scene(int kind) {
+    s_scene = kind;
+}
 
 static bool enabled(void) {
     const char* v = getenv("MELEE_XR_PLACE");
@@ -166,6 +176,10 @@ bool pc_xr_place_decided(void) {
     return s_decided;
 }
 
+bool pc_xr_place_needed(void) {
+    return pc_xr_place_available() && !s_decided && !aurora_xr_stage_adopted();
+}
+
 void pc_xr_place_dummy_start(void) {
     s_dummy = true;
     s_dummy_result = 0;
@@ -211,6 +225,14 @@ bool pc_xr_place_hold(void) {
          * peer starts the match on the agreed frame whatever this side
          * shows, so the stage keeps its default placement. */
         if (!s_dummy && (!enabled() || !aurora_xr_active() || pc_net_active())) {
+            return false;
+        }
+        /* Sudden Death: the fight just played, on the stage just placed. */
+        if (!s_dummy && s_scene == 3) { /* GS_SUDDEN_DEATH */
+            return false;
+        }
+        /* "Start right away": once there's a stage spot, from it. */
+        if (!s_dummy && !s_every_fight && (s_decided || aurora_xr_stage_adopted())) {
             return false;
         }
         /* All-Star's rest area comes back after every fight: placed once a
