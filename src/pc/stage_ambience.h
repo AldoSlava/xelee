@@ -21,6 +21,12 @@ void pc_ambience_set_enabled(bool on);
  * ambience plays. Read only. */
 void pc_ambience_frame(void);
 
+/* Any thread: the pause menu's duck (lbAudioAx_80024E84), which takes the
+ * music down to 0.2; the ambience follows it, gliding. It lifts by itself
+ * once no fight draws, so a match left paused can't leave the next one
+ * ducked. */
+void pc_ambience_set_duck(float gain);
+
 /* Audio thread: the ambience for one AX frame of `frames` stereo samples:
  * what surrounds the listener added to `out` (interleaved, at the AX rate),
  * what stands somewhere placed there (pc_spatial_render_placed). */

@@ -16,6 +16,7 @@
 #include "pc/net.h"
 #ifdef TARGET_PC
 #include "pc/net_sfx.h"
+#include "pc/stage_ambience.h"
 #endif
 #include <dolphin/ai.h>
 #include <dolphin/ar.h>
@@ -1330,6 +1331,7 @@ void lbAudioAx_80024E84(bool arg0)
         HSD_AudioPStreamPauseCh(8);
         HSD_AudioPStreamPauseCh(7);
         pc_music_stream_set_volume(0.2F);
+        pc_ambience_set_duck(0.2F);
     } else {
         lbl_804D38E4 = 1.0F;
         lbl_804D38E8 = 1.0F;
@@ -1338,6 +1340,7 @@ void lbAudioAx_80024E84(bool arg0)
         HSD_AudioPStreamResumeCh(8);
         HSD_AudioPStreamResumeCh(7);
         pc_music_stream_set_volume(1.0F);
+        pc_ambience_set_duck(1.0F);
     }
 }
 

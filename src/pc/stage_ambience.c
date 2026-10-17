@@ -15,11 +15,15 @@
 /* Without a drawn fight frame for this long, the ambience fades out. */
 #define AMB_STALE_NS 250000000ull
 #define AMB_FADE_S 1.0f /* in or out, full scale */
+#define AMB_DUCK_S 0.15f /* the pause duck's glide, full scale */
 
 enum { AMB_NONE, AMB_WIND, AMB_FALLS };
 
 static uint64_t s_stamp; /* game thread writes, audio thread reads (__atomic) */
 static int s_kind;
+static float s_duck_target = 1.f; /* __atomic: written by pc_ambience_set_duck */
+static float s_duck = 1.f;        /* audio thread: the duck, gliding to the target */
+static float s_duck0 = 1.f;       /* audio thread: s_duck a frame ago */
 
 static uint64_t now_ns(void) {
     struct timespec ts;
@@ -36,6 +40,10 @@ void pc_ambience_set_enabled(bool on) {
 static bool enabled(void) {
     const char* v = getenv("MELEE_AMBIENCE");
     return v != NULL && v[0] != '\0' ? v[0] != '0' : s_pref;
+}
+
+void pc_ambience_set_duck(float gain) {
+    __atomic_store(&s_duck_target, &gain, __ATOMIC_RELAXED);
 }
 
 void pc_ambience_frame(void) {
@@ -131,6 +139,7 @@ static void wind_mix(float* out, int frames, int rate, bool on) {
 
     gust_step(&s_wind.shared, dt);
     const float volume = pc_get_sfx_volume() * ambience_gain();
+    const float duck0 = s_duck0, duck1 = s_duck;
     const float two_pi_over_rate = 6.2831853f / (float)rate;
     for (int c = 0; c < 2; c++) {
         WindChannel* w = &s_wind.ch[c];
@@ -159,7 +168,8 @@ static void wind_mix(float* out, int frames, int rate, bool on) {
             w->bp_band += f * high;
             w->bp_low += f * w->bp_band;
             const float whistle = w->bp_band * 0.35f;
-            const float lv = level0 + (s_wind.level - level0) * ((float)i / (float)frames);
+            const float t = (float)i / (float)frames;
+            const float lv = (level0 + (s_wind.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
             out[i * 2 + c] += (rush + whistle) * amp * lv;
         }
     }
@@ -214,6 +224,7 @@ static void falls_mix(int frames, int rate, bool on) {
     const float level0 = s_falls.level;
     s_falls.level = on ? fminf(1.f, level0 + dt / AMB_FADE_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
     const float volume = pc_get_sfx_volume() * ambience_gain();
+    const float duck0 = s_duck0, duck1 = s_duck;
     const float w = 6.2831853f / (float)rate;
     const float a_hp = 1.f - expf(-w * 90.f);
     const float a_lp = 1.f - expf(-w * 3200.f);
@@ -252,7 +263,8 @@ static void falls_mix(int frames, int rate, bool on) {
             f->fz_env += (f->fz_target - f->fz_env) * 0.01f;
             f->fz_hp += a_fz * (n - f->fz_hp);
             const float fizz = (n - f->fz_hp) * f->fz_env;
-            const float lv = level0 + (s_falls.level - level0) * ((float)i / (float)frames);
+            const float t = (float)i / (float)frames;
+            const float lv = (level0 + (s_falls.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
             mono[i] = (roar + 0.35f * f->bp_band + 0.18f * fizz) * amp * lv;
         }
         pc_spatial_render_placed(c, s_falls_pos[c], mono);
@@ -266,6 +278,15 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     const uint64_t stamp = __atomic_load_n(&s_stamp, __ATOMIC_ACQUIRE);
     const int kind = __atomic_load_n(&s_kind, __ATOMIC_RELAXED);
     const bool fresh = stamp != 0 && now_ns() - stamp < AMB_STALE_NS;
+    float target = 1.f;
+    if (!fresh) {
+        __atomic_store(&s_duck_target, &target, __ATOMIC_RELAXED);
+    } else {
+        __atomic_load(&s_duck_target, &target, __ATOMIC_RELAXED);
+    }
+    const float step = (float)frames / (float)rate / AMB_DUCK_S;
+    s_duck0 = s_duck;
+    s_duck = s_duck < target ? fminf(target, s_duck + step) : fmaxf(target, s_duck - step);
     wind_mix(out, frames, rate, fresh && kind == AMB_WIND);
     falls_mix(frames, rate, fresh && kind == AMB_FALLS);
 }
