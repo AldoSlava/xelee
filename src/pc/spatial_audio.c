@@ -81,9 +81,10 @@ static const struct {
 #define SP_MUSIC_ELEVATION 15.0f
 #define SP_SPEAKER_GAP 0.10f
 /* Fight music under spatial audio, in dB: placed sounds, the crowd and the
- * stage's ambience need room the plain mix never gave them (the user, by
- * ear, ran music at 30% with them). MELEE_SPATIAL_MUSIC_GAIN overrides. */
-#define SP_FIGHT_MUSIC_DB (-9.0f)
+ * stage's ambience need room the plain mix never gave them. -4.4 is 60%;
+ * -9 (the player's first pick by ear, 30%) cut it more than needed.
+ * MELEE_SPATIAL_MUSIC_GAIN overrides. */
+#define SP_FIGHT_MUSIC_DB (-4.4f)
 /* Frames (5 ms) to cross between plain stereo and a speaker blend. */
 #define SP_SPEAKER_FADE 10
 #define SP_ROLLOFF 0.5f
