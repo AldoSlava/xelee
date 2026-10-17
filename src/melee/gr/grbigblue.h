@@ -76,4 +76,11 @@
 /* 1EFC14 */ bool grBigBlue_801EFC14(Vec3*, int arg, HSD_JObj* jobj);
 /* 3E2D20 */ extern StageData grBb_StageData;
 
+#ifdef TARGET_PC
+/* PC (spatial audio): where lane `lane`'s car is (game units), from its
+ * collision joint as last drawn; `part` is the cars' part. False when
+ * there's none. */
+bool grBigBlue_pc_lane_pos(const HSD_GObj* part, int lane, float pos[3]);
+#endif
+
 #endif

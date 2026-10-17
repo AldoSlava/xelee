@@ -26,7 +26,7 @@
 #define AMB_FADE_IN_S 0.3f /* in, as the fight starts: quickly */
 #define AMB_DUCK_S 0.15f /* the pause duck's glide, full scale */
 
-enum { AMB_NONE, AMB_WIND, AMB_FALLS, AMB_FOUNTAIN };
+enum { AMB_NONE, AMB_WIND, AMB_FALLS, AMB_FOUNTAIN, AMB_RUSH };
 
 static uint64_t s_stamp; /* game thread writes, audio thread reads (__atomic) */
 static int s_kind;
@@ -146,6 +146,7 @@ void pc_ambience_frame(void) {
                      : stage_info.grkind == Gr_Kind_Corneria ? AMB_WIND
                      : stage_info.grkind == Gr_Kind_Kongo  ? AMB_FALLS
                      : stage_info.grkind == Gr_Kind_Izumi  ? AMB_FOUNTAIN
+                     : stage_info.grkind == Gr_Kind_BigBlue ? AMB_RUSH
                                                            : AMB_NONE;
     if (kind == AMB_FOUNTAIN) {
         jets_frame();
@@ -696,6 +697,98 @@ static void jungle_mix(float* out, int frames, int rate, bool on) {
     }
 }
 
+/* Big Blue's rush of air: the fight rides cars racing down the track, and
+ * the wind of that speed is all around (the crowd's ring, like Corneria's
+ * wind). Steadier and brighter than Corneria's gusts: noise from 150 Hz to
+ * about 2 kHz, its brightness and level surging slowly, buffeted by quick
+ * turbulence (two random flutters, around 6 and 13 Hz), with a thin
+ * whistle of air past edges near 3.5 kHz. */
+typedef struct Flutter {
+    uint32_t seed;
+    float value, target, rate; /* rate: new targets a second */
+    float hold;
+} Flutter;
+
+static float flutter_step(Flutter* f, float dt) {
+    f->hold -= dt;
+    if (f->hold <= 0.f) {
+        f->target = rnd_unit(&f->seed);
+        f->hold = 1.f / f->rate;
+    }
+    f->value += (f->target - f->value) * (1.f - expf(-dt * f->rate * 2.f));
+    return f->value;
+}
+
+typedef struct RushChannel {
+    uint32_t seed;
+    Flutter slow, fast;
+    float lp1, lp2, hp;
+    float bp_low, bp_band;
+} RushChannel;
+
+static struct {
+    bool init;
+    float level;
+    Gust surge;
+    RushChannel ch[2];
+} s_rush;
+
+static void rush_init(void) {
+    s_rush.surge = (Gust){.seed = 0x51ED270Bu, .value = 0.6f, .target = 0.6f};
+    for (int c = 0; c < 2; c++) {
+        RushChannel* r = &s_rush.ch[c];
+        *r = (RushChannel){0};
+        r->seed = c == 0 ? 0x3B9ACA07u : 0x2545F491u;
+        r->slow = (Flutter){.seed = c == 0 ? 0x1F123BB5u : 0x5F356495u, .value = 0.5f, .rate = 6.f};
+        r->fast = (Flutter){.seed = c == 0 ? 0x2F8D3E61u : 0x6C8E9CF5u, .value = 0.5f, .rate = 13.f};
+    }
+    s_rush.init = true;
+}
+
+static void rush_mix(float* out, int frames, int rate, bool on) {
+    const float dt = (float)frames / (float)rate;
+    if (!on && s_rush.level <= 0.f) {
+        s_rush.init = false;
+        return;
+    }
+    if (!s_rush.init) {
+        rush_init();
+    }
+    const float level0 = s_rush.level;
+    s_rush.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    gust_step(&s_rush.surge, dt);
+    const float volume = pc_get_sfx_volume() * ambience_gain();
+    const float duck0 = s_duck0, duck1 = s_duck;
+    const float w = 6.2831853f / (float)rate;
+    const float a_hp = 1.f - expf(-w * 150.f);
+    const float f_bp = 2.f * sinf(3.14159265f * 3500.f / (float)rate);
+    for (int c = 0; c < 2; c++) {
+        RushChannel* r = &s_rush.ch[c];
+        const float g = s_rush.surge.value;
+        const float buffet = 0.7f + 0.3f * (0.6f * flutter_step(&r->slow, dt) + 0.4f * flutter_step(&r->fast, dt));
+        const float cutoff = 1200.f + 1000.f * g;
+        const float a = 1.f - expf(-w * cutoff);
+        /* The rush's level falls with its cutoff; this keeps it about even. */
+        const float makeup = sqrtf(2400.f / cutoff);
+        /* About -36 dBFS in a flat desktop mix between the fight's sounds
+         * (the racers' engines about -39 there), Corneria's wind's level. */
+        const float amp = (0.55f + 0.45f * g) * buffet * 0.071f * volume;
+        for (int i = 0; i < frames; i++) {
+            const float n = rnd_unit(&r->seed) * 2.f - 1.f;
+            r->lp1 += a * (n - r->lp1);
+            r->lp2 += a * (r->lp1 - r->lp2);
+            r->hp += a_hp * (r->lp2 - r->hp);
+            const float rush = (r->lp2 - r->hp) * makeup;
+            const float high = n - r->bp_low - 0.25f * r->bp_band;
+            r->bp_band += f_bp * high;
+            r->bp_low += f_bp * r->bp_band;
+            const float t = (float)i / (float)frames;
+            const float lv = (level0 + (s_rush.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
+            out[i * 2 + c] += (rush + r->bp_band * 0.06f) * amp * lv;
+        }
+    }
+}
+
 void pc_ambience_mix(float* out, int frames, int rate) {
     if (!enabled()) {
         return;
@@ -716,4 +809,5 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     falls_mix(out, frames, rate, fresh && kind == AMB_FALLS);
     jungle_mix(out, frames, rate, fresh && kind == AMB_FALLS);
     fountain_mix(out, frames, rate, fresh && kind == AMB_FOUNTAIN);
+    rush_mix(out, frames, rate, fresh && kind == AMB_RUSH);
 }

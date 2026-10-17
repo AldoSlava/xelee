@@ -133,6 +133,10 @@ typedef struct DISC_STRUCT grBb_YakumonoParam {
 #include <sysdolphin/baselib/memory.h>
 #include <sysdolphin/baselib/random.h>
 
+#ifdef TARGET_PC
+#include "pc/spatial_audio.h"
+#endif
+
 /* 1E8560 */ static void fn_801E8560(void* user_data, int joint_id,
                                      CollData* coll, int coll_x50,
                                      mpLib_GroundEnum ground_kind,
@@ -3079,7 +3083,13 @@ static inline void grBigBlue_801EC6C0_inline(Ground* gp, s32 car_idx,
     }
     gp->u.bigblue.car.lanes[car_idx].threshold = lo;
 
+#ifdef TARGET_PC
+    pc_spatial_stage_lane(gp->gobj, car_idx); /* the engine follows the car */
+#endif
     Ground_801C5440(gp, car_idx, lbl_803E3010[HSD_Randi(4)]);
+#ifdef TARGET_PC
+    pc_spatial_stage_lane(NULL, -1);
+#endif
 
     gp->u.bigblue.car.lanes[car_idx].alpha = 1.0F;
 
@@ -3982,7 +3992,13 @@ static inline void grBigBlue_801EE398_inline(Ground* gp, s32 arg1, s32 arg2,
                 sfx_id = lbl_803E3010[grBigBlue_801EE398_sfx()];
                 sfx_gp = gp;
                 slot_arg = slot;
+#ifdef TARGET_PC
+                pc_spatial_stage_lane(gp->gobj, arg1); /* the engine follows the car */
+#endif
                 Ground_801C5440(sfx_gp, slot_arg, sfx_id);
+#ifdef TARGET_PC
+                pc_spatial_stage_lane(NULL, -1);
+#endif
 
                 Ground_801C5630(gp, arg1, gp->u.bigblue.car.lanes[arg1].alpha);
 
@@ -4072,7 +4088,13 @@ static inline void grBigBlue_801EE398_inline(Ground* gp, s32 arg1, s32 arg2,
                 sfx_id = lbl_803E3010[grBigBlue_801EE398_sfx()];
                 slot_arg = slot;
                 sfx_gp = gp;
+#ifdef TARGET_PC
+                pc_spatial_stage_lane(gp->gobj, arg1); /* the engine follows the car */
+#endif
                 Ground_801C5440(sfx_gp, slot_arg, sfx_id);
+#ifdef TARGET_PC
+                pc_spatial_stage_lane(NULL, -1);
+#endif
 
                 Ground_801C5630(gp, arg1, gp->u.bigblue.car.lanes[arg1].alpha);
 
@@ -4489,3 +4511,26 @@ bool grBigBlue_801EFC14(Vec3* a, int b, HSD_JObj* jobj)
         return false;
     }
 }
+
+#ifdef TARGET_PC
+bool grBigBlue_pc_lane_pos(const HSD_GObj* part, int lane, float pos[3])
+{
+    const Ground* gp = part != NULL ? part->user_data : NULL;
+    const HSD_JObj* jobj;
+    int k;
+    if (gp == NULL || lane < 0 || lane >= 4 || gp->u.bigblue.car.collision_jobjs == NULL) {
+        return false;
+    }
+    jobj = gp->u.bigblue.car.collision_jobjs[gp->u.bigblue.car.lanes[lane].collision_slot];
+    if (jobj == NULL) {
+        return false;
+    }
+    for (k = 0; k < 3; k++) {
+        pos[k] = jobj->mtx[k][3];
+        if (!isfinite(pos[k])) {
+            return false;
+        }
+    }
+    return true;
+}
+#endif

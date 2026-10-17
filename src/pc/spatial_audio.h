@@ -77,6 +77,10 @@ void pc_spatial_note_handle(int32_t handle, int sound_id, int group);
  * the one noted for `handle`. */
 void pc_spatial_handle_begin(int32_t handle);
 void pc_spatial_handle_end(void);
+/* Big Blue (grbigblue.c), around the start of a car's engine loop: it
+ * follows lane `lane`'s car of `part` (the cars' part) for the match, as
+ * each new car takes the lane; (NULL, -1) after. */
+void pc_spatial_stage_lane(const void* part, int lane);
 /* Once per drawn fight frame, with the fight camera's view matrix (world ->
  * camera, GX Mtx layout): publishes positions and the listener. */
 void pc_spatial_frame(const float view[3][4]);
@@ -148,6 +152,10 @@ static inline void pc_spatial_note_handle(int32_t handle, int sound_id, int grou
 }
 static inline void pc_spatial_handle_begin(int32_t handle) { (void)handle; }
 static inline void pc_spatial_handle_end(void) {}
+static inline void pc_spatial_stage_lane(const void* part, int lane) {
+    (void)part;
+    (void)lane;
+}
 static inline void pc_spatial_frame(const float view[3][4]) { (void)view; }
 static inline void pc_spatial_voice_tag(int voice, const void* gobj, const float pos[2][3], int channel) {
     (void)voice;

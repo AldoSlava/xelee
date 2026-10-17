@@ -13,6 +13,7 @@
 #include <melee/ft/forward.h>
 #include <melee/ft/ftlib.h>
 #include <melee/gr/ground.h>
+#include <melee/gr/grbigblue.h>
 #include <melee/it/forward.h>
 /* it/it_26B1.h, declared here: its header pulls in every fighter type. */
 void it_8026B294(HSD_GObj* gobj, Vec3* pos);
@@ -136,6 +137,8 @@ static uint64_t now_ns(void) {
 
 static const HSD_GObj* s_cur;      /* the fighter or item whose proc runs */
 static const HSD_GObj* s_cur_part; /* or the stage part */
+static const HSD_GObj* s_lane_part; /* pc_spatial_stage_lane, around a start */
+static int s_lane = -1;
 static bool s_override_on;         /* a deferred netplay start: its noted emitter */
 static const void* s_override_gobj;
 static float s_override_pos[2][3];
@@ -146,6 +149,11 @@ static struct {
 } s_handles[SP_HANDLES];
 static unsigned s_handle_next;
 static unsigned s_starts_tagged, s_starts_plain, s_starts_crowd, s_late_found, s_late_missed; /* stats */
+
+void pc_spatial_stage_lane(const void* part, int lane) {
+    s_lane_part = part;
+    s_lane = part != NULL ? lane : -1;
+}
 
 void pc_spatial_proc(const void* gobj) {
     const HSD_GObj* g = gobj;
@@ -198,6 +206,7 @@ typedef struct StageSound {
     bool from_proc; /* in the starting part's joint */
     int joint;      /* depth first from the part's root, as pc/xr_scene.c counts */
     bool to_shot;   /* then with the Arwing laser the start fires, once it exists */
+    bool lane;      /* with the car of the lane it starts for (pc_spatial_stage_lane) */
 } StageSound;
 
 static const StageSound s_stage_sounds[] = {
@@ -230,6 +239,14 @@ static const StageSound s_stage_sounds[] = {
     /* An Arwing's laser shot: from the Arwing, then with the laser it makes
      * just after starting the sound (itarwinglaser.c) as it flies. */
     {.grkind = 0x0E, .sfx = {0x55733, 0x55734}, .gain = 1.f, .from_proc = true, .joint = 3, .to_shot = true},
+    /* Big Blue (grbigblue.c): the racers' engines, loops Melee starts as a
+     * car takes one of the track's four lanes (four as the stage loads) and
+     * never stops (a later one in the same sound slot replaces it). Plain,
+     * they were a steady bed in both ears (-35 dBFS); each now rides its
+     * lane's car, past the player and on as the lane takes new ones. Placed
+     * they came to -42 in a flat desktop mix, the cars mostly away to the
+     * sides: 3 dB up, the racers being the point. */
+    {.grkind = 0x13, .sfx = {0x6DDD2, 0x6DDD3, 0x6DDD4, 0x6DDD5}, .gain = 1.4f, .lane = true},
 };
 #define SP_STAGE_SOUNDS ((int)(sizeof s_stage_sounds / sizeof s_stage_sounds[0]))
 
@@ -239,6 +256,8 @@ typedef struct StageInstance {
     const HSD_GObj* part; /* the part that started it */
     const HSD_GObj* shot; /* to_shot: its laser, once matched */
     bool waiting;         /* to_shot: no laser yet */
+    bool lane_on;         /* lane: follows `lane`'s car of `part` while it lives */
+    int lane;
     uint64_t stamp;       /* now_ns() at the start */
     float pos[2][3];      /* where it was last */
 } StageInstance;
@@ -315,7 +334,12 @@ static void stage_sound_pos(const StageSound* r, float pos[2][3]) {
 /* An instance's points now; where they were last once its part or laser is gone. */
 static void instance_pos(StageInstance* in) {
     float p[3];
-    if (in->shot != NULL && live(in->shot, HSD_GOBJ_PLINK_ITEM) && emitter_pos(in->shot, p)) {
+    if (in->lane_on) {
+        if (live(in->part, HSD_GOBJ_PLINK_GROUND) && grBigBlue_pc_lane_pos(in->part, in->lane, p)) {
+            memcpy(in->pos[0], p, sizeof(p));
+            memcpy(in->pos[1], p, sizeof(p));
+        }
+    } else if (in->shot != NULL && live(in->shot, HSD_GOBJ_PLINK_ITEM) && emitter_pos(in->shot, p)) {
         memcpy(in->pos[0], p, sizeof(p));
         memcpy(in->pos[1], p, sizeof(p));
     } else if (in->shot == NULL && live(in->part, HSD_GOBJ_PLINK_GROUND)) {
@@ -369,6 +393,30 @@ static const void* find_emitter(int sound_id, int group, float pos[2][3]) {
     const StageSound* r = stage_sound(sound_id);
     if (r == NULL) {
         return NULL;
+    }
+    if (r->lane) {
+        if (s_lane < 0 || s_lane_part == NULL) {
+            return NULL;
+        }
+        /* One emitter a lane, whichever of its loops are playing. */
+        for (int i = 0; i < SP_INSTANCES; i++) {
+            StageInstance* in = &s_inst[i];
+            if (in->r == r && in->lane_on && in->part == s_lane_part && in->lane == s_lane) {
+                instance_pos(in);
+                memcpy(pos, in->pos, sizeof(in->pos));
+                return in;
+            }
+        }
+        StageInstance* in = &s_inst[s_inst_next++ % SP_INSTANCES];
+        memset(in, 0, sizeof(*in));
+        in->r = r;
+        in->part = s_lane_part;
+        in->lane_on = true;
+        in->lane = s_lane;
+        in->stamp = now_ns();
+        instance_pos(in);
+        memcpy(pos, in->pos, sizeof(in->pos));
+        return in;
     }
     if (!r->from_proc) {
         stage_sound_pos(r, pos);
@@ -524,7 +572,7 @@ static void collect_stage(Snapshot* s) {
     uint64_t t = now_ns();
     for (int i = 0; i < SP_INSTANCES && s->n < SP_EMITTERS; i++) {
         StageInstance* in = &s_inst[i];
-        if (in->r != NULL && t - in->stamp < SP_INSTANCE_NS) {
+        if (in->r != NULL && (in->lane_on ? live(in->part, HSD_GOBJ_PLINK_GROUND) : t - in->stamp < SP_INSTANCE_NS)) {
             instance_pos(in);
             memcpy(s->e[s->n].pos, in->pos, sizeof(in->pos));
             s->e[s->n].gobj = in;
