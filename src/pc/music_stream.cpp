@@ -358,7 +358,7 @@ extern "C" void pc_music_stream_mix(float* dst_left, float* dst_right, int num_s
 
     pump_stream_locked();
 
-    float mix_volume = s_stream_volume * pc_get_music_volume();
+    float mix_volume = s_stream_volume * pc_get_music_volume() * pc_audio_dev_music_gain();
     if (mix_volume < 0.0f) {
         mix_volume = 0.0f;
     }

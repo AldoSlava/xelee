@@ -4852,7 +4852,8 @@ void build_placing_layers(PlacingLayers& out, int mode) {
 // s_grades (src/pc/xr_scene.c).
 //
 // Audio, which the game applies (aurora_xr_dev_audio; src/pc/spatial_audio.c):
-// spatial audio on, or bypassed for every sound to play plain stereo.
+// spatial audio on, or bypassed for every sound to play plain stereo; the
+// music's level, to hear the rest without it.
 //
 // AURORA_XR_GRADE_PANEL=1, its first name, is both: the panel and the grade.
 // AURORA_XR_DEV_TOOLS_POS "dx,dy,dz,width" (0.3,-0.15,-0.55,0.36): where it
@@ -4976,9 +4977,9 @@ constexpr std::array<const char*, kPages> kPageNames{"TINT", "AUDIO"};
 constexpr int kTabX0 = 10, kTabW = 150, kTabGap = 10;
 
 // The Audio page: choices, a row each.
-enum { kSpatial, kAudioRows };
+enum { kSpatial, kMusic, kAudioRows };
 constexpr int kAudioRowY0 = 80, kAudioRowStep = 70, kChoiceX1 = 750;
-constexpr std::array<const char*, kAudioRows> kAudioNames{"SPATIAL"};
+constexpr std::array<const char*, kAudioRows> kAudioNames{"SPATIAL", "MUSIC"};
 constexpr std::array<const char*, 2> kSpatialNames{"ON", "OFF"};
 
 // What's under a laser: a tint slider (kHue..kSat), an Audio row (kAudio +
@@ -5041,7 +5042,7 @@ void audio_log() {
     std::lock_guard lock{g_devAudio.mutex};
     a = g_devAudio.value;
   }
-  Log.info("Dev tools: audio: spatial {}", a.spatial ? "on" : "off");
+  Log.info("Dev tools: audio: spatial {}, music {:.0f}%", a.spatial ? "on" : "off", a.music * 100.f);
 }
 
 void draw_header(Canvas& c) {
@@ -5103,7 +5104,7 @@ void draw_tint(Canvas& c) {
 }
 
 void draw_audio(Canvas& c) {
-  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255};
+  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255}, lit{120, 200, 255, 255};
   AuroraXrDevAudio a;
   bool have;
   {
@@ -5118,7 +5119,16 @@ void draw_audio(Canvas& c) {
   for (int row = 0; row < kAudioRows; ++row) {
     const int y = kAudioRowY0 + row * kAudioRowStep;
     const int target = kAudio + row;
-    c.text(18, y + 4, 3, kAudioNames[row], target == P.hover ? text : dim);
+    c.text(18, y + 4, 3, kAudioNames[row], target == P.active ? lit : target == P.hover ? text : dim);
+    if (row == kMusic) {
+      const int kx = kTrackX0 + static_cast<int>(std::lround(std::clamp(a.music, 0.f, 1.f) * (kTrackX1 - kTrackX0)));
+      c.fill(kTrackX0, y + 10, kTrackX1, y + kTrackH - 10, {52, 56, 68, 255});
+      c.fill(kTrackX0, y + 10, kx, y + kTrackH - 10, {70, 110, 150, 255});
+      c.fill(kx - 6, y - 9, kx + 6, y + kTrackH + 9, {10, 10, 12, 255});
+      c.fill(kx - 3, y - 6, kx + 3, y + kTrackH + 6, target == P.active ? lit : Rgba{250, 250, 250, 255});
+      c.text(kTrackX1 + 22, y + 4, 3, fmt::format("{:.0f}", a.music * 100.f), text);
+      continue;
+    }
     const int n = 2, chosen = a.spatial ? 0 : 1;
     const int w = (kChoiceX1 - kTrackX0) / n;
     for (int i = 0; i < n; ++i) {
@@ -5129,7 +5139,8 @@ void draw_audio(Canvas& c) {
       c.text(x0 + (w - tw) / 2, y + 4, 3, name, i == chosen ? text : dim);
     }
   }
-  c.text(18, kAudioRowY0 + kAudioRows * kAudioRowStep + 10, 3, "OFF: EVERY SOUND PLAIN STEREO.", dim);
+  c.text(18, kAudioRowY0 + kAudioRows * kAudioRowStep + 10, 3, "SPATIAL OFF: EVERY SOUND PLAIN STEREO.", dim);
+  c.text(18, kAudioRowY0 + kAudioRows * kAudioRowStep + 50, 3, "MUSIC: PERCENT OF ITS USUAL LEVEL.", dim);
 }
 
 void draw_panel(Canvas& c) {
@@ -5207,11 +5218,20 @@ void audio_choose(int row, float px) {
   audio_log();
 }
 
-// Dragging a tint slider (a target) to px.
+// Dragging a slider (a target) to px.
 void panel_drag(int target, float px) {
+  const float t = std::clamp((px - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0), 0.f, 1.f);
+  if (target == kAudio + kMusic) {
+    const float v = std::round(t * 20.f) / 20.f; // steps of 5%
+    std::lock_guard lock{g_devAudio.mutex};
+    if (v != g_devAudio.value.music) {
+      g_devAudio.value.music = v;
+      P.dirty = true;
+    }
+    return;
+  }
   if (target < 0 || target >= kSliders)
     return;
-  const float t = std::clamp((px - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0), 0.f, 1.f);
   const float v = t * kSliderMax[target];
   if (v != P.value[target]) {
     P.value[target] = v;
@@ -5242,6 +5262,8 @@ void panel_reset() {
 void panel_released() {
   if (P.active >= 0 && P.active < kSliders)
     panel_log("set");
+  else if (P.active == kAudio + kMusic)
+    audio_log();
 }
 
 // Each display frame, before the arena's grab: shows the panel while `show`,
@@ -5305,9 +5327,10 @@ void update_dev_panel(bool show, bool tintUsable) {
     } else if (panel_pressed(hand) && target >= kTab && target < kTab + kPages) {
       P.page = target - kTab;
       P.dirty = true;
-    } else if (panel_pressed(hand) && target >= kAudio && target < kAudio + kAudioRows) {
+    } else if (panel_pressed(hand) && target == kAudio + kSpatial) {
       audio_choose(target - kAudio, px);
-    } else if (panel_pressed(hand) && target >= 0 && target < kSliders && P.active < 0) {
+    } else if (panel_pressed(hand) && (target == kAudio + kMusic || (target >= 0 && target < kSliders)) &&
+               P.active < 0) {
       P.active = target;
       P.activeHand = h;
       P.dirty = true;

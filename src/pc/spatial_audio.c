@@ -530,18 +530,23 @@ static void collect_stage(Snapshot* s) {
     }
 }
 
-/* Spatial audio bypassed from the dev tools panel (aurora_xr_dev_audio), for
- * an A/B: every voice as it would be without it. Game thread. */
+/* The dev tools panel's audio settings (aurora_xr_dev_audio): spatial audio
+ * bypassed for an A/B (every voice as it would be without it), returned,
+ * and the music's level, handed to the mixer. Game thread. */
 static bool dev_bypass(void) {
 #ifdef AURORA_ENABLE_OPENXR
     static bool published;
     if (!published) {
-        const AuroraXrDevAudio d = {.spatial = true};
+        const AuroraXrDevAudio d = {.spatial = true, .music = 1.f};
         aurora_xr_dev_audio_defaults(&d);
         published = true;
     }
     AuroraXrDevAudio d;
-    return aurora_xr_dev_audio(&d) && !d.spatial;
+    if (!aurora_xr_dev_audio(&d)) {
+        return false;
+    }
+    pc_audio_set_dev_music_gain(d.music);
+    return !d.spatial;
 #else
     return false;
 #endif

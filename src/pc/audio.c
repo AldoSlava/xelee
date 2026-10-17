@@ -118,6 +118,19 @@ float pc_audio_get_music_volume(void) {
     return s_music_volume;
 }
 
+static float s_dev_music_gain = 1.0f; /* __atomic: the dev tools' music level */
+
+void pc_audio_set_dev_music_gain(float gain) {
+    gain = gain < 0.0f ? 0.0f : (gain > 1.0f ? 1.0f : gain);
+    __atomic_store(&s_dev_music_gain, &gain, __ATOMIC_RELAXED);
+}
+
+float pc_audio_dev_music_gain(void) {
+    float gain;
+    __atomic_load(&s_dev_music_gain, &gain, __ATOMIC_RELAXED);
+    return gain;
+}
+
 float pc_audio_get_sfx_volume(void) {
     return s_sfx_volume;
 }
@@ -354,7 +367,7 @@ static void mix_voice(Voice* v, float* out, bool mono) {
     s32 vol = pb->ve.currentVolume;
     s32 delta = pb->ve.currentDelta;
 
-    float voice_gain = is_music_stream(v) ? pc_get_music_volume() : pc_get_sfx_volume();
+    float voice_gain = is_music_stream(v) ? pc_get_music_volume() * pc_audio_dev_music_gain() : pc_get_sfx_volume();
     if (voice_gain < 0.0f) {
         voice_gain = 0.0f;
     }

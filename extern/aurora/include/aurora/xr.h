@@ -146,9 +146,11 @@ void aurora_xr_heavy_effect(void);
 
 /* Dev tools (AURORA_XR_DEV_TOOLS=1): a panel in paused fights. Its Audio
  * page's settings, which the game applies: spatial audio on, or bypassed
- * (every sound plain stereo, as without it). */
+ * (every sound plain stereo, as without it), and the music's level (0 to 1,
+ * times its usual: 0 mutes it, to hear the rest). */
 typedef struct AuroraXrDevAudio {
   bool spatial;
+  float music;
 } AuroraXrDevAudio;
 /* The game: its audio settings as they stand without the panel, which it
  * shows and Reset goes back to. Any thread. */
