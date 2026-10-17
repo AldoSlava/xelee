@@ -1544,9 +1544,6 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `MELEE_POINTER_MOUSE` | 0 | 1: the mouse in the window is the screen's pointer, its right button Back (testing the menu hooks flat) |
 | `AURORA_XR_HUD_ON_TOP` | 0 | 1: the HUD draws over the fighters in mixed reality too (it always does in full VR) |
 | `AURORA_XR_DUMP` | unset | Directory to write each stream's image once (PPM, plus alpha as PGM) |
-| `AURORA_XR_ROOM` | 1 | 0 leaves the room's layout from Space Setup (`XR_FB_scene`) unread: the room reverb takes a typical living room (5 x 4 x 2.5 m) |
-| `MELEE_ROOM_REVERB` | MR | Placed sounds reverberate in the player's room (`src/pc/room_reverb.h`) in mixed reality, instead of the stage's reverb. 0 never, 1 always (also flat, for desktop A/B) |
-| `MELEE_ROOM_REVERB_DB` | -9 | The room reverb's level against a sound at the reference distance (dB) |
 | `AURORA_XR_RAYCAST` | 1 | 0 leaves `XR_META_environment_raycast` off: no surface measured under the stage (Quest 3/3S, spatial data permission) |
 | `AURORA_XR_LOCAL_FLOOR` | 1 | 0 leaves `XR_EXT_local_floor` off: the floor no longer stands in for the surface without raycast |
 | `AURORA_XR_SURFACE_SHADOW` | 1 | 0 hides the stage's shadow on the surface under it (still measured): blind A/B. Overrides the launcher's Stage shadow (Off also skips raycasting) |

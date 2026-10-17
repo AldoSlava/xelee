@@ -16,11 +16,7 @@
  * 30% of its power comes from a stereo pair ahead of the stage and up, and
  * in the XR menus 30% of the whole mix from a pair beside the flat screen.
  * The announcer and every other sound are plain stereo, as are the reverb
- * busses. In mixed reality, where the stage is in the player's own room,
- * placed sounds reverberate in that room instead of the stage's reverb
- * (pc/room_reverb.h, sized from the headset's room layout or a typical
- * living room): their aux A sends are dropped and they feed the room's
- * reverb, heard all around, before their distance gain.
+ * busses.
  *
  * The path, in four steps:
  *   1. Emitter. The GObj proc loop (gobj.c) names the fighter or item whose
@@ -116,10 +112,6 @@ float* pc_spatial_ambient_bus(void);
  * each keeping its HRTF state from frame to frame). False, doing nothing,
  * when nothing is placed this frame. */
 bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono);
-/* Audio thread: placed sounds reverberate in the player's room this frame
- * (mixed reality; pc/room_reverb.h), in place of the stage's reverb: their
- * aux A sends are to be dropped. */
-bool pc_spatial_room_reverb(void);
 /* After the voices: adds the positional bus to the interleaved stereo mix
  * `out` (160 frames). */
 void pc_spatial_frame_end(float* out);
@@ -173,7 +165,6 @@ static inline float* pc_spatial_voice_bus(int voice) {
 }
 static inline float* pc_spatial_music_bus(void) { return 0; }
 static inline float* pc_spatial_ambient_bus(void) { return 0; }
-static inline bool pc_spatial_room_reverb(void) { return false; }
 static inline bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono) {
     (void)slot;
     (void)pos;
