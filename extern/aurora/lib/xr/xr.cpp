@@ -321,6 +321,15 @@ struct AudioScreen {
 } g_audioScreen;
 std::array<XrView, 2> g_latestViews{};
 bool g_viewsValid = false;
+// How fast the head turns (degrees a second), from the poses publish_views
+// locates: the most and the mean since the GPU passes line last logged them
+// (under g_viewMutex), and the latest (any thread), for a spike's line.
+float g_headTurnMax = 0.f;
+double g_headTurnSum = 0.0;
+uint32_t g_headTurnN = 0;
+XrQuaternionf g_headTurnPrev{0.f, 0.f, 0.f, 1.f};
+XrTime g_headTurnPrevTime = 0;
+std::atomic<float> g_headTurnLast{0.f};
 
 // Lock-step pacing (aurora_xr_pace): the XR thread ticks every
 // g_displayPerGameFrame display frames, the game waits for the tick instead
@@ -2109,12 +2118,22 @@ bool compute_gate() {
   }
   if (g_gate.tick == 0)
     return true;
-  // The three images the compositor needs together, the 3D one longest.
+  // The three images the compositor needs together, the 3D one longest:
+  // up to 10 ms (AURORA_XR_GATE_WAIT_MS). There are three, and at latency 2
+  // one is shown and one queued, so the third comes back only as the
+  // compositor lets go, later when it's loaded (SpaceWarp filling frames
+  // under a heavy stage, a fast head turn). At 6 ms the wait ran out 140
+  // times in 10 s as Brinstar Depths' Kraid rose: a frame done in time was
+  // repeated and the next found the ring full of stale ones (3D at 46-53 a
+  // second). At 10 the image always came (8 ms at most), the loop still
+  // ending 24 ms before display: 59.9.
+  static const int64_t stereoWaitNs =
+      static_cast<int64_t>(std::clamp(env_float("AURORA_XR_GATE_WAIT_MS", 10.f), 0.5f, 14.f) * 1e6f);
   for (const int id : {kStereo, kMotion, kMotionDepth}) {
     Stream& st = g_streams[id];
     if (has_free_image(st))
       continue;
-    if (!acquire_ahead(st, id == kStereo ? 6'000'000 : 2'000'000))
+    if (!acquire_ahead(st, id == kStereo ? stereoWaitNs : 2'000'000))
       return false;
     if (!has_free_image(st)) {
       g_gate.blocked = true;
@@ -2591,6 +2610,22 @@ void publish_views(XrTime displayTime) {
     const XrVector3f &l = views[0].pose.position, &r = views[1].pose.position;
     B.head = {(l.x + r.x) * 0.5f, (l.y + r.y) * 0.5f, (l.z + r.z) * 0.5f};
     B.headOrientation = views[0].pose.orientation;
+    // The turn since the last pose: 2 asin |q_rel.xyz|, from the quaternions'
+    // dot (no libm calls here: the game's own libm interposes some).
+    const XrQuaternionf& q = B.headOrientation;
+    const XrQuaternionf& p = g_headTurnPrev;
+    const double dt = (displayTime - g_headTurnPrevTime) * 1e-9;
+    if (g_headTurnPrevTime != 0 && dt > 1e-4 && dt < 0.1) {
+      const float dot = std::min(1.f, std::fabs(q.x * p.x + q.y * p.y + q.z * p.z + q.w * p.w));
+      const float deg = 2.f * std::sqrt(std::max(0.f, 1.f - dot * dot)) * 57.2958f; // small angles
+      const float speed = static_cast<float>(deg / dt);
+      g_headTurnMax = std::max(g_headTurnMax, speed);
+      g_headTurnSum += speed;
+      ++g_headTurnN;
+      g_headTurnLast.store(speed, std::memory_order_relaxed);
+    }
+    g_headTurnPrev = q;
+    g_headTurnPrevTime = displayTime;
   }
 }
 
@@ -5903,15 +5938,24 @@ bool render_xr_frame() {
   pre[3] = monotonic_ns();
   publish_views(fs.predictedDisplayTime);
   pre[4] = monotonic_ns();
-  if (B.focused && g_arenaToHead.exchange(false)) {
+  static const bool atHead = env_flag("AURORA_XR_ARENA_AT_HEAD", false);
+  bool viewsValid;
+  {
+    std::lock_guard lock{g_viewMutex};
+    viewsValid = g_viewsValid;
+  }
+  // Unattended runs wait for a tracked head: placed from the identity pose
+  // before it, the stage stood wherever the lenses weren't looking.
+  if (B.focused && (!atHead || viewsValid) && g_arenaToHead.exchange(false)) {
     const XrVector3f fwd = qrot(B.headOrientation, {0.f, 0.f, -1.f});
     const float yaw = std::atan2(-fwd.x, -fwd.z); // rot_y's sense
     std::lock_guard lock{g_arenaMutex};
     g_arena.yaw = g_defaultArena.yaw + yaw;
     // From the head's spot on the floor, at the default height; unattended
-    // runs (AURORA_XR_ARENA_AT_HEAD) from the head itself, wherever it lies.
-    static const bool atHead = env_flag("AURORA_XR_ARENA_AT_HEAD", false);
-    g_arena.pos = XrVector3f{B.head.x, atHead ? B.head.y : 0.f, B.head.z} + rot_y(g_defaultArena.pos, yaw);
+    // runs (AURORA_XR_ARENA_AT_HEAD) from the head itself, wherever it lies
+    // and looks, up or down too (a headset on a desk may face anywhere).
+    g_arena.pos = atHead ? B.head + qrot(B.headOrientation, g_defaultArena.pos)
+                         : XrVector3f{B.head.x, 0.f, B.head.z} + rot_y(g_defaultArena.pos, yaw);
     Log.info("Arena placed at the head: {:.2f},{:.2f},{:.2f}, yaw {:.0f} deg", g_arena.pos.x, g_arena.pos.y,
              g_arena.pos.z, g_arena.yaw * 57.2958f);
   }
@@ -7112,7 +7156,8 @@ void map_timing() {
                   for (uint32_t z = 0; z < kZoneCount; ++z)
                     if (z != kZoneFrame && (rb.zones & (1u << z)) && ts[z * 2 + 1] > ts[z * 2])
                       passes += fmt::format(", {} {:.1f}", kZoneNames[z], (ts[z * 2 + 1] - ts[z * 2]) / 1e6);
-                  Log.info("GPU frame spike: {:.1f} ms{}", t.lastFrameNs / 1e6, passes);
+                  Log.info("GPU frame spike: {:.1f} ms{}; head turning {:.0f} deg/s", t.lastFrameNs / 1e6, passes,
+                           g_headTurnLast.load(std::memory_order_relaxed));
                   g_spikeSeen = true;
                 }
               }
@@ -7131,8 +7176,19 @@ void map_timing() {
             total += us;
             line += fmt::format("{}{} {:.0f}", z ? ", " : "", kZoneNames[z], us);
           }
-          Log.info("GPU 3D passes per frame (us): {} (total {:.0f}); {:.0f} world draws per frame", line, total,
-                   t.worldFrames ? static_cast<double>(t.worldDraws) / t.worldFrames : 0.0);
+          float turnMax, turnMean;
+          {
+            std::lock_guard lock{g_viewMutex};
+            turnMax = g_headTurnMax;
+            turnMean = g_headTurnN ? static_cast<float>(g_headTurnSum / g_headTurnN) : 0.f;
+            g_headTurnMax = 0.f;
+            g_headTurnSum = 0.0;
+            g_headTurnN = 0;
+          }
+          Log.info("GPU 3D passes per frame (us): {} (total {:.0f}); {:.0f} world draws per frame; head turning "
+                   "{:.0f} deg/s mean, {:.0f} most",
+                   line, total, t.worldFrames ? static_cast<double>(t.worldDraws) / t.worldFrames : 0.0, turnMean,
+                   turnMax);
           t.worldDraws = 0;
           t.worldFrames = 0;
           t.ns = {};

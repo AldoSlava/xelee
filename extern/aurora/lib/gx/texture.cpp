@@ -7,6 +7,8 @@
 #include "shader_info.hpp"
 
 #include <absl/container/flat_hash_map.h>
+#include <chrono>
+#include <cstdlib>
 #include <absl/container/flat_hash_set.h>
 #include <tracy/Tracy.hpp>
 #include <xxhash.h>
@@ -695,6 +697,25 @@ void invalidate_replacement(uint64_t replacementId) noexcept {
   }
 }
 
+// Time this frame's texture lookups took past the object cache: content
+// hashing, and decoding and uploading the ones never seen (misses), on the
+// thread replaying the FIFO. AURORA_LOG_SLOW_TEXTURES=<ms> (2 by default, 0
+// off) logs a frame whose lookups took that long: textures first seen
+// mid-fight (an element appearing for the first time) cost frame time here.
+struct SlowTextures {
+  int64_t ns = 0;
+  uint32_t lookups = 0;
+} s_slowTextures;
+
+struct SlowTextureTimer {
+  std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+  ~SlowTextureTimer() {
+    s_slowTextures.ns += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+                             .count();
+    ++s_slowTextures.lookups;
+  }
+};
+
 gfx::TextureHandle resolve_static_texture(const GXTexObj_& obj) {
   ZoneScoped;
 
@@ -709,6 +730,7 @@ gfx::TextureHandle resolve_static_texture(const GXTexObj_& obj) {
     }
   }
 
+  const SlowTextureTimer timer;
   gfx::TextureHandle handle;
   uint64_t replacementId = 0;
   std::optional<TextureKeys> keys;
@@ -763,6 +785,7 @@ gfx::TextureHandle resolve_static_palette_texture(const GXTexObj_& obj, const GX
     }
   }
 
+  const SlowTextureTimer timer;
   gfx::TextureHandle handle;
   uint64_t replacementId = 0;
   std::optional<TextureKeys> keys;
@@ -802,6 +825,14 @@ gfx::TextureHandle resolve_static_palette_texture(const GXTexObj_& obj, const GX
 }
 
 void end_frame() noexcept {
+  static const double slowMs = [] {
+    const char* v = std::getenv("AURORA_LOG_SLOW_TEXTURES");
+    return v != nullptr ? std::atof(v) : 2.0;
+  }();
+  if (slowMs > 0.0 && s_slowTextures.ns >= slowMs * 1e6)
+    Log.info("slow textures: {:.1f} ms this frame, {} looked up past the object cache, {} new ({} KiB uploaded)",
+             s_slowTextures.ns / 1e6, s_slowTextures.lookups, s_stats.misses, s_stats.uploadBytes / 1024);
+  s_slowTextures = {};
   sweep_hash_memo();
   const auto streamingStats = gfx::texture_replacement::process_streaming();
   s_stats.pendingLoads = streamingStats.pendingLoads;

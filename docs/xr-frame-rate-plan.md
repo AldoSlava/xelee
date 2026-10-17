@@ -49,9 +49,13 @@ How it ended up, and where it left the A2 design below:
   and four-CPU Brinstar stuck at 33 3D frames a second.
 - **Clipped stage parts** are in the motion pass with the eyes' clip test
   (hard cut or dithered fade), whole.
-- **Staged frames in step:** a hand-over with a frame due waits up to 6 ms
-  for a swapchain image, and a frame with a later one due too is retired
-  unshown. A lost loop otherwise left the 3D, HUD and SpaceWarp queues a
+- **Staged frames in step:** a hand-over with a frame due waits up to 10 ms
+  (`AURORA_XR_GATE_WAIT_MS`; 6 until 2026-10-17) for a swapchain image, and
+  a frame with a later one due too is retired unshown. With three images at
+  latency 2 the third comes back only as the compositor lets go, later when
+  it's loaded: at 6 ms the wait ran out 140 times in 10 s as Brinstar
+  Depths' Kraid rose (frames done in time repeated, 3D at 46-53 a second);
+  at 10 it never did (8 ms at most) and Depths held 59.9. A lost loop otherwise left the 3D, HUD and SpaceWarp queues a
   frame apart for the rest of a fight (SpaceWarp distorting more and more
   on Temple).
 - (An adaptive switch-off, for fights the GPU couldn't keep at 60 with

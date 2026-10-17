@@ -1049,7 +1049,42 @@ static void follow_update(void) {
 /* Slippi's pause: the overlay only, the match runs on (gm/gmvs.c). */
 extern bool gm_vs_soft_paused(void);
 
+/* MELEE_XR_PROBE=1: a log line whenever what the 3D view draws around the
+ * blast zones changes from one drawn frame to the next (draws of fighters
+ * off the flat camera, magnifier bubbles, KO explosions clipped to the
+ * blast box, KOs), to line up with the XR stats (AURORA_XR_LOG_PERIOD). */
+static struct {
+    int on;
+    unsigned frame;
+    int offscreen, magnified, blast, ko;
+    int last_offscreen, last_magnified, last_blast;
+} s_probe = {.on = -1};
+
+static bool probe_on(void) {
+    if (s_probe.on < 0) {
+        s_probe.on = getenv("MELEE_XR_PROBE") != NULL && getenv("MELEE_XR_PROBE")[0] == '1';
+    }
+    return s_probe.on;
+}
+
+static void probe_frame(void) {
+    if (!probe_on()) {
+        return;
+    }
+    s_probe.frame++;
+    if (s_probe.offscreen != s_probe.last_offscreen || s_probe.magnified != s_probe.last_magnified ||
+        s_probe.blast != s_probe.last_blast || s_probe.ko > 0) {
+        pc_log_line("xr-probe: frame %u offscreen %d magnified %d blast %d%s", s_probe.frame, s_probe.offscreen,
+                    s_probe.magnified, s_probe.blast, s_probe.ko > 0 ? " KO" : "");
+    }
+    s_probe.last_offscreen = s_probe.offscreen;
+    s_probe.last_magnified = s_probe.magnified;
+    s_probe.last_blast = s_probe.blast;
+    s_probe.offscreen = s_probe.magnified = s_probe.blast = s_probe.ko = 0;
+}
+
 void pc_xr_world_camera(const float view[3][4]) {
+    probe_frame();
     if (s_flat_view) {
         pc_xr_mono_camera();
         return;
@@ -1114,6 +1149,7 @@ bool pc_xr_fighter_offscreen_begin(void) {
     float planes[AURORA_XR_MAX_CLIPS][4], fades[AURORA_XR_MAX_CLIPS];
     const int n = s_follow != NULL && s_follow_placed && pc_xr_mixed_reality() ? follow_planes(planes, fades) : 0;
     aurora_xr_world_clips4_fade((const float(*)[4])planes, fades, n, opacity);
+    s_probe.offscreen++;
     return true;
 }
 
@@ -1130,6 +1166,7 @@ bool pc_xr_magnify_begin(void) {
     }
     s_magnify_saved = s_category;
     pc_xr_mono_camera();
+    s_probe.magnified++;
     return true;
 }
 
@@ -1809,6 +1846,7 @@ bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const flo
 
 void pc_xr_heavy_effect(void) {
     s_ko_window_until = SDL_GetTicks() + 1000; /* MELEE_XR_PTCL_STATS */
+    s_probe.ko++;
     aurora_xr_heavy_effect();
 }
 
@@ -1820,6 +1858,7 @@ int pc_xr_blast_clip_begin(void) {
     if (s_category != AURORA_XR_WORLD || s_center_grkind <= 0) {
         return 0;
     }
+    s_probe.blast++;
     if (off) {
         return 1;
     }

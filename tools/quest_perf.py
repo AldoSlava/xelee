@@ -214,10 +214,14 @@ def summarize(text):
 DUMP_DIR = f"{FILES}/dump"
 
 
-def view_coverage():
-    """How much of the left eye the 3D view drew (its alpha), from the dump."""
+def view_coverage(label):
+    """How much of the left eye the 3D view drew (its alpha), from the dump,
+    which is kept as build/quest-perf/<label>-eye.pgm to look at."""
     raw = subprocess.run(["adb", "exec-out", "cat", f"{DUMP_DIR}/xr_3d_alpha.pgm"], capture_output=True).stdout
     adb("shell", "rm", "-rf", DUMP_DIR, check=False)
+    if raw:
+        with open(os.path.join(OUT_DIR, f"{label}-eye.pgm"), "wb") as f:
+            f.write(raw)
     parts = raw.split(maxsplit=4)
     if len(parts) < 5 or parts[0] != b"P5":
         return "  view: no eye dump (WARNING: can't tell whether the stage is in view)"
@@ -316,7 +320,7 @@ def run_phases(args):
     with open(os.path.join(OUT_DIR, f"{args.label}-warmup.log"), "w") as f:
         f.write(adb("logcat", "-d", "-v", "time"))
     if args.view_check:
-        print(view_coverage())
+        print(view_coverage(args.label))
     for i, (mode, secs) in enumerate(phases):
         if i > 0:
             shell_write(CTL_FILE, mode + "\n")
