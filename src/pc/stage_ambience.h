@@ -29,7 +29,8 @@ void pc_ambience_set_duck(float gain);
 
 /* Audio thread: the ambience for one AX frame of `frames` stereo samples:
  * what surrounds the listener added to `out` (interleaved, at the AX rate),
- * what stands somewhere placed there (pc_spatial_render_placed). */
+ * what stands somewhere placed there (pc_spatial_render_placed), or into
+ * `out`, centred, when it can't be (spatial audio bypassed). */
 void pc_ambience_mix(float* out, int frames, int rate);
 
 #ifdef __cplusplus

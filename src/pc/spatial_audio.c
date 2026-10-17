@@ -441,6 +441,7 @@ void pc_spatial_handle_end(void) {
 typedef struct Snapshot {
     uint64_t stamp; /* now_ns() when published; 0: never */
     bool xr3d;      /* the fight is in 3D in a headset: the head is the listener */
+    bool bypass;    /* spatial audio bypassed (dev tools): every voice plain stereo */
     float view[3][4];
     int n;
     struct {
@@ -524,6 +525,23 @@ static void collect_stage(Snapshot* s) {
     }
 }
 
+/* Spatial audio bypassed from the dev tools panel (aurora_xr_dev_audio), for
+ * an A/B: every voice as it would be without it. Game thread. */
+static bool dev_bypass(void) {
+#ifdef AURORA_ENABLE_OPENXR
+    static bool published;
+    if (!published) {
+        const AuroraXrDevAudio d = {.spatial = true};
+        aurora_xr_dev_audio_defaults(&d);
+        published = true;
+    }
+    AuroraXrDevAudio d;
+    return aurora_xr_dev_audio(&d) && !d.spatial;
+#else
+    return false;
+#endif
+}
+
 void pc_spatial_frame(const float view[3][4]) {
     static Snapshot s; /* game thread only; static to keep it off the stack */
     static uint64_t last_log;
@@ -536,6 +554,7 @@ void pc_spatial_frame(const float view[3][4]) {
     collect_stage(&s);
     memcpy(s.view, view, sizeof(s.view));
     s.xr3d = pc_xr_world_3d();
+    s.bypass = dev_bypass();
     s.stamp = now_ns();
     pthread_mutex_lock(&s_snap_mutex);
     s_snap = s;
@@ -612,6 +631,7 @@ static Speakers s_music_spk; /* fights: ahead of the stage, the music */
 /* Fight music this frame (32 kHz stereo), apart from the rest of the mix. */
 static float s_music_bus[SP_AX_FRAME * 2];
 static bool s_music_bus_on;
+static bool s_bypassed; /* a fight draws, spatial audio bypassed (dev tools) */
 
 static float s_up[3][SP_UP_TAPS];     /* upsampler phases: offsets 0, 2/3, 1/3 */
 static float s_down[2][SP_DOWN_TAPS]; /* downsampler phases: offsets 0, 1/2 */
@@ -825,6 +845,7 @@ void pc_spatial_voice_clear(int voice) {
 void pc_spatial_frame_begin(void) {
     s_frame++;
     s_active = false;
+    s_bypassed = false;
     s_music_bus_on = false;
     if (!s_ready) {
         return;
@@ -839,6 +860,10 @@ void pc_spatial_frame_begin(void) {
     const Snapshot* s = &s_audio_snap;
     if (s->stamp == 0 || now_ns() - s->stamp > SP_STALE_NS) {
         return; /* no fight drawing (menus, scene changes) */
+    }
+    if (s->bypass) {
+        s_bypassed = true;
+        return; /* every voice as it would be without spatial audio */
     }
     if (s->xr3d) {
 #ifdef AURORA_ENABLE_OPENXR
@@ -891,6 +916,10 @@ float* pc_spatial_voice_bus(int voice) {
     }
     s_crowd_in_used = true;
     return s_crowd_in;
+}
+
+bool pc_spatial_bypassed(void) {
+    return s_bypassed;
 }
 
 float* pc_spatial_ambient_bus(void) {

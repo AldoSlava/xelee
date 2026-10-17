@@ -144,6 +144,19 @@ void aurora_xr_set_room_grade(float r, float g, float b, float saturation);
  * thread. */
 void aurora_xr_heavy_effect(void);
 
+/* Dev tools (AURORA_XR_DEV_TOOLS=1): a panel in paused fights. Its Audio
+ * page's settings, which the game applies: spatial audio on, or bypassed
+ * (every sound plain stereo, as without it). */
+typedef struct AuroraXrDevAudio {
+  bool spatial;
+} AuroraXrDevAudio;
+/* The game: its audio settings as they stand without the panel, which it
+ * shows and Reset goes back to. Any thread. */
+void aurora_xr_dev_audio_defaults(const AuroraXrDevAudio* audio);
+/* The game: the panel's audio settings; false, leaving `audio` untouched,
+ * without dev tools or before the defaults came. Any thread; cheap. */
+bool aurora_xr_dev_audio(AuroraXrDevAudio* audio);
+
 /* True while an OpenXR session is presenting the game. Any thread. */
 bool aurora_xr_active(void);
 /* For positional audio: the transform from the current stage's game world

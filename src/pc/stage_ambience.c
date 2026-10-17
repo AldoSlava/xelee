@@ -212,7 +212,7 @@ static void falls_init(void) {
     s_falls.init = true;
 }
 
-static void falls_mix(int frames, int rate, bool on) {
+static void falls_mix(float* out, int frames, int rate, bool on) {
     const float dt = (float)frames / (float)rate;
     if (!on && s_falls.level <= 0.f) {
         s_falls.init = false;
@@ -267,7 +267,12 @@ static void falls_mix(int frames, int rate, bool on) {
             const float lv = (level0 + (s_falls.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
             mono[i] = (roar + 0.35f * f->bp_band + 0.18f * fizz) * amp * lv;
         }
-        pc_spatial_render_placed(c, s_falls_pos[c], mono);
+        if (!pc_spatial_render_placed(c, s_falls_pos[c], mono)) {
+            for (int i = 0; i < frames; i++) { /* not placed (spatial audio bypassed): plain, centred */
+                out[i * 2] += mono[i] * 0.7071f;
+                out[i * 2 + 1] += mono[i] * 0.7071f;
+            }
+        }
     }
 }
 
@@ -288,5 +293,5 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     s_duck0 = s_duck;
     s_duck = s_duck < target ? fminf(target, s_duck + step) : fmaxf(target, s_duck - step);
     wind_mix(out, frames, rate, fresh && kind == AMB_WIND);
-    falls_mix(frames, rate, fresh && kind == AMB_FALLS);
+    falls_mix(out, frames, rate, fresh && kind == AMB_FALLS);
 }

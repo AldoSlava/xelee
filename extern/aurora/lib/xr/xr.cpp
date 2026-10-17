@@ -4836,19 +4836,27 @@ void build_placing_layers(PlacingLayers& out, int mode) {
   }
 }
 
-// ---------------------------------------------------------------- XR thread: the room grade panel
+// ---------------------------------------------------------------- XR thread: the dev tools panel
 //
-// For tuning a stage's room grade by eye (AURORA_XR_GRADE_PANEL=1, a debug
-// aid): while a fight is paused in mixed reality, a panel floats to the
-// right of where the head looked as the pause began. Its sliders are the
+// For tuning and A/Bs on the headset (AURORA_XR_DEV_TOOLS=1, a debug aid):
+// while a fight is paused, a panel floats to the right of where the head
+// looked as the pause began, with a page per tab. A laser on the panel and
+// the trigger (a pinch for a tracked hand) pick a tab or a choice and drag
+// a slider; Reset gives the page's settings back as they were without it.
+//
+// Tint, in mixed reality with the room's grade on (AURORA_XR_GRADE=1): the
 // tint as a colour in HSL (hue, tint: its saturation, light: its lightness;
-// that colour is the gains per channel) and the room's own saturation. A
-// laser on the panel and the trigger (a pinch for a tracked hand) drag a
-// slider, and the room follows within about 100 ms. What it sets replaces
-// the game's grade for that stage until the app quits; Reset gives the
-// game's back. Each change is logged as a row for s_grades
-// (src/pc/xr_scene.c). AURORA_XR_GRADE_PANEL_POS "dx,dy,dz,width"
-// (0.3,-0.15,-0.55,0.36): where it floats against the head, in meters.
+// that colour is the gains per channel) and the room's own saturation. The
+// room follows within about 100 ms. What it sets replaces the game's grade
+// for that stage until the app quits; each change is logged as a row for
+// s_grades (src/pc/xr_scene.c).
+//
+// Audio, which the game applies (aurora_xr_dev_audio; src/pc/spatial_audio.c):
+// spatial audio on, or bypassed for every sound to play plain stereo.
+//
+// AURORA_XR_GRADE_PANEL=1, its first name, is both: the panel and the grade.
+// AURORA_XR_DEV_TOOLS_POS "dx,dy,dz,width" (0.3,-0.15,-0.55,0.36): where it
+// floats against the head, in meters.
 
 struct Hsl {
   float h = 0.f, s = 0.f, l = 1.f; // hue in degrees
@@ -4916,6 +4924,7 @@ constexpr Glyph kGlyphs[] = {
     {'Y', "#...##...#.#.#...#....#....#....#.."}, {'Z', "#####....#...#...#...#...#....#####"},
     {'.', ".........................##...##..."}, {'-', "...............#####..............."},
     {'x', "..........#...#.#.#...#...#.#.#...#"}, {':', "......##...##.......##...##........"},
+    {'_', "..............................#####"}, {'=', "..........#####.....#####.........."},
 };
 
 using Rgba = std::array<uint8_t, 4>;
@@ -4961,20 +4970,50 @@ enum { kHue, kTint, kLight, kSat, kSliders };
 constexpr std::array<const char*, kSliders> kSliderNames{"HUE", "TINT", "LIGHT", "SAT"};
 constexpr std::array<float, kSliders> kSliderMax{360.f, 1.f, 1.f, 1.5f};
 
-struct GradePanel {
+// The pages, as tabs left of Reset.
+enum { kPageTint, kPageAudio, kPages };
+constexpr std::array<const char*, kPages> kPageNames{"TINT", "AUDIO"};
+constexpr int kTabX0 = 10, kTabW = 150, kTabGap = 10;
+
+// The Audio page: choices, a row each.
+enum { kSpatial, kAudioRows };
+constexpr int kAudioRowY0 = 80, kAudioRowStep = 70, kChoiceX1 = 750;
+constexpr std::array<const char*, kAudioRows> kAudioNames{"SPATIAL"};
+constexpr std::array<const char*, 2> kSpatialNames{"ON", "OFF"};
+
+// What's under a laser: a tint slider (kHue..kSat), an Audio row (kAudio +
+// row), a tab (kTab + page), Reset, or -1.
+constexpr int kAudio = 10, kTab = 20, kReset = 30;
+
+struct DevPanel {
   bool shown = false;
   XrPosef pose{{0.f, 0.f, 0.f, 1.f}, {}};
   float width = 0.36f;
+  int page = -1; // kPageTint or kPageAudio; -1 until first opened
+  bool tintUsable = false; // the grade is on and the room shows
   int stage = -1;
   std::array<float, kSliders> value{0.f, 0.f, 1.f, 1.f};
-  int hover = -1;      // a slider, or kSliders for Reset
-  int active = -1;     // the slider being dragged
+  int hover = -1;      // a target
+  int active = -1;     // the slider being dragged (a target)
   int activeHand = -1; // the hand dragging it
   bool dirty = true;   // the picture needs drawing
   std::chrono::steady_clock::time_point drawn{};
   PlacingImage image;
   std::deque<std::pair<XrSwapchain, std::chrono::steady_clock::time_point>> retired;
 } P;
+
+// The Audio page's settings: the game's (aurora_xr_dev_audio_defaults) and
+// the panel's, which the game reads (aurora_xr_dev_audio).
+struct DevAudio {
+  std::mutex mutex;
+  bool have = false;
+  AuroraXrDevAudio defaults{}, value{};
+} g_devAudio;
+
+bool dev_tools_wanted() {
+  static const bool on = env_flag("AURORA_XR_DEV_TOOLS", env_flag("AURORA_XR_GRADE_PANEL", false));
+  return on;
+}
 
 RoomGrade panel_grade() {
   const auto rgb = hsl_to_rgb({P.value[kHue], P.value[kTint], P.value[kLight]});
@@ -4996,14 +5035,39 @@ void panel_log(const char* what) {
            strength != 1.f ? fmt::format(", shown at strength x{:.2f}", strength) : std::string{});
 }
 
-void draw_panel(Canvas& c) {
-  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255}, lit{120, 200, 255, 255};
-  c.fill(0, 0, kPanelW, kPanelH, {18, 20, 26, 225});
-  c.fill(0, 0, kPanelW, 3, {90, 96, 110, 255});
-  const int end = c.text(18, 18, 3, "ROOM TINT", text);
-  c.text(end + 24, 18, 3, fmt::format("STAGE 0x{:02X}", P.stage), dim);
-  c.fill(kResetX0, kResetY0, kResetX1, kResetY1, P.hover == kSliders ? Rgba{70, 110, 150, 255} : Rgba{52, 56, 68, 255});
+void audio_log() {
+  AuroraXrDevAudio a;
+  {
+    std::lock_guard lock{g_devAudio.mutex};
+    a = g_devAudio.value;
+  }
+  Log.info("Dev tools: audio: spatial {}", a.spatial ? "on" : "off");
+}
+
+void draw_header(Canvas& c) {
+  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255};
+  for (int i = 0; i < kPages; ++i) {
+    const int x0 = kTabX0 + i * (kTabW + kTabGap);
+    const bool on = P.page == i;
+    c.fill(x0, kResetY0, x0 + kTabW, kResetY1,
+           on ? Rgba{70, 110, 150, 255} : P.hover == kTab + i ? Rgba{60, 66, 80, 255} : Rgba{36, 40, 50, 255});
+    const int w = static_cast<int>(std::strlen(kPageNames[i])) * 18 - 3;
+    c.text(x0 + (kTabW - w) / 2, kResetY0 + 11, 3, kPageNames[i], on ? text : dim);
+  }
+  if (P.page == kPageTint)
+    c.text(kTabX0 + kPages * (kTabW + kTabGap) + 8, kResetY0 + 11, 3, fmt::format("0x{:02X}", P.stage), dim);
+  c.fill(kResetX0, kResetY0, kResetX1, kResetY1, P.hover == kReset ? Rgba{70, 110, 150, 255} : Rgba{52, 56, 68, 255});
   c.text(kResetX0 + (kResetX1 - kResetX0 - 87) / 2, kResetY0 + 11, 3, "RESET", text);
+}
+
+void draw_tint(Canvas& c) {
+  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255}, lit{120, 200, 255, 255};
+  if (!P.tintUsable) {
+    c.text(18, kRowY0 + 10, 3, "THE ROOM TINT IS OFF.", text);
+    c.text(18, kRowY0 + 60, 3, "IT NEEDS MIXED REALITY AND", dim);
+    c.text(18, kRowY0 + 100, 3, "AURORA_XR_GRADE=1 AT LAUNCH.", dim);
+    return;
+  }
   const Hsl tint{P.value[kHue], P.value[kTint], P.value[kLight]};
   for (int i = 0; i < kSliders; ++i) {
     const int y = kRowY0 + i * kRowStep;
@@ -5038,6 +5102,46 @@ void draw_panel(Canvas& c) {
   c.fill(kTrackX1 + 16, kPanelH - 56, kResetX1, kPanelH - 14, linear_rgba(g.r, g.g, g.b));
 }
 
+void draw_audio(Canvas& c) {
+  const Rgba text{232, 236, 242, 255}, dim{150, 156, 168, 255};
+  AuroraXrDevAudio a;
+  bool have;
+  {
+    std::lock_guard lock{g_devAudio.mutex};
+    a = g_devAudio.value;
+    have = g_devAudio.have;
+  }
+  if (!have) {
+    c.text(18, kAudioRowY0 + 10, 3, "NO AUDIO SETTINGS FROM THE GAME.", dim);
+    return;
+  }
+  for (int row = 0; row < kAudioRows; ++row) {
+    const int y = kAudioRowY0 + row * kAudioRowStep;
+    const int target = kAudio + row;
+    c.text(18, y + 4, 3, kAudioNames[row], target == P.hover ? text : dim);
+    const int n = 2, chosen = a.spatial ? 0 : 1;
+    const int w = (kChoiceX1 - kTrackX0) / n;
+    for (int i = 0; i < n; ++i) {
+      const int x0 = kTrackX0 + i * w;
+      const char* name = kSpatialNames[i];
+      c.fill(x0 + 2, y - 4, x0 + w - 2, y + kTrackH + 4, i == chosen ? Rgba{70, 110, 150, 255} : Rgba{36, 40, 50, 255});
+      const int tw = static_cast<int>(std::strlen(name)) * 18 - 3;
+      c.text(x0 + (w - tw) / 2, y + 4, 3, name, i == chosen ? text : dim);
+    }
+  }
+  c.text(18, kAudioRowY0 + kAudioRows * kAudioRowStep + 10, 3, "OFF: EVERY SOUND PLAIN STEREO.", dim);
+}
+
+void draw_panel(Canvas& c) {
+  c.fill(0, 0, kPanelW, kPanelH, {18, 20, 26, 225});
+  c.fill(0, 0, kPanelW, 3, {90, 96, 110, 255});
+  draw_header(c);
+  if (P.page == kPageTint)
+    draw_tint(c);
+  else
+    draw_audio(c);
+}
+
 // Where a laser meets the panel's plane: meters along it, and the point in
 // the panel's pixels (outside 0..kPanelW, 0..kPanelH when it misses the
 // panel itself). False when it points away from the panel.
@@ -5057,14 +5161,32 @@ bool panel_ray(const Hand& hand, float& t, float& px, float& py) {
   return true;
 }
 
-// What's at a point on the panel: a slider's row, kSliders for Reset, or -1.
+// What's at a point on the panel (a target), or -1.
 int panel_target(float px, float py) {
-  if (px >= kResetX0 && px < kResetX1 && py >= kResetY0 && py < kResetY1)
-    return kSliders;
-  for (int i = 0; i < kSliders; ++i) {
-    const float y = static_cast<float>(kRowY0 + i * kRowStep);
-    if (px >= kTrackX0 - 24 && px < kTrackX1 + 24 && py >= y - 22 && py < y + kTrackH + 22)
-      return i;
+  if (py >= kResetY0 && py < kResetY1) {
+    if (px >= kResetX0 && px < kResetX1)
+      return kReset;
+    for (int i = 0; i < kPages; ++i) {
+      const float x0 = static_cast<float>(kTabX0 + i * (kTabW + kTabGap));
+      if (px >= x0 && px < x0 + kTabW)
+        return kTab + i;
+    }
+    return -1;
+  }
+  if (P.page == kPageTint) {
+    if (!P.tintUsable)
+      return -1;
+    for (int i = 0; i < kSliders; ++i) {
+      const float y = static_cast<float>(kRowY0 + i * kRowStep);
+      if (px >= kTrackX0 - 24 && px < kTrackX1 + 24 && py >= y - 22 && py < y + kTrackH + 22)
+        return i;
+    }
+    return -1;
+  }
+  for (int row = 0; row < kAudioRows; ++row) {
+    const float y = static_cast<float>(kAudioRowY0 + row * kAudioRowStep);
+    if (px >= kTrackX0 - 24 && px < kChoiceX1 && py >= y - 18 && py < y + kTrackH + 18)
+      return kAudio + row;
   }
   return -1;
 }
@@ -5072,28 +5194,88 @@ int panel_target(float px, float py) {
 bool panel_holding(const Hand& h) { return h.valid && (h.tracked ? h.held : h.sel); }
 bool panel_pressed(const Hand& h) { return h.valid && (h.tracked ? h.held && !h.wasHeld : h.sel && !h.wasSel); }
 
+// A press on an Audio choice row at px: picks the segment under it.
+void audio_choose(int row, float px) {
+  const int n = 2, w = (kChoiceX1 - kTrackX0) / n;
+  const int i = std::clamp(static_cast<int>((px - kTrackX0) / static_cast<float>(w)), 0, n - 1);
+  {
+    std::lock_guard lock{g_devAudio.mutex};
+    if (row == kSpatial)
+      g_devAudio.value.spatial = i == 0;
+  }
+  P.dirty = true;
+  audio_log();
+}
+
+// Dragging a tint slider (a target) to px.
+void panel_drag(int target, float px) {
+  if (target < 0 || target >= kSliders)
+    return;
+  const float t = std::clamp((px - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0), 0.f, 1.f);
+  const float v = t * kSliderMax[target];
+  if (v != P.value[target]) {
+    P.value[target] = v;
+    P.dirty = true;
+    std::lock_guard lock{g_grade.mutex};
+    g_grade.panel[P.stage] = panel_grade();
+    set_grade_locked(g_grade.panel[P.stage]);
+  }
+}
+
+void panel_reset() {
+  if (P.page == kPageTint) {
+    std::lock_guard lock{g_grade.mutex};
+    g_grade.panel.erase(P.stage);
+    set_grade_locked(g_grade.game);
+    panel_from_grade(g_grade.game);
+    Log.info("Room grade panel: stage 0x{:02X} back to the game's grade", P.stage);
+    return;
+  }
+  {
+    std::lock_guard lock{g_devAudio.mutex};
+    g_devAudio.value = g_devAudio.defaults;
+  }
+  P.dirty = true;
+  audio_log();
+}
+
+void panel_released() {
+  if (P.active >= 0 && P.active < kSliders)
+    panel_log("set");
+}
+
 // Each display frame, before the arena's grab: shows the panel while `show`,
 // and points, presses and drags on it. Marks the hands on it (Hand::onPanel).
-void update_grade_panel(bool show) {
+// `tintUsable`: the room's grade is on and the room shows.
+void update_dev_panel(bool show, bool tintUsable) {
   for (Hand& hand : G.hands) {
     hand.onPanel = false;
     hand.panelHit = -1.f;
+  }
+  if (tintUsable != P.tintUsable) {
+    P.tintUsable = tintUsable;
+    P.dirty = true;
   }
   if (show && !P.shown) {
     // Opened: to the right of where the head looks, facing it.
     const XrVector3f fwd = qrot(B.headOrientation, {0.f, 0.f, -1.f});
     XrVector3f offset{0.3f, -0.15f, -0.55f};
     P.width = 0.36f;
-    if (const char* v = std::getenv("AURORA_XR_GRADE_PANEL_POS"))
+    if (const char* v = std::getenv("AURORA_XR_DEV_TOOLS_POS"))
+      std::sscanf(v, "%f,%f,%f,%f", &offset.x, &offset.y, &offset.z, &P.width);
+    else if (const char* v = std::getenv("AURORA_XR_GRADE_PANEL_POS"))
       std::sscanf(v, "%f,%f,%f,%f", &offset.x, &offset.y, &offset.z, &P.width);
     P.pose.position = B.head + rot_y(offset, std::atan2(-fwd.x, -fwd.z));
     P.pose.orientation = facing(P.pose.position, B.head);
+    if (P.page < 0)
+      P.page = tintUsable ? kPageTint : kPageAudio;
+    P.dirty = true;
     std::lock_guard lock{g_grade.mutex};
     P.stage = g_grade.stage;
     panel_from_grade(g_grade.grade);
   }
   if (!show && P.active >= 0)
-    panel_log("set");
+    panel_released();
   if (!show)
     P.active = P.activeHand = -1;
   P.shown = show;
@@ -5117,22 +5299,15 @@ void update_grade_panel(bool show) {
     const int target = dragging ? P.active : panel_target(px, py);
     hover = target;
     if (dragging) {
-      const float v = std::clamp((px - kTrackX0) / static_cast<float>(kTrackX1 - kTrackX0), 0.f, 1.f) *
-                      kSliderMax[P.active];
-      if (v != P.value[P.active]) {
-        P.value[P.active] = v;
-        P.dirty = true;
-        std::lock_guard lock{g_grade.mutex};
-        g_grade.panel[P.stage] = panel_grade();
-        set_grade_locked(g_grade.panel[P.stage]);
-      }
-    } else if (panel_pressed(hand) && target == kSliders) {
-      std::lock_guard lock{g_grade.mutex};
-      g_grade.panel.erase(P.stage);
-      set_grade_locked(g_grade.game);
-      panel_from_grade(g_grade.game);
-      Log.info("Room grade panel: stage 0x{:02X} back to the game's grade", P.stage);
-    } else if (panel_pressed(hand) && target >= 0 && P.active < 0) {
+      panel_drag(P.active, px);
+    } else if (panel_pressed(hand) && target == kReset) {
+      panel_reset();
+    } else if (panel_pressed(hand) && target >= kTab && target < kTab + kPages) {
+      P.page = target - kTab;
+      P.dirty = true;
+    } else if (panel_pressed(hand) && target >= kAudio && target < kAudio + kAudioRows) {
+      audio_choose(target - kAudio, px);
+    } else if (panel_pressed(hand) && target >= 0 && target < kSliders && P.active < 0) {
       P.active = target;
       P.activeHand = h;
       P.dirty = true;
@@ -5141,7 +5316,7 @@ void update_grade_panel(bool show) {
     }
   }
   if (P.activeHand >= 0 && !panel_holding(G.hands[P.activeHand])) {
-    panel_log("set");
+    panel_released();
     P.active = P.activeHand = -1;
     P.dirty = true;
   }
@@ -5154,7 +5329,7 @@ void update_grade_panel(bool show) {
 // The panel's layer, drawn again (a new static swapchain) when it changed,
 // at most 20 times a second. Old swapchains go once their upload is surely
 // done.
-bool build_grade_panel_layer(XrCompositionLayerQuad& q) {
+bool build_dev_panel_layer(XrCompositionLayerQuad& q) {
   const auto now = std::chrono::steady_clock::now();
   while (!P.retired.empty() && now - P.retired.front().second > std::chrono::milliseconds(500)) {
     xrDestroySwapchain(P.retired.front().first);
@@ -5174,7 +5349,7 @@ bool build_grade_panel_layer(XrCompositionLayerQuad& q) {
     if (!upload_placing_image(P.image)) {
       static bool warned = false;
       if (!warned)
-        Log.warn("Room grade panel: picture not uploaded");
+        Log.warn("Dev tools panel: picture not uploaded");
       warned = true;
     }
     P.dirty = false;
@@ -5193,7 +5368,7 @@ bool build_grade_panel_layer(XrCompositionLayerQuad& q) {
   return true;
 }
 
-void destroy_grade_panel() {
+void destroy_dev_panel() {
   for (auto& r : P.retired)
     xrDestroySwapchain(r.first);
   P.retired.clear();
@@ -5501,10 +5676,10 @@ bool render_xr_frame() {
   const bool pointing = fight && held && B.focused;
   const bool screenPointing = screenShown && B.focused;
   locate_hands(fs.predictedDisplayTime);
-  // The room grade panel, in a paused fight over the room.
-  static const bool gradePanel = env_flag("AURORA_XR_GRADE_PANEL", false);
+  // The dev tools panel, in a paused fight.
   const bool roomWanted = B.passthroughLayer && B.passthroughRunning && g_passthroughWanted;
-  update_grade_panel(gradePanel && pointing && g_fightPaused && placing == 0 && roomWanted);
+  update_dev_panel(dev_tools_wanted() && pointing && g_fightPaused && placing == 0,
+                   roomWanted && B.hasColorLutExt);
   update_grab(fight ? Target::Arena : Target::Screen, pointing || screenPointing);
   bool onPanel = false;
   for (Hand& hand : G.hands) {
@@ -5552,7 +5727,7 @@ bool render_xr_frame() {
   PointerLayers pointers;
   PlacingLayers placingLayers;
   XrCompositionLayerQuad panelQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
-  const bool panel = build_grade_panel_layer(panelQuad);
+  const bool panel = build_dev_panel_layer(panelQuad);
   if (fs.shouldRender && fight) {
     // Premultiplied alpha (no UNPREMULTIPLIED bit): the arena's coverage
     // hides the room, effects outside it add light over passthrough.
@@ -5939,7 +6114,7 @@ void teardown() {
       xrDestroySwapchain(*sc);
     *sc = XR_NULL_HANDLE;
   }
-  destroy_grade_panel();
+  destroy_dev_panel();
   {
     std::lock_guard lock{g_placingMutex};
     for (auto& clip : g_placingClips) {
@@ -8457,6 +8632,26 @@ extern "C" void aurora_xr_set_stage_footprint(float xmin, float xmax, float zmin
   }
   // A stage ready for its fight: measured now, in case no hold comes.
   surface_request(1000, false);
+}
+
+extern "C" void aurora_xr_dev_audio_defaults(const AuroraXrDevAudio* audio) {
+  using namespace aurora::xr;
+  std::lock_guard lock{g_devAudio.mutex};
+  g_devAudio.defaults = *audio;
+  if (!g_devAudio.have)
+    g_devAudio.value = *audio;
+  g_devAudio.have = true;
+}
+
+extern "C" bool aurora_xr_dev_audio(AuroraXrDevAudio* audio) {
+  using namespace aurora::xr;
+  if (!dev_tools_wanted())
+    return false;
+  std::lock_guard lock{g_devAudio.mutex};
+  if (!g_devAudio.have)
+    return false;
+  *audio = g_devAudio.value;
+  return true;
 }
 
 extern "C" void aurora_xr_set_room_grade(float r, float g, float b, float saturation) {

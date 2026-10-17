@@ -718,10 +718,13 @@ static void render_frame(float* out) {
         }
     }
     /* Stage ambience (pc/stage_ambience.h): in a placed fight, from the
-     * crowd's seats all around. Made for spatial audio: without it, none. */
+     * crowd's seats all around. Made for spatial audio: without it, none,
+     * but for the dev tools' A/B with it bypassed: plain. */
     float* ambient_bus = pc_spatial_ambient_bus();
     if (ambient_bus != NULL) {
         pc_ambience_mix(ambient_bus, AX_FRAME, AX_RATE);
+    } else if (pc_spatial_bypassed()) {
+        pc_ambience_mix(out, AX_FRAME, AX_RATE);
     }
     pc_spatial_frame_end(out);
 

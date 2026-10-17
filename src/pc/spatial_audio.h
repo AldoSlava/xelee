@@ -106,6 +106,9 @@ float* pc_spatial_music_bus(void);
 /* Audio thread: the crowd's bus for sounds of the place itself (stage
  * ambience), heard from the same seats all around; NULL: mix them plain. */
 float* pc_spatial_ambient_bus(void);
+/* Audio thread: a fight draws with spatial audio bypassed (the dev tools'
+ * A/B): what would be placed is mixed plain. */
+bool pc_spatial_bypassed(void);
 /* Audio thread, during a fight after pc_spatial_frame_begin: a sound made
  * here (stage ambience), `mono` (160 samples at 32 kHz), heard from `pos`
  * (game units) as a voice is, through its own slot (0-3: one per source,
@@ -165,6 +168,7 @@ static inline float* pc_spatial_voice_bus(int voice) {
 }
 static inline float* pc_spatial_music_bus(void) { return 0; }
 static inline float* pc_spatial_ambient_bus(void) { return 0; }
+static inline bool pc_spatial_bypassed(void) { return false; }
 static inline bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono) {
     (void)slot;
     (void)pos;
