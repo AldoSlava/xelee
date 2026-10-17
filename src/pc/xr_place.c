@@ -192,6 +192,10 @@ void pc_xr_place_stage_ready(int grkind) {
     }
 }
 
+bool pc_xr_place_holding(void) {
+    return s_holding >= 0 || s_pending >= 0;
+}
+
 bool pc_xr_place_hold(void) {
     if (s_holding < 0) {
         if (s_pending < 0) {

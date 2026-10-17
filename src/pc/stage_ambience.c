@@ -5,6 +5,7 @@
 
 #include "pc/pc.h"
 #include "pc/spatial_audio.h"
+#include "pc/xr_place.h"
 #include <melee/gr/forward.h>
 #include <melee/gr/ground.h>
 #include <melee/gr/types.h>
@@ -21,7 +22,8 @@
 
 /* Without a drawn fight frame for this long, the ambience fades out. */
 #define AMB_STALE_NS 250000000ull
-#define AMB_FADE_S 1.0f /* in or out, full scale */
+#define AMB_FADE_S 1.0f    /* out, full scale */
+#define AMB_FADE_IN_S 0.3f /* in, as the fight starts: quickly */
 #define AMB_DUCK_S 0.15f /* the pause duck's glide, full scale */
 
 enum { AMB_NONE, AMB_WIND, AMB_FALLS, AMB_FOUNTAIN };
@@ -139,7 +141,9 @@ void pc_ambience_frame(void) {
     if (!enabled()) {
         return;
     }
-    const int kind = stage_info.grkind == Gr_Kind_Corneria ? AMB_WIND
+    /* None while the stage is held for placing: they start with the fight. */
+    const int kind = pc_xr_place_holding()                 ? AMB_NONE
+                     : stage_info.grkind == Gr_Kind_Corneria ? AMB_WIND
                      : stage_info.grkind == Gr_Kind_Kongo  ? AMB_FALLS
                      : stage_info.grkind == Gr_Kind_Izumi  ? AMB_FOUNTAIN
                                                            : AMB_NONE;
@@ -228,7 +232,7 @@ static void wind_mix(float* out, int frames, int rate, bool on) {
     }
     const float step = dt / AMB_FADE_S;
     const float level0 = s_wind.level;
-    s_wind.level = on ? fminf(1.f, level0 + step) : fmaxf(0.f, level0 - step);
+    s_wind.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - step);
 
     gust_step(&s_wind.shared, dt);
     const float volume = pc_get_sfx_volume() * ambience_gain();
@@ -315,7 +319,7 @@ static void falls_mix(float* out, int frames, int rate, bool on) {
         falls_init();
     }
     const float level0 = s_falls.level;
-    s_falls.level = on ? fminf(1.f, level0 + dt / AMB_FADE_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    s_falls.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
     const float volume = pc_get_sfx_volume() * ambience_gain();
     const float duck0 = s_duck0, duck1 = s_duck;
     const float w = 6.2831853f / (float)rate;
@@ -507,7 +511,7 @@ static void fountain_mix(float* out, int frames, int rate, bool on) {
         fountain_init();
     }
     const float level0 = s_fountain.level;
-    s_fountain.level = on ? fminf(1.f, level0 + dt / AMB_FADE_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    s_fountain.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
     const float volume = pc_get_sfx_volume() * ambience_gain();
     const float duck0 = s_duck0, duck1 = s_duck;
     const float w = 6.2831853f / (float)rate;
@@ -597,6 +601,7 @@ static struct {
     unsigned serial;
     int buf;
     float level;
+    float played; /* seconds since it started */
     uint32_t seed;
     JungleSeg seg[2];
 } s_jungle = {.buf = -1};
@@ -622,6 +627,7 @@ static void jungle_mix(float* out, int frames, int rate, bool on) {
             s_jungle.seg[1].on = false;
             jungle_seg(&s_jungle.seg[0], 0.0, JUNGLE_INTRO_S * sr, JUNGLE_XFADE_S * sr, false);
             s_jungle.level = 1.f; /* the recording rises by itself */
+            s_jungle.played = 0.f;
         }
     }
     const int b = s_jungle.buf;
@@ -629,9 +635,13 @@ static void jungle_mix(float* out, int frames, int rate, bool on) {
         return;
     }
     const float dt = (float)frames / (float)rate;
+    s_jungle.played += dt;
     const float level0 = s_jungle.level;
-    s_jungle.level = on ? fminf(1.f, level0 + dt / AMB_FADE_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    s_jungle.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
     if (!on && s_jungle.level <= 0.f) {
+        if (s_jungle.played < 2.f) {
+            s_jungle.serial--; /* cut off as it began: from the start next time */
+        }
         s_jungle.seg[0].on = s_jungle.seg[1].on = false;
         s_jungle.buf = -1;
         __atomic_store_n(&s_jungle_playing, -1, __ATOMIC_RELEASE);

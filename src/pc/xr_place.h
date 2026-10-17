@@ -26,6 +26,9 @@ extern "C" {
 /* Once per scene-loop pass, before the pass's ticks (gm/gmscene.c). True:
  * run no ticks this pass, only draw; the pads that came in are dropped. */
 bool pc_xr_place_hold(void);
+/* Game thread: the stage is held for placing, or about to be (no ticks, no
+ * fight yet). Only reads. */
+bool pc_xr_place_holding(void);
 /* A stage's fight geometry is ready in the 3D view (xr_scene.c): offer the
  * hold for it next pass. */
 void pc_xr_place_stage_ready(int grkind);
@@ -43,6 +46,7 @@ static inline int pc_xr_place_dummy_result(void) { return 0; }
 static inline bool pc_xr_place_decided(void) { return true; }
 static inline bool pc_xr_place_available(void) { return false; }
 static inline bool pc_xr_place_hold(void) { return false; }
+static inline bool pc_xr_place_holding(void) { return false; }
 static inline void pc_xr_place_stage_ready(int grkind) { (void)grkind; }
 #endif
 
