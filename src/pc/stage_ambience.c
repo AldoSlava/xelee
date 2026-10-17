@@ -11,6 +11,8 @@
 #include <melee/gr/grbigblue.h>
 #include <melee/gr/ground.h>
 #include <melee/gr/types.h>
+#include <melee/gr/stage.h>
+#include <melee/mp/mplib.h>
 #include <melee/lb/lb_00B0.h>
 #include <sysdolphin/baselib/gobj.h>
 #include <sysdolphin/baselib/jobj.h>
@@ -255,6 +257,29 @@ void pc_ambience_tick(uint64_t proc_mask) {
 
 void pc_ambience_frame(void) {
     pc_stage_mix_frame(stage_info.grkind); /* Melee's own placed stage sounds mix there too */
+    { /* MELEE_STAGE_SURVEY=1: the stage's floors, camera bounds and blast
+       * zones, logged once a fight is up: what xr_scene.c's s_placements is
+       * measured from (with MELEE_DEBUG_VS_STAGE, any stage kind). */
+        static int n;
+        if (getenv("MELEE_STAGE_SURVEY") != NULL && ++n == 120) {
+            const float bl = Stage_GetBlastZoneLeftOffset(), br = Stage_GetBlastZoneRightOffset();
+            const float bb = Stage_GetBlastZoneBottomOffset(), bt = Stage_GetBlastZoneTopOffset();
+            float top, mnx, mxx, lo = 1e9f, hi = -1e9f, xl = 1e9f, xr = -1e9f;
+            for (float y = bb; y < bt; y += 5.f) {
+                if (mpLib_FloorExtent(bl, br, y, y + 5.f, &top, &mnx, &mxx)) {
+                    lo = fminf(lo, top);
+                    hi = fmaxf(hi, top);
+                    xl = fminf(xl, mnx);
+                    xr = fmaxf(xr, mxx);
+                }
+            }
+            pc_log_line("survey: grkind 0x%02X floors x %.0f..%.0f y %.0f..%.0f; camera x %.0f..%.0f y %.0f..%.0f; "
+                        "blast x %.0f..%.0f y %.0f..%.0f",
+                        stage_info.grkind, xl, xr, lo, hi, Stage_GetCamBoundsLeftOffset(),
+                        Stage_GetCamBoundsRightOffset(), Stage_GetCamBoundsBottomOffset(),
+                        Stage_GetCamBoundsTopOffset(), bl, br, bb, bt);
+        }
+    }
     if (!enabled()) {
         return;
     }

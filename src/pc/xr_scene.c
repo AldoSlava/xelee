@@ -411,6 +411,40 @@ static const StagePlacement s_placements[] = {
     {0x43, 0.f, 0.f, 0.f, 1.f},      /* Home-Run Contest: its window (s_follows) */
     {0x42, 0.f, 0.f, 0.f, 0.8f},     /* All-Star's rest area: floors x -198 to 198 */
     {0x25, 0.f, 0.f, 0.f, 1.f},      /* Final Destination */
+    /* Break the Targets (surveyed 2026-10-17, MELEE_STAGE_SURVEY): each
+     * course is the play area, its floors spread across and up, so the
+     * center is the middle of all its floors and the size rule takes the
+     * larger of their width and height (a tall course fits too). */
+    {0x28, -50.f, 30.f, 0.f, 0.65f},  /* Mario: floors x -210 to 112, y -161 to 218 (tall) */
+    {0x29, 30.f, -20.f, 0.f, 0.75f},  /* Captain Falcon: x -130 to 190, y -155 to 110 */
+    {0x2A, 0.f, 85.f, 0.f, 0.85f},    /* Young Link: x -120 to 120, y -40 to 210 (tall) */
+    {0x2B, 0.f, 80.f, 0.f, 0.65f},    /* Donkey Kong: x -190 to 190, y -35 to 200 */
+    {0x2C, 15.f, -10.f, 0.f, 0.85f},  /* Dr. Mario: x -96 to 130, y -105 to 90 */
+    {0x2D, -15.f, 5.f, 0.f, 0.85f},   /* Falco: x -140 to 110, y -80 to 90 */
+    {0x2E, 10.f, 5.f, 0.f, 0.8f},     /* Fox: x -120 to 145, y -130 to 140 (tall) */
+    {0x2F, 0.f, 260.f, 0.f, 0.55f},   /* Ice Climbers: a climb, x -120 to 120, y -20 to 539 */
+    {0x30, -10.f, 45.f, 0.f, 0.8f},   /* Kirby: x -150 to 130, y -70 to 160 */
+    {0x31, 65.f, -30.f, 0.f, 0.7f},   /* Bowser: x -105 to 235, y -145 to 85 */
+    {0x32, -10.f, 0.f, 0.f, 0.85f},   /* Link: x -135 to 110, y -90 to 90 */
+    {0x33, 0.f, 5.f, 0.f, 1.05f},     /* Luigi: x -80 to 80, y -70 to 80 */
+    {0x34, -30.f, 35.f, 0.f, 0.85f},  /* Marth: x -150 to 90, y -70 to 140 */
+    {0x35, 5.f, 0.f, 0.f, 0.85f},     /* Mewtwo: x -120 to 130, y -80 to 85 */
+    {0x36, 0.f, -25.f, 0.f, 0.75f},   /* Ness: x -150 to 150, y -130 to 80 */
+    {0x37, 20.f, 20.f, 0.f, 0.8f},    /* Peach: x -110 to 150, y -90 to 130 */
+    {0x38, -25.f, 20.f, 0.f, 0.75f},  /* Pichu: x -180 to 130, y -93 to 135 */
+    {0x39, 10.f, 20.f, 0.f, 0.8f},    /* Pikachu: x -130 to 150, y -80 to 115 */
+    {0x3A, 5.f, 5.f, 0.f, 0.75f},     /* Jigglypuff: x -150 to 156, y -60 to 70 */
+    {0x3B, 10.f, 15.f, 0.f, 0.85f},   /* Samus: x -110 to 130, y -110 to 140 (tall) */
+    {0x3C, -5.f, 0.f, 0.f, 0.95f},    /* Sheik: one floor, x -100 to 90 */
+    {0x3D, -10.f, 30.f, 0.f, 0.75f},  /* Yoshi: x -155 to 130, y -110 to 165 */
+    {0x3E, -15.f, -5.f, 0.f, 0.85f},  /* Zelda: x -128 to 100, y -90 to 80 */
+    {0x3F, -10.f, 5.f, 0.f, 1.f},     /* Mr. Game & Watch: x -92 to 77, y -29 to 41 */
+    {0x40, -20.f, 50.f, 0.f, 0.8f},   /* Roy: x -155 to 110, y -20 to 117 */
+    {0x41, -10.f, 25.f, 0.f, 0.75f},  /* Ganondorf: x -171 to 147, y 0 to 51 */
+    /* Adventure's trophy fights, on giant trophy stands. */
+    {0x44, 5.f, -15.f, 0.f, 1.05f},   /* floors x -70 to 79, y -58 to 27 */
+    {0x45, 5.f, -10.f, 0.f, 0.95f},   /* floors x -90 to 101, y -42 to 18 */
+    {0x46, 0.f, 0.f, 0.f, 1.05f},     /* floors x -80 to 80, y -52 to 56 */
 };
 #define PLACEMENT_COUNT ((int)(sizeof s_placements / sizeof s_placements[0]))
 

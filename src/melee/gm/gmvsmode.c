@@ -225,7 +225,7 @@ static void fillDebugVs(GameModeState* state, UNUSED bool dummy)
      * (3 is Pokemon Stadium, whose transformations load from disc). */
     if (getenv("MELEE_DEBUG_VS_STAGE") != NULL) {
         int st = atoi(getenv("MELEE_DEBUG_VS_STAGE"));
-        if (st > St_Kind_Test && st < St_Kind_Last) {
+        if (st > St_Kind_Test && st < 0x150) { /* any stage kind (target tests, trophy fights: surveys) */
             start->rules.stkind = (StKind) st;
         }
     }
