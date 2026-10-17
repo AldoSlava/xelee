@@ -6,6 +6,7 @@
 #ifdef MELEE_SPATIAL_AUDIO
 
 #include "pc/pc.h"
+#include "pc/stage_ambience.h"
 #include "pc/stage_mix.h"
 #include "pc/xr_scene.h"
 #ifdef AURORA_ENABLE_OPENXR
@@ -607,7 +608,10 @@ static bool dev_bypass(void) {
     if (!aurora_xr_dev_audio(&d)) {
         return false;
     }
-    pc_audio_set_dev_music_gain(d.music);
+    /* The Stage page open in the pause: the music out of the pause's duck
+     * too, to mix against it. */
+    const float duck = pc_ambience_duck();
+    pc_audio_set_dev_music_gain(pc_stage_mix_listening() && duck > 0.f && duck < 1.f ? d.music / duck : d.music);
     return !d.spatial;
 #else
     return false;
@@ -938,6 +942,10 @@ void pc_spatial_voice_tag(int voice, const void* gobj, const float pos[2][3], in
     const StageSound* r = stage_entry(gobj);
     v->boost = r != NULL ? r->gain : 1.f;
     v->mix = r != NULL ? r->mix : -1;
+    if (r != NULL && r->lane && pc_ambience_racers()) {
+        v->boost = 0.f; /* Big Blue's engines: the stage ambience's racers play instead */
+        v->mix = -1;
+    }
     channel_pos(pos, channel, v->pos);
     v->tagged = true;
     v->last_frame = 0; /* a new sound: state resets at its first frame */
@@ -1137,6 +1145,18 @@ void pc_spatial_render(int voice, const float* mono) {
             st.sample_gain = gain;
         }
     }
+}
+
+bool pc_spatial_listener_distance(const float pos[3], float* units) {
+    if (!s_active || s_scale <= 0.f) {
+        return false;
+    }
+    float h[3];
+    for (int r = 0; r < 3; r++) {
+        h[r] = s_listener[r][0] * pos[0] + s_listener[r][1] * pos[1] + s_listener[r][2] * pos[2] + s_listener[r][3];
+    }
+    *units = sqrtf(h[0] * h[0] + h[1] * h[1] + h[2] * h[2]) / s_scale;
+    return isfinite(*units);
 }
 
 bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono) {

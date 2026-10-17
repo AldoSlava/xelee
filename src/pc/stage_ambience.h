@@ -39,6 +39,12 @@ bool pc_ambience_kongo_jungle(void);
  * once no fight draws, so a match left paused can't leave the next one
  * ducked. */
 void pc_ambience_set_duck(float gain);
+/* Any thread: that duck as it stands (1: none). */
+float pc_ambience_duck(void);
+
+/* Any thread: Big Blue's racers' engines are the ambience's (their own
+ * loops silenced): expanded stage sounds and spatial audio on. */
+bool pc_ambience_racers(void);
 
 /* Audio thread: the ambience for one AX frame of `frames` stereo samples:
  * what surrounds the listener added to `out` (interleaved, at the AX rate),

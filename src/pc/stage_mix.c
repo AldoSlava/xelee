@@ -118,9 +118,17 @@ static void parse_env(void) {
 }
 
 static int s_grkind = -1; /* game thread writes, audio thread reads (__atomic) */
+static bool s_listening;  /* game thread writes (__atomic) */
+
+bool pc_stage_mix_listening(void) {
+    return __atomic_load_n(&s_listening, __ATOMIC_RELAXED);
+}
 
 void pc_stage_mix_frame(int grkind) {
     static int published = -2;
+#ifdef AURORA_ENABLE_OPENXR
+    __atomic_store_n(&s_listening, aurora_xr_dev_mix_listening(), __ATOMIC_RELAXED);
+#endif
     if (published == -2) {
         parse_env();
     }

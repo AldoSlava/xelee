@@ -122,6 +122,10 @@ bool pc_spatial_bypassed(void);
  * each keeping its HRTF state from frame to frame). False, doing nothing,
  * when nothing is placed this frame. */
 bool pc_spatial_render_placed(int slot, const float pos[3], const float* mono);
+/* Audio thread, during a fight after pc_spatial_frame_begin: how far `pos`
+ * (game units) is from the listener, in game units (for Doppler). False
+ * when nothing is placed this frame. */
+bool pc_spatial_listener_distance(const float pos[3], float* units);
 /* After the voices: adds the positional bus to the interleaved stereo mix
  * `out` (160 frames). */
 void pc_spatial_frame_end(float* out);
@@ -185,6 +189,11 @@ static inline bool pc_spatial_render_placed(int slot, const float pos[3], const 
     (void)slot;
     (void)pos;
     (void)mono;
+    return false;
+}
+static inline bool pc_spatial_listener_distance(const float pos[3], float* units) {
+    (void)pos;
+    (void)units;
     return false;
 }
 static inline void pc_spatial_frame_end(float* out) { (void)out; }

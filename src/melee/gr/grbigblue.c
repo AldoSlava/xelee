@@ -590,6 +590,9 @@ void grBigBlue_801E6364(Ground_GObj* gobj)
 
     gp->u.bigblue.car.collision_jobjs = HSD_MemAlloc(30 * sizeof(HSD_JObj*));
     HSD_ASSERT(774, gp->u.carnull.coll_jobj);
+#ifdef TARGET_PC
+    grBigBlue_pc_cars = gobj;
+#endif
 
     gp->u.bigblue.car.ranks = HSD_MemAlloc(30);
     HSD_ASSERT(776, gp->u.carnull.rank);
@@ -676,6 +679,11 @@ void grBigBlue_801E68B8(Ground_GObj* gobj)
 
     HSD_Free(gp->u.bigblue.car.collision_jobjs);
     gp->u.bigblue.car.collision_jobjs = NULL;
+#ifdef TARGET_PC
+    if (grBigBlue_pc_cars == gobj) {
+        grBigBlue_pc_cars = NULL;
+    }
+#endif
     HSD_Free(gp->u.bigblue.car.ranks);
     gp->u.bigblue.car.ranks = NULL;
 }
@@ -4513,6 +4521,20 @@ bool grBigBlue_801EFC14(Vec3* a, int b, HSD_JObj* jobj)
 }
 
 #ifdef TARGET_PC
+HSD_GObj* grBigBlue_pc_cars;
+
+bool grBigBlue_pc_racer(int lane, float pos[3], float* presence)
+{
+    const Ground* gp = grBigBlue_pc_cars != NULL ? grBigBlue_pc_cars->user_data : NULL;
+    if (gp == NULL || lane < 0 || lane >= 4 || gp->u.bigblue.car.lanes[lane].state == 1 ||
+        !grBigBlue_pc_lane_pos(grBigBlue_pc_cars, lane, pos))
+    {
+        return false;
+    }
+    *presence = gp->u.bigblue.car.lanes[lane].alpha;
+    return isfinite(*presence);
+}
+
 bool grBigBlue_pc_lane_pos(const HSD_GObj* part, int lane, float pos[3])
 {
     const Ground* gp = part != NULL ? part->user_data : NULL;

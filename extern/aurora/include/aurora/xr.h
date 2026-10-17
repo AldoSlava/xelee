@@ -183,6 +183,9 @@ void aurora_xr_dev_mix_stage(int stage, int count, const char* const names[],
  * leaving `out` untouched, without dev tools or before the stage came. Any
  * thread; cheap. */
 bool aurora_xr_dev_mix(int stage, int channel, AuroraXrMixChannel* out);
+/* The game: the panel shows its Stage page now, so the pause should not
+ * duck what's being mixed. Any thread; cheap. */
+bool aurora_xr_dev_mix_listening(void);
 
 /* True while an OpenXR session is presenting the game. Any thread. */
 bool aurora_xr_active(void);

@@ -8,6 +8,7 @@
 #include "pc/stage_mix.h"
 #include "pc/xr_place.h"
 #include <melee/gr/forward.h>
+#include <melee/gr/grbigblue.h>
 #include <melee/gr/ground.h>
 #include <melee/gr/types.h>
 #include <melee/lb/lb_00B0.h>
@@ -56,6 +57,12 @@ void pc_ambience_set_duck(float gain) {
     __atomic_store(&s_duck_target, &gain, __ATOMIC_RELAXED);
 }
 
+float pc_ambience_duck(void) {
+    float gain;
+    __atomic_load(&s_duck_target, &gain, __ATOMIC_RELAXED);
+    return gain;
+}
+
 /* Fountain of Dreams' side platforms ride jets of water (grizumi.c: part 4,
  * one gobj each): the root at the jet's foot in the stage's floor, its
  * child the column, scaled in height with the platform (scale.y 0.01 to
@@ -95,6 +102,34 @@ static void jets_frame(void) {
     __atomic_add_fetch(&s_jets_seq, 1, __ATOMIC_ACQ_REL);
     s_jets = j;
     __atomic_add_fetch(&s_jets_seq, 1, __ATOMIC_RELEASE);
+}
+
+/* Big Blue's racers, one a lane (grbigblue.c): where each car is and how
+ * much of it there is (its fade), published by the game thread each drawn
+ * frame under a sequence count, like the jets. */
+#define RACERS 4
+typedef struct Racers {
+    float pos[RACERS][3];
+    float presence[RACERS]; /* 0: the lane's empty */
+} Racers;
+static Racers s_racers;
+static unsigned s_racers_seq;
+
+static void racers_frame(void) {
+    Racers r = {0};
+    for (int k = 0; k < RACERS; k++) {
+        if (!grBigBlue_pc_racer(k, r.pos[k], &r.presence[k])) {
+            r.presence[k] = 0.f;
+        }
+        r.presence[k] = fminf(fmaxf(r.presence[k], 0.f), 1.f);
+    }
+    __atomic_add_fetch(&s_racers_seq, 1, __ATOMIC_ACQ_REL);
+    s_racers = r;
+    __atomic_add_fetch(&s_racers_seq, 1, __ATOMIC_RELEASE);
+}
+
+bool pc_ambience_racers(void) {
+    return enabled() && pc_spatial_enabled();
 }
 
 /* Kongo Jungle's jungle: Melee plays a stereo recording (sound 0x55D, 16
@@ -163,6 +198,8 @@ void pc_ambience_frame(void) {
                                                            : AMB_NONE;
     if (kind == AMB_FOUNTAIN) {
         jets_frame();
+    } else if (kind == AMB_RUSH) {
+        racers_frame();
     }
     __atomic_store_n(&s_kind, kind, __ATOMIC_RELAXED);
     __atomic_store_n(&s_stamp, now_ns(), __ATOMIC_RELEASE);
@@ -809,6 +846,176 @@ static void rush_mix(float* out, int frames, int rate, bool on) {
     }
 }
 
+/* Big Blue's racers' engines, in place of Melee's (its loops, 0x6DDD2-5,
+ * are a hiss that disappeared into the rush of air): hover ships, so no
+ * pistons and no exhaust. Each lane's its own machine, heard from its car:
+ *  - the hum of its anti-gravity, a sawtooth around 90-115 Hz rolled off
+ *    past 900 Hz, throbbing about 20 times a second as it rides the track;
+ *  - the whine of its turbine ten-odd times higher, a sine and a little of
+ *    its octave, wavering;
+ *  - a little air off its thrusters (noise around 2.4 kHz).
+ * Doppler from how fast the car closes on or leaves the listener, so it
+ * sweeps down as it passes. Placed (slots 0-3, one a lane); the mixer's
+ * ENGINES channel. */
+#define RACER_DOPPLER_C 2400.f /* game units a second: the speed of sound here */
+
+typedef struct RacerSource {
+    uint32_t seed;
+    float level;    /* glides to the car's presence */
+    float pos[3];   /* where it was last seen */
+    float dist, vr; /* from the listener (game units), and its rate (smoothed) */
+    bool have_dist;
+    float pitch;    /* Doppler, glided */
+    Gust rpm;       /* the engine's own wander: the cars mostly hold their places */
+    float ph_hum, ph_whine, ph_whine2, ph_vib, ph_throb;
+    float lp1, lp2;
+    float bp_low, bp_band;
+    StageMixState mix;
+} RacerSource;
+
+static const struct {
+    float hum, whine, throb;
+} s_racer_voice[RACERS] = {
+    {88.f, 11.0f, 19.f}, {101.f, 10.4f, 23.f}, {113.f, 12.1f, 21.f}, {95.f, 9.7f, 17.f}};
+
+static struct {
+    bool init;
+    float level;
+    RacerSource src[RACERS];
+    int log_frames;
+} s_racer_mix;
+
+static float poly_blep(float t, float dt) {
+    if (t < dt) {
+        t /= dt;
+        return t + t - t * t - 1.f;
+    }
+    if (t > 1.f - dt) {
+        t = (t - 1.f) / dt;
+        return t * t + t + t + 1.f;
+    }
+    return 0.f;
+}
+
+static void racers_mix(float* out, int frames, int rate, bool on) {
+    const float dt = (float)frames / (float)rate;
+    if (!on && s_racer_mix.level <= 0.f) {
+        s_racer_mix.init = false;
+        return;
+    }
+    if (!s_racer_mix.init) {
+        for (int k = 0; k < RACERS; k++) {
+            s_racer_mix.src[k] = (RacerSource){.seed = 0x9E3779B9u * (uint32_t)(k + 1), .pitch = 1.f};
+            s_racer_mix.src[k].rpm = (Gust){.seed = 0x6A09E667u ^ (uint32_t)k, .value = 0.5f, .target = 0.5f};
+            s_racer_mix.src[k].ph_throb = 0.25f * (float)k;
+        }
+        s_racer_mix.init = true;
+    }
+    const float level0 = s_racer_mix.level;
+    s_racer_mix.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    const float volume = pc_get_sfx_volume() * ambience_gain();
+    const float duck0 = s_duck0, duck1 = s_duck;
+    Racers racers;
+    unsigned seq;
+    do {
+        seq = __atomic_load_n(&s_racers_seq, __ATOMIC_ACQUIRE);
+        racers = s_racers;
+    } while ((seq & 1u) != 0 || seq != __atomic_load_n(&s_racers_seq, __ATOMIC_ACQUIRE));
+    const float w = 6.2831853f / (float)rate;
+    const float a_lp = 1.f - expf(-w * 900.f);
+    const float f_bp = 2.f * sinf(3.14159265f * 2400.f / (float)rate);
+    const float inv_rate = 1.f / (float)rate;
+    float mono[160];
+    if (frames > 160) {
+        frames = 160;
+    }
+    for (int k = 0; k < RACERS; k++) {
+        RacerSource* r = &s_racer_mix.src[k];
+        const bool here = racers.presence[k] > 0.f;
+        if (here) {
+            memcpy(r->pos, racers.pos[k], sizeof(r->pos));
+        }
+        const float rl0 = r->level;
+        r->level += ((here ? racers.presence[k] : 0.f) - r->level) * (1.f - expf(-dt / 0.15f));
+        if (rl0 < 1e-3f && r->level < 1e-3f) {
+            r->have_dist = false;
+            continue;
+        }
+        /* Doppler: the rate the distance changes, smoothed; a jump (a new
+         * car taking the lane) starts it over. */
+        float d;
+        if (pc_spatial_listener_distance(r->pos, &d)) {
+            const float v = r->have_dist ? (d - r->dist) / dt : 0.f;
+            if (fabsf(v) > 20000.f) {
+                r->vr = 0.f;
+            } else {
+                r->vr += (v - r->vr) * (1.f - expf(-dt / 0.08f));
+            }
+            r->dist = d;
+            r->have_dist = true;
+        }
+        gust_step(&r->rpm, dt * 0.7f);
+        const float want = fminf(fmaxf(RACER_DOPPLER_C / (RACER_DOPPLER_C + r->vr), 0.7f), 1.4f) *
+                           (0.96f + 0.08f * r->rpm.value);
+        const float p0 = r->pitch;
+        r->pitch += (want - r->pitch) * (1.f - expf(-dt / 0.03f));
+        const float hum_f = s_racer_voice[k].hum, whine_f = hum_f * s_racer_voice[k].whine;
+        /* The four together about -32 dBFS in a flat desktop mix (the rush
+         * -38 there): the racers over the wind. */
+        const float amp = 0.017f * volume;
+        for (int i = 0; i < frames; i++) {
+            const float t = (float)i / (float)frames;
+            const float pitch = p0 + (r->pitch - p0) * t;
+            /* The hum: a band-limited sawtooth, rolled off. */
+            const float dh = hum_f * pitch * inv_rate;
+            r->ph_hum += dh;
+            r->ph_hum -= floorf(r->ph_hum);
+            const float saw = 2.f * r->ph_hum - 1.f - poly_blep(r->ph_hum, dh);
+            r->lp1 += a_lp * (saw - r->lp1);
+            r->lp2 += a_lp * (r->lp1 - r->lp2);
+            r->ph_throb += s_racer_voice[k].throb * inv_rate;
+            r->ph_throb -= floorf(r->ph_throb);
+            const float throb = 1.f - 0.3f * (0.5f + 0.5f * sinf(6.2831853f * r->ph_throb));
+            /* The whine, wavering. */
+            r->ph_vib += 5.7f * inv_rate;
+            r->ph_vib -= floorf(r->ph_vib);
+            const float wf = whine_f * pitch * (1.f + 0.006f * sinf(6.2831853f * r->ph_vib));
+            r->ph_whine += wf * inv_rate;
+            r->ph_whine -= floorf(r->ph_whine);
+            r->ph_whine2 += 2.01f * wf * inv_rate;
+            r->ph_whine2 -= floorf(r->ph_whine2);
+            const float whine = sinf(6.2831853f * r->ph_whine) + 0.35f * sinf(6.2831853f * r->ph_whine2);
+            /* The air off its thrusters. */
+            const float n = rnd_unit(&r->seed) * 2.f - 1.f;
+            const float high = n - r->bp_low - 0.8f * r->bp_band;
+            r->bp_band += f_bp * high;
+            r->bp_low += f_bp * r->bp_band;
+            const float lv = (level0 + (s_racer_mix.level - level0) * t) * (duck0 + (duck1 - duck0) * t) *
+                             (rl0 + (r->level - rl0) * t);
+            mono[i] = (1.6f * r->lp2 * throb + 0.22f * whine + 0.12f * r->bp_band) * amp * lv;
+        }
+        pc_stage_mix_apply(STAGE_MIX_ENGINES, &r->mix, mono, frames, 1);
+        if (!pc_spatial_render_placed(k, r->pos, mono)) {
+            for (int i = 0; i < frames; i++) { /* not placed (spatial audio bypassed): plain, centred */
+                out[i * 2] += mono[i] * 0.7071f;
+                out[i * 2 + 1] += mono[i] * 0.7071f;
+            }
+        }
+    }
+    /* MELEE_RACERS_LOG=1: the cars' distances and Doppler, twice a second. */
+    static int log_on = -1;
+    if (log_on < 0) {
+        log_on = getenv("MELEE_RACERS_LOG") != NULL;
+    }
+    if (log_on && ++s_racer_mix.log_frames >= rate / frames / 2) {
+        s_racer_mix.log_frames = 0;
+        pc_log_line("racers: %.0f/%.0f/%.2f %.0f/%.0f/%.2f %.0f/%.0f/%.2f %.0f/%.0f/%.2f (distance/rate/pitch)",
+                    s_racer_mix.src[0].dist, s_racer_mix.src[0].vr, s_racer_mix.src[0].pitch, s_racer_mix.src[1].dist,
+                    s_racer_mix.src[1].vr, s_racer_mix.src[1].pitch, s_racer_mix.src[2].dist, s_racer_mix.src[2].vr,
+                    s_racer_mix.src[2].pitch, s_racer_mix.src[3].dist, s_racer_mix.src[3].vr, s_racer_mix.src[3].pitch);
+    }
+}
+
 /* A layer heard all around (into the ambient bus), through its stage mixer
  * channel: made into a frame of its own, mixed, then added. */
 typedef void (*BusLayer)(float* out, int frames, int rate, bool on);
@@ -839,9 +1046,9 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     float target = 1.f;
     if (!fresh) {
         __atomic_store(&s_duck_target, &target, __ATOMIC_RELAXED);
-    } else {
+    } else if (!pc_stage_mix_listening()) {
         __atomic_load(&s_duck_target, &target, __ATOMIC_RELAXED);
-    }
+    } /* the dev tools' Stage page open in the pause: heard as in the fight */
     const float step = (float)frames / (float)rate / AMB_DUCK_S;
     s_duck0 = s_duck;
     s_duck = s_duck < target ? fminf(target, s_duck + step) : fmaxf(target, s_duck - step);
@@ -850,4 +1057,5 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     bus_layer(jungle_mix, STAGE_MIX_JUNGLE, jungle, out, frames, rate, fresh && kind == AMB_FALLS);
     fountain_mix(out, frames, rate, fresh && kind == AMB_FOUNTAIN);
     bus_layer(rush_mix, STAGE_MIX_RUSH, rush, out, frames, rate, fresh && kind == AMB_RUSH);
+    racers_mix(out, frames, rate, fresh && kind == AMB_RUSH && pc_spatial_enabled());
 }

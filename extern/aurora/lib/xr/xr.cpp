@@ -5086,6 +5086,7 @@ struct DevMix {
   int stage = -1;
   std::map<int, DevMixStage> stages;
 } g_devMix;
+std::atomic<bool> g_devMixListening{false}; // the panel shows its Stage page
 
 bool dev_tools_wanted() {
   static const bool on = env_flag("AURORA_XR_DEV_TOOLS", env_flag("AURORA_XR_GRADE_PANEL", false));
@@ -5646,6 +5647,7 @@ void update_dev_panel(bool show, bool tintUsable) {
   if (!show)
     P.active = P.activeHand = -1;
   P.shown = show;
+  g_devMixListening.store(show && P.page == kPageMix, std::memory_order_relaxed);
   if (!show)
     return;
   int hover = -1;
@@ -9067,6 +9069,10 @@ extern "C" void aurora_xr_dev_mix_stage(int stage, int count, const char* const 
     st.names[c] = names[c];
     st.defaults[c] = st.value[c] = defaults[c];
   }
+}
+
+extern "C" bool aurora_xr_dev_mix_listening(void) {
+  return aurora::xr::g_devMixListening.load(std::memory_order_relaxed);
 }
 
 extern "C" bool aurora_xr_dev_mix(int stage, int channel, AuroraXrMixChannel* out) {

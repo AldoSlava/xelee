@@ -81,6 +81,13 @@
  * collision joint as last drawn; `part` is the cars' part. False when
  * there's none. */
 bool grBigBlue_pc_lane_pos(const HSD_GObj* part, int lane, float pos[3]);
+/* The cars' part while the stage is up (set as it's made, cleared as it
+ * goes), or NULL. */
+extern HSD_GObj* grBigBlue_pc_cars;
+/* PC (stage ambience): lane `lane`'s racer, where its car is and how much
+ * of it there is (its fade, 0 to 1). False without the cars or with the
+ * lane empty (state 1). */
+bool grBigBlue_pc_racer(int lane, float pos[3], float* presence);
 #endif
 
 #endif

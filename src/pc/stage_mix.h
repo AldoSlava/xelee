@@ -41,6 +41,11 @@ typedef struct StageMixState {
 /* Game thread, each drawn fight frame: the stage playing (its Gr_Kind). */
 void pc_stage_mix_frame(int grkind);
 
+/* Any thread: the dev tools' Stage page is open (in a pause), so the
+ * pause's duck is lifted for what's being mixed: the stage's sounds and
+ * the music, heard as in the fight. */
+bool pc_stage_mix_listening(void);
+
 /* Audio thread, once each AX frame before anything mixes: takes the
  * newest settings. */
 void pc_stage_mix_begin(int rate);
