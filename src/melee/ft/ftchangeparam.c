@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftchangeparam.h"
 
 #include <placeholder.h>
@@ -16,7 +17,7 @@ float ftCo_CalcYScaledKnockback(float arg0, float scale, float arg2)
         return arg0 / ftCo_CalcYScaledKnockback(1.0F, scale, -arg2);
     }
     if (scale >= 1.0F || arg2 <= 1.0F) {
-        return (scale - 1.0F) * arg0 * arg2 + arg0;
+        return gk_fmadds((scale - 1.0F) * arg0, arg2, arg0);
     }
     return arg0 * scale / arg2;
 }

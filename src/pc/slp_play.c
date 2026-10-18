@@ -28,7 +28,10 @@ typedef struct PlayFrame {
     float c[4][2];  /* the C-stick as the game normalized it */
     uint32_t cdir[4]; /* and the direction bits it set (HSD_PadADConvert) */
     float lr[4][2]; /* the triggers likewise (nml_analogL, nml_analogR) */
-    bool have[4];
+    float pre_pos[4][2];  /* the fighter's position going in */
+    float post_pos[4][2]; /* and coming out */
+    float hitlag[4];      /* its hitlag coming out */
+    bool have[4], have_post[4];
 } PlayFrame;
 
 static struct {
@@ -44,7 +47,7 @@ static struct {
     bool started;  /* the VS scene has set up */
     int32_t next;  /* the fight frame the next tick is */
     bool converted;
-    unsigned c_misses, lr_misses;
+    unsigned c_misses, lr_misses, c_snaps_read;
 } P;
 
 /* Event fields, as offsets from the command byte (SPEC.md). */
@@ -53,6 +56,8 @@ static struct {
 #define PRE_FRAME 0x1
 #define PRE_PORT 0x5
 #define PRE_FOLLOWER 0x6
+#define PRE_X 0xD
+#define PRE_Y 0x11
 #define PRE_C_X 0x21
 #define PRE_C_Y 0x25
 #define PRE_BUTTONS 0x2D
@@ -64,6 +69,9 @@ static struct {
 #define PRE_RAW_Y 0x40
 #define PRE_RAW_CX 0x41
 #define PRE_RAW_CY 0x42
+#define POST_X 0xA
+#define POST_Y 0xE
+#define POST_HITLAG 0x49
 
 static uint32_t be32(const uint8_t* p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
@@ -87,14 +95,17 @@ static float bef(const uint8_t* p) {
  * moves the fighter by. A stick held off centre is almost always at the
  * rim, and one held along an axis in its notch: for those a raw UCF
  * snaps stands for them if there is one, then the largest; at rest, (0, 0),
- * the smallest. (Replays from Slippi 3.17 on carry the raw C-stick
- * itself.) A
- * table keyed by the two floats' bits and the direction bits. */
+ * the smallest. Where the replay shows which it was, that one
+ * (c_snaps_from_asdi). (Replays from Slippi 3.17 on carry the raw C-stick
+ * itself.) A table keyed by the two floats' bits and the direction bits,
+ * holding the best raw that snaps and the best that does not. */
 #define C_SLOTS (1u << 17)
 static struct {
     uint64_t key; /* x bits << 32 | y bits, plus one: 0 is empty */
     uint32_t dir;
-    int8_t x, y;
+    int8_t x, y;   /* the best that does not snap */
+    int8_t sx, sy; /* the best that snaps */
+    bool plain, snap;
 } s_c[C_SLOTS];
 static float s_lr[256]; /* nml_analogL for each raw trigger value */
 
@@ -136,14 +147,22 @@ static void build_tables(void) {
                 if (s_c[i].key == 0 || (s_c[i].key == k && s_c[i].dir == dir)) {
                     /* UCF's cardinal snap (ftucf.c snapCardinal): at the rim on
                      * one axis, within 6 of centre on the other */
-#define SNAPS(px, py) ((abs(px) >= 80 && abs(py) <= 6) || (abs(py) >= 80 && abs(px) <= 6))
-                    const int m = abs(x) + abs(y), held = abs(s_c[i].x) + abs(s_c[i].y);
-                    const bool snaps = SNAPS(x, y), held_snaps = SNAPS(s_c[i].x, s_c[i].y);
+                    const bool snaps = (abs(x) >= 80 && abs(y) <= 6) || (abs(y) >= 80 && abs(x) <= 6);
                     const bool rest = nx == 0.0f && ny == 0.0f;
-#undef SNAPS
-                    if (s_c[i].key == 0 || (rest ? m < held : snaps != held_snaps ? snaps : m > held)) {
-                        s_c[i].x = (int8_t)x;
-                        s_c[i].y = (int8_t)y;
+                    const int m = abs(x) + abs(y);
+                    if (snaps) {
+                        if (!s_c[i].snap || m > abs(s_c[i].sx) + abs(s_c[i].sy)) {
+                            s_c[i].sx = (int8_t)x;
+                            s_c[i].sy = (int8_t)y;
+                            s_c[i].snap = true;
+                        }
+                    } else {
+                        const int held = abs(s_c[i].x) + abs(s_c[i].y);
+                        if (!s_c[i].plain || (rest ? m < held : m > held)) {
+                            s_c[i].x = (int8_t)x;
+                            s_c[i].y = (int8_t)y;
+                            s_c[i].plain = true;
+                        }
                     }
                     s_c[i].key = k;
                     s_c[i].dir = dir;
@@ -161,7 +180,9 @@ static void build_tables(void) {
     }
 }
 
-static bool c_raw(float x, float y, uint32_t dir, s8* rx, s8* ry) {
+/* snap: 1 a raw UCF snaps, 0 one it does not, -1 the default (a snapping
+ * one if there is one). False if there is none such. */
+static bool c_raw(float x, float y, uint32_t dir, int snap, s8* rx, s8* ry) {
     const uint64_t k = c_key(x, y);
     for (uint32_t h = c_hash(k ^ dir);; h++) {
         const uint32_t i = h & (C_SLOTS - 1);
@@ -169,9 +190,65 @@ static bool c_raw(float x, float y, uint32_t dir, s8* rx, s8* ry) {
             return false;
         }
         if (s_c[i].key == k && s_c[i].dir == dir) {
-            *rx = s_c[i].x;
-            *ry = s_c[i].y;
+            const bool use_snap = snap < 0 ? s_c[i].snap : snap > 0;
+            if (use_snap ? !s_c[i].snap : !s_c[i].plain) {
+                return false;
+            }
+            *rx = use_snap ? s_c[i].sx : s_c[i].x;
+            *ry = use_snap ? s_c[i].sy : s_c[i].y;
             return true;
+        }
+    }
+}
+
+/* Whether UCF snapped a held C-stick shows in the replay where the stick
+ * moved the fighter: at hitlag's end ASDI (ftCo_Damage_OnExitHitlag) moves
+ * it by the C-stick times x4BC, between the frame's post-frame position
+ * before and its pre-frame one; snapped, by exactly x4BC along the axis.
+ * The raw that agrees goes to the whole hold: a held stick does not move. */
+static void c_snaps_from_asdi(void) {
+    const float k = p_ftCommonData->x4BC;
+    const float min = p_ftCommonData->sdi_min_stick_mag;
+    for (int port = 0; port < 4; port++) {
+        for (int32_t i = 1; i < P.count; i++) {
+            PlayFrame* fr = &P.frames[i];
+            const PlayFrame* pv = &P.frames[i - 1];
+            if (!fr->have[port] || !pv->have_post[port] || !(pv->hitlag[port] > 0.0f && pv->hitlag[port] <= 1.0f)) {
+                continue;
+            }
+            const float cx = fr->c[port][0], cy = fr->c[port][1];
+            if (cx * cx + cy * cy < min * min) {
+                continue;
+            }
+            const int axis = fabsf(cx) >= fabsf(cy) ? 0 : 1;
+            const float c = fr->c[port][axis];
+            if (fabsf(c) == 1.0f) {
+                continue;
+            }
+            const float d = fr->pre_pos[port][axis] - pv->post_pos[port][axis];
+            const float off_snap = fabsf(d - copysignf(k, c)), off_plain = fabsf(d - c * k);
+            if (fminf(off_snap, off_plain) > 0.01f) {
+                continue; /* something else moved it too */
+            }
+            const int snap = off_snap < off_plain;
+            s8 rx, ry;
+            if (!c_raw(cx, cy, fr->cdir[port], snap, &rx, &ry)) {
+                continue;
+            }
+            int32_t a = i, b = i;
+            while (a > 0 && P.frames[a - 1].have[port] && P.frames[a - 1].c[port][0] == cx &&
+                   P.frames[a - 1].c[port][1] == cy && P.frames[a - 1].cdir[port] == fr->cdir[port]) {
+                a--;
+            }
+            while (b + 1 < P.count && P.frames[b + 1].have[port] && P.frames[b + 1].c[port][0] == cx &&
+                   P.frames[b + 1].c[port][1] == cy && P.frames[b + 1].cdir[port] == fr->cdir[port]) {
+                b++;
+            }
+            for (int32_t j = a; j <= b; j++) {
+                P.frames[j].pad[port].substickX = rx;
+                P.frames[j].pad[port].substickY = ry;
+            }
+            P.c_snaps_read++;
         }
     }
 }
@@ -259,6 +336,8 @@ static bool load(const char* path) {
                 fr->c[port][0] = bef(e + PRE_C_X);
                 fr->c[port][1] = bef(e + PRE_C_Y);
                 fr->cdir[port] = be32(e + PRE_BUTTONS) & C_DIRS;
+                fr->pre_pos[port][0] = bef(e + PRE_X);
+                fr->pre_pos[port][1] = bef(e + PRE_Y);
                 fr->lr[port][0] = bef(e + PRE_PHYS_L);
                 fr->lr[port][1] = bef(e + PRE_PHYS_R);
                 fr->have[port] = true;
@@ -266,6 +345,17 @@ static bool load(const char* path) {
                 if (idx + 1 > P.count) {
                     P.count = idx + 1;
                 }
+            }
+        } else if (cmd == SLP_CMD_POST_FRAME && len > POST_HITLAG + 3 && !e[PRE_FOLLOWER] && e[PRE_PORT] < 4) {
+            /* the frame's pre-frame came first and made room for it */
+            const int32_t idx = (int32_t)be32(e + PRE_FRAME) - SLP_FIRST_FRAME;
+            if (idx >= 0 && idx < cap) {
+                PlayFrame* fr = &P.frames[idx];
+                const int port = e[PRE_PORT];
+                fr->post_pos[port][0] = bef(e + POST_X);
+                fr->post_pos[port][1] = bef(e + POST_Y);
+                fr->hitlag[port] = bef(e + POST_HITLAG);
+                fr->have_post[port] = true;
             }
         }
         e += len;
@@ -297,7 +387,7 @@ static void convert(void) {
             }
             PADStatus* pad = &fr->pad[port];
             if (!P.raw_c &&
-                !c_raw(fr->c[port][0], fr->c[port][1], fr->cdir[port], &pad->substickX, &pad->substickY))
+                !c_raw(fr->c[port][0], fr->c[port][1], fr->cdir[port], -1, &pad->substickX, &pad->substickY))
             {
                 if (P.c_misses++ < 5) {
                     pc_log_line("slp play: frame %d port %d: no raw C-stick gives %.4f,%.4f with directions %06x",
@@ -312,6 +402,9 @@ static void convert(void) {
             }
         }
     }
+    if (!P.raw_c) {
+        c_snaps_from_asdi();
+    }
     /* A frame a port's fighter sent nothing for (asleep, or out of the
      * match) keeps the pad it last had: the controller stays plugged in. */
     for (int32_t i = 1; i < P.count; i++) {
@@ -323,8 +416,9 @@ static void convert(void) {
         }
     }
     P.converted = true;
-    pc_log_line("slp play: %d frames (%d to %d); C-stick %s, %u unmatched; %u unmatched triggers", P.count,
-        SLP_FIRST_FRAME, P.last, P.raw_c ? "raw" : "from its normalized values", P.c_misses, P.lr_misses);
+    pc_log_line("slp play: %d frames (%d to %d); C-stick %s, %u unmatched, %u snaps read from ASDI; "
+                "%u unmatched triggers", P.count, SLP_FIRST_FRAME, P.last,
+        P.raw_c ? "raw" : "from its normalized values", P.c_misses, P.c_snaps_read, P.lr_misses);
 }
 
 bool pc_slp_play_active(void) {
