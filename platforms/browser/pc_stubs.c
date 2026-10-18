@@ -113,3 +113,24 @@ void pc_slp_tick_end(uint64_t proc_mask) {
 void pc_slp_pre_frame(struct HSD_GObj* gobj) {
     (void)gobj;
 }
+void pc_slp_sync_rng(uint32_t seed) {
+    (void)seed;
+}
+/* Nor replay playback, which reads one. */
+bool pc_slp_play_active(void) {
+    return false;
+}
+uint32_t pc_slp_play_rng_offset(void) {
+    return 0;
+}
+void pc_slp_play_setup(struct StartMeleeData* start) {
+    (void)start;
+}
+void pc_slp_play_match_start(void) {}
+void pc_slp_play_feed(struct PADStatus* head) {
+    (void)head;
+}
+void pc_slp_play_match_end(void) {}
+void pc_slp_play_tick_end(bool fight_frame) {
+    (void)fight_frame;
+}

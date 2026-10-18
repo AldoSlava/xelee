@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* One trig implementation for every peer (musl's, see LICENSE). glibc,
+/* One trig implementation for every peer: the GameCube's own
+ * (pc_msl_trig.c), since a Slippi peer runs that one in Dolphin. glibc,
  * mingw-w64 and bionic all return different bits for sinf/cosf/tanf/atanf,
- * which would desync netplay. Force-included into the game library
- * (compat.h) and aurora_mtx (CMakeLists.txt) so no call reaches the
- * platform libm. */
+ * and so does a correctly rounded libm (musl's, used here before), any of
+ * which desyncs netplay. Force-included into the game library (compat.h)
+ * and aurora_mtx (CMakeLists.txt) so no call reaches the platform libm. */
 #ifndef PC_TRIG_H
 #define PC_TRIG_H
 

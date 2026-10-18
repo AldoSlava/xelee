@@ -32,7 +32,10 @@ extern "C" {
  * input packets carry their pads delta-coded (pads_encode, net_wire.c).
  * A fight reseeds the RNG every tick (fight_reseed) and forces UCF on and
  * free camera off, which an older peer does not. */
-#define PC_NET_PROTO_VERSION 9
+/* Version 10 computes sinf, cosf, tanf and atanf as the GameCube does
+ * (src/pc/libm/pc_msl_trig.c) instead of musl's correctly rounded ones, so
+ * a peer on 9 parts from it on the first diagonal air dodge. */
+#define PC_NET_PROTO_VERSION 10
 void pc_net_init(void);
 void pc_net_set_input_delay(int frames);
 bool pc_net_active(void);

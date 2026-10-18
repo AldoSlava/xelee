@@ -1,7 +1,9 @@
-The pc_*.c files in this directory are copied from musl libc
-(https://git.musl-libc.org/cgit/musl/, src/math/ and src/internal/libm.h),
-with the functions renamed to a pc_ prefix. musl as a whole is licensed
-under the following standard MIT license:
+pc_libm.h and the pc_rank_*.c files in this directory are copied from musl
+libc (https://git.musl-libc.org/cgit/musl/, src/math/ and
+src/internal/libm.h), with the functions renamed to a pc_ prefix. (The trig
+once vendored from musl here is now pc_msl_trig.c, the GameCube's own, under
+this project's license.) musl as a whole is licensed under the following
+standard MIT license:
 
 ----------------------------------------------------------------------
 Copyright © 2005-2020 Rich Felker, et al.

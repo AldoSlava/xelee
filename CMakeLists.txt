@@ -308,18 +308,12 @@ set(PC_SOURCES
         src/pc/net_sync.c
         src/pc/net_watchdog.c
         src/pc/net_wire.c
-        # Vendored musl trig: platform libm differs by an ULP between targets,
-        # which is a cross-platform desync (docs/netcode-plan.md section 5).
-        src/pc/libm/pc_atanf.c
-        src/pc/libm/pc_cosdf.c
-        src/pc/libm/pc_cosf.c
-        src/pc/libm/pc_perturb.c
-        src/pc/libm/pc_rem_pio2_large.c
-        src/pc/libm/pc_rem_pio2f.c
-        src/pc/libm/pc_sindf.c
-        src/pc/libm/pc_sinf.c
-        src/pc/libm/pc_tandf.c
-        src/pc/libm/pc_tanf.c)
+        # The GameCube's own trig: platform libm differs by an ULP between
+        # targets, which is a cross-platform desync (docs/netcode-plan.md
+        # section 5), and so does any libm from the GameCube's, which a
+        # Slippi peer runs (src/pc/libm/pc_msl_trig.c).
+        src/pc/libm/pc_msl_trig.c
+        src/pc/libm/pc_perturb.c)
 # iOS, not APPLE: ios_dialog.m imports UIKit, which the macOS SDK has no
 # headers for. The glob this replaced matched src/pc/*.m on macOS too.
 if (IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
