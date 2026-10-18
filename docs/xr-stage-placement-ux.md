@@ -441,12 +441,41 @@ yes; D4, clear; D5, leave the stage in place (anchors); D7, yes.
 - Not yet: tall stages re-centred (to tune in the headset), Target Test and
   trophy stages surveyed, the pause legend (D6), the scene's caption.
 
-### C.11 Room survey (built 2026-10-17, the user's idea)
+### C.11 Room survey (built 2026-10-17, the user's idea; fitted 2026-10-18)
 
 Instead of asking with presets (C.3, D3), measure. Once a launch, as soon as
 the head is tracked, the surface worker casts a fan of rays from the head (5
-across, +-30 degrees; 4 down, 5-50 degrees under level) against the
-headset's depth for up to 6 s, while the player looks about the menus:
+across, +-40 degrees; 6 from 10 degrees over level to 50 under) against the
+headset's depth for up to 6 s, while the player looks about the menus, and
+keeps every hit.
+
+**The fit** (`room_fit`, the user's rule, 2026-10-18): the stage goes halfway
+to the farthest wall ahead (its 90th percentile within 40 degrees of
+forward; 5 m when the forward rays find nothing), at most 2.4 m and at least
+40 cm out, and as large as fills the view: its playfield, 300 units across,
+at most about 74 degrees, between 0.0018 and 0.012 m a unit. It sits 13
+degrees under the eyes and clear above whatever it stands over. Then it's
+brought in and shrunk until its box (50 units under its floor to 130 over, 70
+deep) and the view of it from the eyes are clear of every hit with 6 cm to
+spare, taking the farthest spot that shows it within 10% as large as the
+best. A desk's edge may hide the stage's underside, not the floor up. The
+screen goes most of the way to that wall (0.45-3.2 m), about 48 degrees
+across, brought in until clear.
+
+The angles come from the user's own placement on 2026-10-18: seated at a
+desk, wall about 3.2 m ahead, the stage dragged to 1.6 m, 0.36 m under the
+eyes, 0.0082 m a unit (71 degrees across). The fit on a mock of that room
+gives 1.60 m, 0.37 m under, 0.0080. Other mocks:
+
+| Room | Stage | Screen |
+|---|---|---|
+| desk, a monitor 0.6 m ahead | 0.45 m, 0.0023, in front of the monitor | 0.46 m wide at 0.51 m |
+| couch, wall 4.5 m | 2.25 m, 0.0113, 0.36 m under | 2.5 m at 2.8 m |
+| standing, wall 4.5 m | 2.25 m, 0.0113, 0.52 m under | 2.85 m at 3.2 m |
+| small room, wall 1.8 m | 0.9 m, 0.0045 | 1.36 m at 1.53 m |
+
+**The kind**, for the log and for when the rays saw too little to fit
+(under 40 hits, or no wall and no open ray):
 
 - a **desk or table**: level hits 10-80 cm under the eyes, within 1.4 m, not
   the floor;
@@ -456,7 +485,7 @@ headset's depth for up to 6 s, while the player looks about the menus:
   when those rays find nothing within 5 m.
 
 It picks **Desk** (a desk ahead, seated), **Couch** (seated, no desk) or
-**Room** (standing), and seeds the defaults the player hasn't set:
+**Room** (standing), with these fallbacks:
 
 | | Stage | Screen |
 |---|---|---|
@@ -464,14 +493,16 @@ It picks **Desk** (a desk ahead, seated), **Couch** (seated, no desk) or
 | Couch | 0.007 at 1.4 m, 35 cm under the eyes | 1.3 m wide at 1.5 m |
 | Room | 0.011 at 2 m, 60 cm under | 1.7 m at 2 m |
 
-Each is pulled in and shrunk with it (the same size to the eye) to stay clear
+each pulled in and shrunk with it (the same size to the eye) to stay clear
 of a wall ahead. The screen glides there over 0.8 s. Never over an adopted
 spot, a stage already placed or up, a screen the player moved, or the
 `AURORA_XR_ARENA_*` / `AURORA_XR_SCREEN_*` knobs; `AURORA_XR_ROOM_SURVEY=0`
 turns it off. It needs the spatial data permission (as the shadow does);
 without it only the floor is known, so standing is Room and seated Couch is
 never guessed (Unknown keeps today's desk defaults). Logged as "Room survey:
-...". Not yet tried on the headset.
+..." (", fitted" when the fit placed it). The fit is not yet tried on the
+headset; the survey itself ran there on 2026-10-18 (200/200 rays seen,
+desk 0.27-0.38 m under the eyes, floor 1.05 m, clear ahead 2.11 m).
 
 ---
 

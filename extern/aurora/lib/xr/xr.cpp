@@ -3799,9 +3799,15 @@ struct RoomSurvey {
   float deskY = 0.f, deskNear = 0.f, deskFar = 0.f; // its height, and its near and far reach
   float floorY = 0.f;
   float clearance = -1.f; // to the nearest wall or obstacle ahead; -1: unknown; kRoomReach: open
+  float far = -1.f;       // to the farthest wall ahead (kRoomReach: open; -1: unknown)
   float headY = 0.f, yaw = 0.f;
   XrVector3f head{};
-  int rays = 0, informed = 0;
+  int rays = 0, informed = 0, points = 0;
+  // Where the stage and the screen fit (room_fit), when the room was seen.
+  bool fitted = false;
+  float stageDist = 0.f, stageY = 0.f, stageScale = 0.f; // ahead of the head along LOCAL -z
+  bool screenFitted = false;
+  float screenDist = 0.f, screenWidth = 0.f; // ahead along the head's yaw
 };
 const char* room_kind_name(RoomSurvey::Kind k) {
   return k == RoomSurvey::Kind::Desk ? "desk" : k == RoomSurvey::Kind::Couch ? "couch" : k == RoomSurvey::Kind::Room ? "room" : "unknown";
@@ -4227,18 +4233,20 @@ void surface_log(SurfaceWorker& w, int64_t now, const ArenaSnapshot& a) {
 
 // ---------------------------------------------------------------- the room survey
 //
-// Where a stage and the screen start depends on where the player is: at a
-// desk the stage stands on it within reach, on a couch it floats farther
-// out and larger, standing in a living room larger still, and the screen
-// likewise. Once a launch, as soon as the head is tracked, a fan of rays
-// from the head (5 across, +-30 degrees, 4 down, 5 to 50 degrees under
-// level) against the headset's depth, for up to 6 s (the player looking
-// about the menus fills it in): level hits a short way below the eyes and
-// within reach are a desk or table; the lowest level surface (or
-// XR_EXT_local_floor's floor) says seated or standing; walls in the forward
-// rays say how much room there is ahead. The result seeds the defaults the
-// player hasn't set (room_survey_apply); every placement is still theirs.
-// AURORA_XR_ROOM_SURVEY=0: none.
+// Where a stage and the screen start depends on how much room there is: at
+// a desk facing a monitor the stage is small and near, on a couch in a
+// living room it's farther out and larger. Once a launch, as soon as the
+// head is tracked, a fan of rays from the head (5 across, +-40 degrees, 6
+// from 10 degrees over level to 50 under) against the headset's depth, for
+// up to 6 s (the player looking about the menus fills it in). Every hit is
+// kept: room_fit puts the stage halfway to the farthest wall ahead, as large
+// as fills the view (at most about 74 degrees across), clear of everything
+// the rays found, and the screen farther out. Level hits a short way below
+// the eyes and within reach are a desk or table, the lowest level surface
+// (or XR_EXT_local_floor's floor) says seated or standing: the log's kind,
+// and the defaults when the rays saw too little to fit. The result seeds the
+// defaults the player hasn't set (room_survey_apply); every placement is
+// still theirs. AURORA_XR_ROOM_SURVEY=0: none.
 constexpr float kRoomReach = 5.f;
 struct RoomSamples {
   struct Level {
@@ -4246,6 +4254,11 @@ struct RoomSamples {
   };
   std::vector<Level> level;
   std::vector<float> walls;
+  struct Wall {
+    XrVector3f p;
+  };
+  std::vector<Wall> farWalls; // the forward rays' walls, where (the farthest is judged ahead of LOCAL -z)
+  std::vector<XrVector3f> points; // every hit (LOCAL), what the stage must stay clear of
   int rays = 0, informed = 0, open = 0, passes = 0;
   int64_t startNs = 0;
 };
@@ -4258,8 +4271,8 @@ void room_cast(SurfaceWorker& w, RoomSamples& rs, const XrPosef& head, XrTime ti
   const XrEnvironmentRaycastFilterBaseHeaderMETA* filters[] = {
       reinterpret_cast<const XrEnvironmentRaycastFilterBaseHeaderMETA*>(&reach)};
   constexpr float kDeg = 3.14159265f / 180.f;
-  for (const float across : {-30.f, -15.f, 0.f, 15.f, 30.f})
-    for (const float down : {5.f, 20.f, 35.f, 50.f}) {
+  for (const float across : {-40.f, -20.f, 0.f, 20.f, 40.f})
+    for (const float down : {-10.f, 0.f, 10.f, 20.f, 35.f, 50.f}) {
       const XrVector3f dir = rot_y({0.f, -std::sin(down * kDeg), -std::cos(down * kDeg)}, yaw + across * kDeg);
       XrEnvironmentRaycastHitGetInfoMETA gi{XR_TYPE_ENVIRONMENT_RAYCAST_HIT_GET_INFO_META};
       gi.baseSpace = B.space;
@@ -4282,17 +4295,141 @@ void room_cast(SurfaceWorker& w, RoomSamples& rs, const XrPosef& head, XrTime ti
         rs.open += forward ? 1 : 0; // nothing within reach
         continue;
       }
+      const XrVector3f p = hit.pose.position;
+      if (rs.points.size() < 6000)
+        rs.points.push_back(p);
       if (hit.status == XR_ENVIRONMENT_RAYCAST_HIT_STATUS_HIT_INVALID_ORIENTATION_META)
         continue; // where, but not which way it faces
-      const XrVector3f p = hit.pose.position;
       const float d = std::hypot(p.x - head.position.x, p.z - head.position.z);
       const float up = qrot(hit.pose.orientation, {0.f, 0.f, 1.f}).y;
-      if (up >= 0.94f)
+      if (up >= 0.94f && down > 0.f)
         rs.level.push_back({p.y, d});
-      else if (up < 0.5f && forward)
+      else if (up < 0.5f && forward) {
         rs.walls.push_back(d);
+        rs.farWalls.push_back({p});
+      }
     }
   ++rs.passes;
+}
+
+// A box ahead of the eyes, in a frame turned to `yaw` (forward -z at 0):
+// `dist` to its center, `hx` and `hz` its half width and depth, `y0`-`y1`
+// its heights (LOCAL). Clear when no point the rays found is in it, or
+// between the eyes and it from `view0` up (what would cover what's watched
+// of it: a desk's edge may hide a stage's underside), with `margin` around.
+struct FitBox {
+  float dist, hx, hz, y0, y1, view0;
+};
+bool room_clear(const std::vector<XrVector3f>& points, const XrVector3f& eye, float yaw, const FitBox& b,
+                float margin) {
+  const XrVector3f fwd{-std::sin(yaw), 0.f, -std::cos(yaw)}, right{std::cos(yaw), 0.f, -std::sin(yaw)};
+  const float front = b.dist - b.hz;
+  for (const XrVector3f& p : points) {
+    const XrVector3f d = p - eye;
+    const float z = d.x * fwd.x + d.z * fwd.z, x = d.x * right.x + d.z * right.z;
+    if (z < 0.15f || z > b.dist + b.hz + margin)
+      continue; // the player's own hands and lap, or past it
+    if (z >= front - margin) {
+      if (std::abs(x) < b.hx + margin && p.y > b.y0 - margin && p.y < b.y1 + margin)
+        return false; // in it
+    } else {
+      // Between: inside the lines from the eyes to its front's edges.
+      const float k = z / front;
+      if (std::abs(x) < (b.hx + margin) * k && p.y > eye.y + (b.view0 - margin - eye.y) * k &&
+          p.y < eye.y + (b.y1 + margin - eye.y) * k)
+        return false;
+    }
+  }
+  return true;
+}
+
+// The stage's and the screen's defaults from what the rays found
+// (room_survey_apply's), in the user's terms: the stage halfway to the
+// farthest wall ahead (at most 2.4 m, at least 40 cm), as large as fills
+// the view (its playfield, 300 units across, at most about 74 degrees) and
+// no larger than 0.012 m a unit nor smaller than 0.0018, 13 degrees under
+// the eyes (where players put it: 0.36 m under at 1.6 m) and above whatever
+// it stands over (the box 50 units under its floor to 130 over, 70 deep);
+// brought in and shrunk until it and the view of it are clear of every hit
+// with 6 cm to spare, preferring the farthest spot that shows it within 10%
+// as large as the best. The screen: most of the way to that wall (0.45-3.2
+// m), about 48 degrees across, brought in until clear (in front of a
+// monitor, then).
+void room_fit(const RoomSamples& rs, RoomSurvey& out) {
+  constexpr float kDeg = 3.14159265f / 180.f;
+  // The farthest wall ahead of LOCAL -z (within 40 degrees of it), the
+  // 90th percentile to leave out a stray far hit; open when the forward
+  // rays mostly reached nothing.
+  std::vector<float> ahead;
+  for (const auto& w : rs.farWalls) {
+    const float dx = w.p.x - out.head.x, dz = w.p.z - out.head.z;
+    if (-dz > 0.f && std::abs(std::atan2(dx, -dz)) < 40.f * kDeg)
+      ahead.push_back(-dz); // how far ahead, not along the ray
+  }
+  std::sort(ahead.begin(), ahead.end());
+  if (!ahead.empty() && rs.open * 4 < static_cast<int>(ahead.size()))
+    out.far = ahead[ahead.size() * 9 / 10];
+  else if (rs.open > 0)
+    out.far = kRoomReach;
+  out.points = static_cast<int>(rs.points.size());
+  if (out.far < 0.f || rs.points.size() < 40)
+    return;
+  // Level surfaces under a footprint: the stage stands clear above them.
+  const auto top_under = [&](const XrVector3f& c, float hx, float hz) {
+    float top = out.floor ? out.floorY : -1e9f;
+    for (const auto& l : rs.points) {
+      if (std::abs(l.x - c.x) < hx && std::abs(l.z - c.z) < hz && l.y < out.headY - 0.1f)
+        top = std::max(top, l.y);
+    }
+    return top;
+  };
+  const XrVector3f eye = out.head;
+  constexpr float kHalfW = 150.f, kBelow = 50.f, kAbove = 130.f, kHalfD = 35.f, kMargin = 0.06f;
+  const float tanView = std::tan(37.f * kDeg), tanDown = std::tan(13.f * kDeg);
+  const float ideal = std::clamp(out.far * 0.5f, 0.4f, 2.4f);
+  struct Cand {
+    float dist, y, scale;
+  };
+  std::vector<Cand> cands;
+  for (float dist = ideal; dist >= 0.4f - 1e-3f; dist -= 0.05f) {
+    for (float sc = std::min(dist * tanView / kHalfW, 0.012f); sc >= 0.0018f; sc *= 0.94f) {
+      const XrVector3f c{eye.x, 0.f, eye.z - dist};
+      float y = eye.y - dist * tanDown;
+      y = std::max(y, top_under(c, kHalfW * sc + kMargin, kHalfD * sc + kMargin) + kBelow * sc + kMargin + 0.01f);
+      if (y > eye.y - 0.05f)
+        continue; // over the eyes: smaller
+      const FitBox box{dist, kHalfW * sc, kHalfD * sc, y - kBelow * sc, y + kAbove * sc, y - 15.f * sc};
+      if (room_clear(rs.points, eye, 0.f, box, kMargin)) {
+        cands.push_back({dist, y, sc});
+        break;
+      }
+    }
+  }
+  if (!cands.empty()) {
+    float best = 0.f;
+    for (const Cand& c : cands)
+      best = std::max(best, c.scale / c.dist);
+    for (const Cand& c : cands) // farthest first
+      if (c.scale / c.dist >= best * 0.9f) {
+        out.fitted = true;
+        out.stageDist = c.dist;
+        out.stageY = c.y;
+        out.stageScale = c.scale;
+        break;
+      }
+  }
+  // The screen, along the head's yaw, at its own height (about the eyes').
+  const float tanScreen = std::tan(24.f * kDeg);
+  for (float d = std::clamp(out.far * 0.85f, 0.45f, 3.2f); d >= 0.45f - 1e-3f; d -= 0.05f) {
+    const float w = 2.f * d * tanScreen, h = w * 0.75f;
+    const FitBox box{d, w * 0.5f, 0.03f, eye.y - h * 0.5f, eye.y + h * 0.5f, eye.y - h * 0.5f};
+    if (room_clear(rs.points, eye, out.yaw, box, 0.05f)) {
+      out.screenFitted = true;
+      out.screenDist = d;
+      out.screenWidth = w;
+      break;
+    }
+  }
 }
 
 RoomSurvey room_finish(const RoomSamples& rs, const XrPosef& head, XrTime time) {
@@ -4363,6 +4500,7 @@ RoomSurvey room_finish(const RoomSamples& rs, const XrPosef& head, XrTime time) 
            : standing              ? RoomSurvey::Kind::Room
            : out.floor             ? RoomSurvey::Kind::Couch
                                    : RoomSurvey::Kind::Unknown;
+  room_fit(rs, out);
   return out;
 }
 
@@ -4535,7 +4673,9 @@ void surface_frame(bool fight, bool placing, XrTime time) {
 }
 
 // XR thread, every frame: once the room survey is done, the defaults it
-// suggests for what the player hasn't placed yet, and the screen's glide.
+// suggests for what the player hasn't placed yet, and the screen's glide:
+// where room_fit found the stage and the screen fit; when the rays saw too
+// little for that, by the kind of place:
 //   desk:  the stage on the desk, within reach (today's desk scale, 0.0035);
 //          the screen as it is (0.7 m at 0.85 m);
 //   couch: seated with no desk ahead: the stage 0.007 at 1.4 m, 35 cm under
@@ -4594,13 +4734,19 @@ void room_survey_apply() {
   case Kind::Unknown:
     break;
   }
-  if (r.clearance > 0.f) {
+  if (r.fitted) {
+    scale = r.stageScale, dist = r.stageDist, y = r.stageY;
+  } else if (r.clearance > 0.f) {
     const float maxDist = r.clearance - (0.2f + 60.f * scale); // the stage's depth this side of it
     if (dist > maxDist) {
       const float f = std::max(maxDist, 0.5f) / dist;
       dist *= f;
       scale = std::max(scale * f, 0.0035f);
     }
+  }
+  if (r.screenFitted) {
+    screenD = r.screenDist, screenW = r.screenWidth;
+  } else if (r.clearance > 0.f) {
     const float maxScreen = r.clearance - 0.25f;
     if (screenD > maxScreen && screenD > 0.85f) {
       const float f = std::max(maxScreen, 0.85f) / screenD;
@@ -4611,20 +4757,23 @@ void room_survey_apply() {
   const auto clearance = r.clearance < 0.f ? std::string{"unknown"}
                          : r.clearance >= kRoomReach ? fmt::format("open past {:.0f} m", kRoomReach)
                                                      : fmt::format("{:.2f} m", r.clearance);
-  Log.info("Room survey: {}/{} rays seen; desk {}; floor {}; clear ahead {}: {}",
-           r.informed, r.rays,
+  const auto far = r.far < 0.f ? std::string{"unknown"}
+                   : r.far >= kRoomReach ? fmt::format("open past {:.0f} m", kRoomReach)
+                                         : fmt::format("{:.2f} m", r.far);
+  Log.info("Room survey: {}/{} rays seen, {} hits; desk {}; floor {}; clear ahead {}, the far wall {}: {}{}",
+           r.informed, r.rays, r.points,
            r.desk ? fmt::format("{:.2f} m under the eyes, {:.2f}-{:.2f} m out", r.headY - r.deskY, r.deskNear, r.deskFar)
                   : std::string{"none"},
            r.floor ? fmt::format("{:.2f} m under the eyes", r.headY - r.floorY) : std::string{"unknown"}, clearance,
-           room_kind_name(r.kind));
-  if (r.kind == Kind::Unknown)
+           far, room_kind_name(r.kind), r.fitted ? ", fitted" : "");
+  if (r.kind == Kind::Unknown && !r.fitted)
     return;
   const bool arenaEnv = std::getenv("AURORA_XR_ARENA_POS") || std::getenv("AURORA_XR_ARENA_SCALE");
   {
     std::lock_guard lock{g_arenaMutex};
     init_arena();
     if (!arenaEnv && !g_adoptedSet && g_stageArenas.empty() && g_stage < 0) {
-      g_defaultArena.pos = {0.f, y, -dist};
+      g_defaultArena.pos = r.fitted ? XrVector3f{r.head.x, y, r.head.z - dist} : XrVector3f{0.f, y, -dist};
       g_defaultArena.scale = scale;
       g_arena = g_defaultArena;
       g_arena.scale *= g_stageScale;
