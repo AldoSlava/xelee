@@ -2020,8 +2020,11 @@ static void neutralSpawnLog(int slot, int n, int stkind, const Vec3* v)
 }
 
 /* True with `v` filled when the Neutral Spawn rule decided where player i
- * starts. Only online (pc_net_deterministic: netplay and replay record/play),
- * only in VS, only when the match did not name a spawn point itself. */
+ * starts. Only online (pc_net_deterministic: netplay and replay record/play)
+ * and only in VS, but whatever spawn point the match named: the asm runs
+ * after retail has placed the fighter and overrides it (Slippi online's
+ * matches name points 0 and 1, and its replays still start on the neutral
+ * spots). */
 static bool neutralSpawn(int i, Vec3* v)
 {
     VsSceneController* tmp = &controller;
@@ -2031,8 +2034,7 @@ static bool neutralSpawn(int i, Vec3* v)
     /* The asm leaves retail spawns in Training (mode 0x1C) and Target Test
      * (0x0F); gm_IsCurrently1PMode covers the latter. */
     if (!pc_is_slippi_fixes_enabled() || gm_IsCurrently1PMode() ||
-        gm_GetCurrentGameMode() == GM_TRAINING || i >= 5 ||
-        tmp->state.fighters[i].spawn_point != -1 || tmp->start.is_teams == true)
+        gm_GetCurrentGameMode() == GM_TRAINING || i >= 5 || tmp->start.is_teams == true)
     {
         return false;
     }

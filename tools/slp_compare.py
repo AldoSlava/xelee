@@ -22,6 +22,9 @@ import slp_read  # noqa: E402
 INPUTS = ("joy_x", "joy_y", "c_x", "c_y", "trigger", "buttons")
 PRE_STATE = ("seed", "action", "x", "y", "facing", "percent")
 POST = tuple(name for name, _, _ in slp_read.POST_FIELDS)
+# Bits Dolphin's replays hold that the simulation never reads: flags5's
+# 0x80, offscreen, which the render pass writes (src/pc/slp.c capture_fighter).
+MASKS = {"flags5": 0x7F}
 
 
 def bits(v):
@@ -34,6 +37,8 @@ def diff(a, b, names):
         va, vb = a.get(n), b.get(n)
         if va is None or vb is None:
             continue
+        if n in MASKS:
+            va, vb = va & MASKS[n], vb & MASKS[n]
         if bits(va) != bits(vb):
             out.append((n, va, vb))
     return out
@@ -71,7 +76,13 @@ def compare(orig, play, context=0):
             if key not in fa["post"] or key not in fb["post"]:
                 found.append((key, "post", [("present", key in fa["post"], key in fb["post"])]))
                 continue
-            d = diff(fa["post"][key], fb["post"][key], POST)
+            names = POST
+            if not 75 <= (fa["post"][key]["action"] or 0) <= 91:
+                # misc_as is hitstun only in the damage states (DamageHi1 to
+                # DamageFlyRoll); in the others it is whatever that state keeps
+                # in its first motion variable.
+                names = tuple(n for n in POST if n != "misc_as")
+            d = diff(fa["post"][key], fb["post"][key], names)
             if d:
                 found.append((key, "state out", d))
         if found:

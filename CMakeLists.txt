@@ -45,7 +45,18 @@ add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
 # reach (AArch64 emits fmadd by default), no platform trig (see
 # src/pc/libm/pc_trig.h). aurora_mtx is C and used by collision, so it gets
 # the trig routing too; gx/gd only render.
-set(MELEE_FP_FLAGS -ffp-contract=off -fno-fast-math)
+# MELEE_FP_CONTRACT (off): an experiment's knob, never for a shipped build:
+# fast lets the compiler fuse a*b + c as mwcc did on the GameCube (x86-64
+# gets -mfma for it), to see how close that alone comes to Dolphin
+# (tools/slp_compare.py). Different values desync against each other.
+set(MELEE_FP_CONTRACT "off" CACHE STRING "Floating-point contraction for the simulation (off; fast is experimental)")
+set(MELEE_FP_FLAGS -ffp-contract=${MELEE_FP_CONTRACT} -fno-fast-math)
+if (NOT MELEE_FP_CONTRACT STREQUAL "off")
+    message(WARNING "MELEE_FP_CONTRACT=${MELEE_FP_CONTRACT}: an experimental build that desyncs against the others")
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        list(APPEND MELEE_FP_FLAGS -mfma)
+    endif ()
+endif ()
 target_compile_options(aurora_mtx PRIVATE ${MELEE_FP_FLAGS}
         -fno-builtin-sinf -fno-builtin-cosf -fno-builtin-tanf -fno-builtin-atanf
         -include ${CMAKE_CURRENT_SOURCE_DIR}/src/pc/libm/pc_trig.h)
