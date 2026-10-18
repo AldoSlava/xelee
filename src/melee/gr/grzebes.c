@@ -2045,7 +2045,7 @@ bool grZebes_801DBB60(Item_GObj* yaku)
             dy = y2 - y1;
             dx = x2 - x1;
             width = 1.0f;
-            inv_len_sq = 1.0f / (dx * dx + dy * dy);
+            inv_len_sq = 1.0f / (gk_fmadds(dx, dx, dy * dy));
 
             for (k = 0; k < 20; bubbles++, k++) {
                 if (bubbles->x00_active == 1 && k != 0 && k != 6) {
@@ -2053,10 +2053,10 @@ bool grZebes_801DBB60(Item_GObj* yaku)
                     f32 bx = bubbles->x08_x;
                     f32 dpx = by - y1;
                     f32 dpy = bx - x1;
-                    f32 t = inv_len_sq * (dx * dpy + dy * dpx);
+                    f32 t = inv_len_sq * (gk_fmadds(dx, dpy, dy * dpx));
 
                     if (t < 0.0f) {
-                        bx = dpy * dpy + dpx * dpx;
+                        bx = gk_fmadds(dpy, dpy, dpx * dpx);
                     } else if (t > 1.0f) {
                         dpx = bx - x2;
                         dpy = grZebes_Subtract(by, y2);
@@ -2064,8 +2064,8 @@ bool grZebes_801DBB60(Item_GObj* yaku)
                         dpx = dpy * dpy;
                         bx = by + dpx;
                     } else {
-                        dpx = (dx * t + x1) - bx;
-                        dpy = (dy * t + y1) - by;
+                        dpx = (gk_fmadds(dx, t, x1)) - bx;
+                        dpy = (gk_fmadds(dy, t, y1)) - by;
                         by = dpx * dpx;
                         dpx = dpy * dpy;
                         bx = by + dpx;
@@ -2074,7 +2074,7 @@ bool grZebes_801DBB60(Item_GObj* yaku)
                     bx = sqrtf(bx);
 
                     {
-                        if ((f32) (2.0 * (f64) bubbles->x18_size + (f64) bx) >
+                        if ((f32) (gk_fmadd(2.0, (f64) bubbles->x18_size, (f64) bx)) >
                             width)
                         {
                             f32 new_width;
@@ -2086,20 +2086,19 @@ bool grZebes_801DBB60(Item_GObj* yaku)
                                 t = sqrtf(dpx2 + dpy2);
                                 new_width =
                                     (f32) (0.5 *
-                                           (2.0 * (f64) bubbles->x18_size +
-                                            (f64) (t + width)));
+                                           (gk_fmadd(2.0, (f64) bubbles->x18_size, (f64) (t + width))));
                                 if (t > 0.001f) {
                                     dpx2 = (new_width - width) / t;
-                                    x1 += dpx2 * (bubbles->x08_x - x1);
-                                    y1 += dpx2 * (bubbles->x0C_y - y1);
+                                    x1 = gk_fmadds(dpx2, (bubbles->x08_x - x1), x1);
+                                    y1 = gk_fmadds(dpx2, (bubbles->x0C_y - y1), y1);
                                 }
                                 dpy2 = y1 - y2;
                                 dpx2 = x1 - x2;
                                 t = (new_width - width) /
-                                    sqrtf(dpx2 * dpx2 + dpy2 * dpy2);
+                                    sqrtf(gk_fmadds(dpx2, dpx2, dpy2 * dpy2));
                                 width = new_width;
-                                x2 += dpx2 * t;
-                                y2 += dpy2 * t;
+                                x2 = gk_fmadds(dpx2, t, x2);
+                                y2 = gk_fmadds(dpy2, t, y2);
                             } else {
                                 f32 dpx2 = bubbles->x08_x - x2;
                                 f32 dpy2 = bubbles->x0C_y - y2;
@@ -2109,26 +2108,25 @@ bool grZebes_801DBB60(Item_GObj* yaku)
                                 {
                                     f32 calculated_width =
                                         (f32) (0.5 *
-                                               (2.0 * (f64) bubbles->x18_size +
-                                                (f64) (t + width)));
+                                               (gk_fmadd(2.0, (f64) bubbles->x18_size, (f64) (t + width))));
                                     new_width = calculated_width;
                                 }
                                 if (t > 0.001f) {
                                     dpx2 = (new_width - width) / t;
-                                    x2 += dpx2 * (bubbles->x08_x - x2);
-                                    y2 += dpx2 * (bubbles->x0C_y - y2);
+                                    x2 = gk_fmadds(dpx2, (bubbles->x08_x - x2), x2);
+                                    y2 = gk_fmadds(dpx2, (bubbles->x0C_y - y2), y2);
                                 }
                                 dpy2 = y2 - y1;
                                 dpx2 = x2 - x1;
                                 t = (new_width - width) /
-                                    sqrtf(dpx2 * dpx2 + dpy2 * dpy2);
+                                    sqrtf(gk_fmadds(dpx2, dpx2, dpy2 * dpy2));
                                 width = new_width;
-                                x1 += dpx2 * t;
-                                y1 += dpy2 * t;
+                                x1 = gk_fmadds(dpx2, t, x1);
+                                y1 = gk_fmadds(dpy2, t, y1);
                             }
                             dy = y2 - y1;
                             dx = x2 - x1;
-                            inv_len_sq = 1.0f / (dx * dx + dy * dy);
+                            inv_len_sq = 1.0f / (gk_fmadds(dx, dx, dy * dy));
                         }
                     }
                 }

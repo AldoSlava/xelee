@@ -15,8 +15,8 @@ typedef jmp_t jtbl_t[];
  * (pc/gekko_fp.h). */
 #include <dolphin/ppc_math.h>
 #define __frsqrte(x) frsqrte(x)
-#define sqrtf__Ff(x) gk_sqrtf_call(x)
-#define sqrtf_accurate(x) gk_sqrtf_accurate(x)
+#define sqrtf__Ff gk_sqrtf_call
+#define sqrtf_accurate gk_sqrtf_accurate
 #define __fabs(f) fabsf(f)
 #endif
 

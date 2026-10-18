@@ -2978,7 +2978,11 @@ static inline float sqrtf_store(float x, volatile float* y)
     return x;
 }
 #else
-#define sqrtf_store(x, y) sqrtf(x)
+static inline float sqrtf_store(float x, volatile float* y)
+{
+    (void) y;
+    return sqrtf(x);
+}
 #endif
 
 /// @todo replace with fog.h inlines

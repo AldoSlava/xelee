@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Lift.h"
 
 #include <Runtime/platform.h>
@@ -147,7 +148,7 @@ void ftCo_LiftTurn_Anim(HSD_GObj* gobj)
     fp->mv.co.lift.x4 -= 1;
     if (!fp->x2222_b6) {
         float angle =
-            MTXDegToRad(180 / p_ftCommonData->x230) + ftPartGetRotZ(fp, part);
+            gk_fmadds((180 / p_ftCommonData->x230), 0.01745329252f, ftPartGetRotZ(fp, part));
         ftPartSetRotY(fp, part, angle);
         HSD_JObjSetRotationY(jobj, angle);
     }

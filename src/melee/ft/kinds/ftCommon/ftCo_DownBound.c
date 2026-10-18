@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_DownBound.h"
 
 #include <Runtime/platform.h>
@@ -77,7 +78,7 @@ void ftCo_800976A4(Fighter_GObj* gobj)
     Vec3 vec0;
     vel_x = fp->self_vel.x + fp->x8c_kb_vel.x;
     vel_y = fp->self_vel.y + fp->x8c_kb_vel.y;
-    dist = sqrtf(SQ(vel_x) + SQ(vel_y));
+    dist = sqrtf(gk_fmadds((vel_x), (vel_x), SQ(vel_y)));
     ftCo_800976A4_inline(fp, &dist);
     ef_id = 1031;
     arg2 = 1;

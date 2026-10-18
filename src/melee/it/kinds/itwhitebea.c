@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itwhitebea.h"
 
 #include <math.h> // IWYU pragma: keep
@@ -259,7 +260,7 @@ bool it_802E35CC(Item_GObj* gobj)
         dx = pos->x - sp30.x;
         dy = pos->y - sp30.y;
         dz = pos->z - sp30.z;
-        dist = sqrtf__Ff(dx * dx + dy * dy + dz * dz);
+        dist = sqrtf__Ff(gk_fmadds(dz, dz, gk_fmadds(dx, dx, dy * dy)));
         if (dist > attrs->x18) {
             it_8028ECE0(ip->xDD4_itemVar.whitebea.x20);
             it_802E37A4(gobj);

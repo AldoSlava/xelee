@@ -511,7 +511,7 @@ void ftPk_SpecialHi_80126C0C(HSD_GObj* gobj)
 
             // set ground velocity to (zip_slope * stick_mag) + zip_intercept
             // and then flip based on facing direction
-            fp->gr_vel = (pika_attr->x90 * stick_mag) + pika_attr->x94;
+            fp->gr_vel = gk_fmadds(pika_attr->x90, stick_mag, pika_attr->x94);
             fp->gr_vel *= fp->facing_dir;
 
             // if second zip
@@ -595,10 +595,10 @@ void ftPk_SpecialHi_80126E1C(HSD_GObj* gobj)
 
     // compute velocity as (zip slope * stick_mag) + zip intercept
     // x velocity is the same but flips based on facing direction
-    temp_f2_2 = ((pika_attr->x90 * final_stick_mag) + pika_attr->x94) *
+    temp_f2_2 = (gk_fmadds(pika_attr->x90, final_stick_mag, pika_attr->x94)) *
                 cosf(some_angle);
     fp->self_vel.x = fp->facing_dir * temp_f2_2;
-    fp->self_vel.y = ((pika_attr->x90 * final_stick_mag) + pika_attr->x94) *
+    fp->self_vel.y = (gk_fmadds(pika_attr->x90, final_stick_mag, pika_attr->x94)) *
                      sinf(some_angle);
 
     // if second zip

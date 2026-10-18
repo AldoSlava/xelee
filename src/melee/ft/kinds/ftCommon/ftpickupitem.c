@@ -124,7 +124,7 @@ Item_GObj* ftpickupitem_800942A0(Fighter_GObj* gobj, u32 flags)
                             {
                                 float x1 = vec->z;
                                 float x0 =
-                                    fp->facing_dir * vec->x + fp->cur_pos.x;
+                                    gk_fmadds(fp->facing_dir, vec->x, fp->cur_pos.x);
                                 float y0 = fp->cur_pos.y + vec->y;
                                 float y1 = vec->w;
                                 if (x0 - x1 - x_range < it_pos.x &&
@@ -134,7 +134,7 @@ Item_GObj* ftpickupitem_800942A0(Fighter_GObj* gobj, u32 flags)
                                 {
                                     float y_diff = it_pos.y - y0;
                                     float x_diff = it_pos.x - x0;
-                                    float dist_sq = SQ(x_diff) + SQ(y_diff);
+                                    float dist_sq = gk_fmadds((x_diff), (x_diff), SQ(y_diff));
                                     if (dist_sq < min_dist_sq) {
                                         result = cur;
                                         min_dist_sq = dist_sq;

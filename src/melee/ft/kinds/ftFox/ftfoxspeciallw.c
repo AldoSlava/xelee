@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftfoxspeciallw.h"
 
 #include <Runtime/platform.h>
@@ -472,8 +473,7 @@ static void ftFx_SpecialLw_Turn(HSD_GObj* gobj)
         fp->facing_dir = -fp->facing_dir;
     }
     ftPartSetRotY(fp, 0,
-                  -(MTXDegToRad(180 / da->x9C_FOX_REFLECTOR_TURN_FRAMES) -
-                    ftPartGetRotZ(fp, 0)));
+                  -(gk_fmsubs((180 / da->x9C_FOX_REFLECTOR_TURN_FRAMES), 0.01745329252f, ftPartGetRotZ(fp, 0))));
 }
 
 void ftFx_SpecialLwTurn_Anim(HSD_GObj* gobj)

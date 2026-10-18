@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_FlyReflect.h"
 
 #include <placeholder.h>
@@ -189,8 +190,7 @@ void ftCo_800C18A8(Fighter_GObj* gobj, ftCommon_MotionState msid, Vec3* normal,
                                   Ft_MF_SkipHitStun,
                               0, 1, 0, NULL);
     if (msid == ftCo_MS_FlyReflectWall) {
-        fp->cur_pos.x = -(fp->x68C_transNPos.z * -fp->facing_dir -
-                          (fp->cur_pos.x + offset->x));
+        fp->cur_pos.x = -(gk_fmsubs(fp->x68C_transNPos.z, -fp->facing_dir, (fp->cur_pos.x + offset->x)));
         ft_80081F2C(gobj);
     } else {
         fp->cur_pos.y = fp->x68C_transNPos.y + (fp->cur_pos.y + offset->y);
@@ -202,7 +202,7 @@ void ftCo_800C18A8(Fighter_GObj* gobj, ftCommon_MotionState msid, Vec3* normal,
     {
         float vel_x = fp->self_vel.x + fp->x8c_kb_vel.x;
         float vel_y = fp->self_vel.y + fp->x8c_kb_vel.y;
-        float mag = sqrtf(SQ(vel_x) + SQ(vel_y));
+        float mag = sqrtf(gk_fmadds((vel_x), (vel_x), SQ(vel_y)));
         ftCo_80097630(fp, ftCo_DownBound_SfxIds, mag * fp->co_attrs.weight);
     }
 }

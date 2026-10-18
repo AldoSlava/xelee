@@ -60,7 +60,7 @@ void ftSk_SpecialS_80110490(Fighter* fp)
         v5 += 360;
     }
 
-    v6 = v5 * COMMON_DATA_F32[275] + fp->mv.sk.specials.x18;
+    v6 = gk_fmadds(v5, COMMON_DATA_F32[275], fp->mv.sk.specials.x18);
 
     if (v6 > 360) {
         v6 -= 360;
@@ -77,8 +77,7 @@ void ftSk_SpecialS_80110490(Fighter* fp)
         v8 = 1;
     }
 
-    fp->mv.sk.specials.x14 +=
-        COMMON_DATA_F32[275] * (v8 - fp->mv.sk.specials.x14);
+    fp->mv.sk.specials.x14 = gk_fmadds(COMMON_DATA_F32[275], (v8 - fp->mv.sk.specials.x14), fp->mv.sk.specials.x14);
 }
 
 void ftSk_SpecialS_80110610(HSD_GObj* gobj, s32 arg1, float arg2)

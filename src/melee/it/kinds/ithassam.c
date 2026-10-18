@@ -252,7 +252,7 @@ bool itHassam_UnkMotion1_Anim(Item_GObj* gobj)
         jobj = (HSD_JObj*) gobj->hsd_obj;
 
         ip->xDD4_itemVar.hassam.x68 = HSD_JObjGetRotationY(gobj->hsd_obj);
-        ip->xDD4_itemVar.hassam.x68 += MTXDegToRad(180 / attr->x20);
+        ip->xDD4_itemVar.hassam.x68 = gk_fmadds((180 / attr->x20), 0.01745329252f, ip->xDD4_itemVar.hassam.x68);
         HSD_JObjSetRotationY(jobj, ip->xDD4_itemVar.hassam.x68);
 
         if (++ip->xDB0_itcmd_var1 > (u32) attr->x20) {

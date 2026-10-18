@@ -138,14 +138,14 @@ void lbBgFlash_80020E38(HSD_JObj* jobj, Vec3* dir, f32 max_angle,
     z_col_y = jobj->mtx[1][2];
     z_col_x = jobj->mtx[0][2];
     z_col_z = jobj->mtx[2][2];
-    z_col_x = SQ(z_col_x) + SQ(z_col_y);
+    z_col_x = gk_fmadds((z_col_x), (z_col_x), SQ(z_col_y));
     mag_sq = z_col_x;
-    mag_sq = SQ(z_col_z) + mag_sq;
+    mag_sq = gk_fmadds((z_col_z), (z_col_z), mag_sq);
     if (mag_sq > 0.0f) {
         f64 e = __frsqrte(mag_sq);
-        e = 0.5 * e * -(((f64) mag_sq * (e * e)) - 3.0);
-        e = 0.5 * e * -(((f64) mag_sq * (e * e)) - 3.0);
-        e = 0.5 * e * -(((f64) mag_sq * (e * e)) - 3.0);
+        e = 0.5 * e * -(gk_fmsub((f64) mag_sq, (e * e), 3.0));
+        e = 0.5 * e * -(gk_fmsub((f64) mag_sq, (e * e), 3.0));
+        e = 0.5 * e * -(gk_fmsub((f64) mag_sq, (e * e), 3.0));
         tmp = (f32) ((f64) mag_sq * e);
         mag_sq = tmp;
     }

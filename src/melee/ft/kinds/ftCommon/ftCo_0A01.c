@@ -873,7 +873,7 @@ f32 ftCo_800A1AB4(Fighter* fp0, Fighter* fp1)
 {
     float dx = fp0->cur_pos.x - fp1->cur_pos.x;
     float dy = fp0->cur_pos.y - fp1->cur_pos.y;
-    return sqrtf(SQ(dx) + SQ(dy));
+    return sqrtf(gk_fmadds((dx), (dx), SQ(dy)));
 }
 
 bool ftCo_800A1B38_noinline(enum_t arg0);
@@ -1426,11 +1426,11 @@ float ftCo_800A2A70(Fighter* fp, bool arg1)
             if (arg1) {
                 float x = data->x8.x - fp->cur_pos.x,
                       y = data->x8.y - fp->cur_pos.y;
-                r = sqrtf(SQ(x) + SQ(y));
+                r = sqrtf(gk_fmadds((x), (x), SQ(y)));
             } else {
                 float x = data->x14.x - fp->cur_pos.x,
                       y = data->x14.y - fp->cur_pos.y;
-                r = sqrtf(SQ(x) + SQ(y));
+                r = sqrtf(gk_fmadds((x), (x), SQ(y)));
             }
             return r;
         }
@@ -1831,7 +1831,7 @@ bool ftCo_800A3554(Fighter* fp, float arg1)
     }
     {
         float x = data->x54.x - fp->cur_pos.x, y = data->x54.y - fp->cur_pos.y;
-        if (sqrtf(SQ(x) + SQ(y)) < data->x38 + arg1) {
+        if (sqrtf(gk_fmadds((x), (x), SQ(y))) < data->x38 + arg1) {
             if (data->x60 != 0) {
                 data->x60 = 0;
                 data->x54.x = data->x64.x;
@@ -1942,7 +1942,11 @@ static inline float sqrtf_store(float x, volatile float* y)
     return x;
 }
 #else
-#define sqrtf_store(x, y) sqrtf(x)
+static inline float sqrtf_store(float x, volatile float* y)
+{
+    (void) y;
+    return sqrtf(x);
+}
 #endif
 
 static inline bool ftCo_800A3908_inline0(Fighter* fp, struct CpuFighter* data,
@@ -2043,22 +2047,20 @@ bool ftCo_800A3908(Fighter* fp, bool arg1)
 
             t = dx / fp->co_attrs.air_drift_max;
             if (frames <= 0) {
-                dist = fp->pos_delta.y * t + fp->cur_pos.y;
+                dist = gk_fmadds(fp->pos_delta.y, t, fp->cur_pos.y);
             } else if (t < frames) {
                 volatile f32 sqrt_time_store;
 
                 dist = fp->cur_pos.y +
-                       (fp->pos_delta.y * t -
-                        0.5 * (fp->co_attrs.gravity *
-                               sqrtf_store((f32) t, &sqrt_time_store)));
+                       (gk_fnmsub(0.5, (fp->co_attrs.gravity *
+                               sqrtf_store((f32) t, &sqrt_time_store)), fp->pos_delta.y * t));
             } else {
                 volatile f32 sqrt_terminal_store;
 
                 dist = fp->cur_pos.y +
-                       ((fp->pos_delta.y * frames -
-                         0.5 * (fp->co_attrs.gravity *
+                       ((gk_fnmsub(0.5, (fp->co_attrs.gravity *
                                 sqrtf_store((f32) frames,
-                                            &sqrt_terminal_store))) -
+                                            &sqrt_terminal_store)), fp->pos_delta.y * frames)) -
                         (f32) (t - frames) * ftCo_GetTerminalVelocity(fp));
             }
             if (arg1 != 0) {
@@ -2106,7 +2108,7 @@ bool ftCo_800A3908(Fighter* fp, bool arg1)
                     volatile f32 sqrt_dist_store;
 
                     PAD_STACK(8);
-                    dist = sqrtf_store(ex * ex + ddy * ddy, &sqrt_dist_store);
+                    dist = sqrtf_store(gk_fmadds(ex, ex, ddy * ddy), &sqrt_dist_store);
                     if (data->x5C > dist) {
                         ftCo_800A75DC_set_target(fp, &fp->cpu.x60, px, ey,
                                                  5.0f);
@@ -2211,22 +2213,20 @@ bool ftCo_800A4038(Fighter* fp, bool arg1)
         if (dx > 0.0f) {
             t = dx / fp->co_attrs.air_drift_max;
             if (frames <= 0) {
-                dist = fp->pos_delta.y * t + fp->cur_pos.y;
+                dist = gk_fmadds(fp->pos_delta.y, t, fp->cur_pos.y);
             } else if (t < frames) {
                 volatile f32 sqrt_time_store;
 
                 dist = fp->cur_pos.y +
-                       (fp->pos_delta.y * t -
-                        0.5 * (fp->co_attrs.gravity *
-                               sqrtf_store((f32) t, &sqrt_time_store)));
+                       (gk_fnmsub(0.5, (fp->co_attrs.gravity *
+                               sqrtf_store((f32) t, &sqrt_time_store)), fp->pos_delta.y * t));
             } else {
                 volatile f32 sqrt_terminal_store;
 
                 dist = fp->cur_pos.y +
-                       ((fp->pos_delta.y * frames -
-                         0.5 * (fp->co_attrs.gravity *
+                       ((gk_fnmsub(0.5, (fp->co_attrs.gravity *
                                 sqrtf_store((f32) frames,
-                                            &sqrt_terminal_store))) -
+                                            &sqrt_terminal_store)), fp->pos_delta.y * frames)) -
                         (f32) (t - frames) * ftCo_GetTerminalVelocity(fp));
             }
             if (arg1 != 0) {
@@ -2273,7 +2273,7 @@ bool ftCo_800A4038(Fighter* fp, bool arg1)
                     volatile f32 sqrt_dist_store;
 
                     PAD_STACK(8);
-                    dist = sqrtf_store(ex * ex + ddy * ddy, &sqrt_dist_store);
+                    dist = sqrtf_store(gk_fmadds(ex, ex, ddy * ddy), &sqrt_dist_store);
                     if (data->x5C > dist) {
                         ftCo_800A75DC_set_target(fp, &fp->cpu.x60, px, ey,
                                                  5.0f);
@@ -2530,13 +2530,13 @@ Fighter* ftCo_800A4E8C(Fighter* fp, Vec3* arg1)
                             dy = cur_fp->cur_pos.y - arg1->y;
                             dx = distance;
                             dz = cur_fp->cur_pos.z - arg1->z;
-                            closest = sqrtf__Ff(dz * dz + (dx * dx + dy * dy));
+                            closest = sqrtf__Ff(gk_fmadds(dz, dz, (gk_fmadds(dx, dx, dy * dy))));
                         } else {
                             dx = cur_fp->cur_pos.x - arg1->x;
                             dz = cur_fp->cur_pos.z - arg1->z;
                             dy = cur_fp->cur_pos.y - arg1->y;
                             distance =
-                                sqrtf__Ff(dz * dz + (dx * dx + dy * dy));
+                                sqrtf__Ff(gk_fmadds(dz, dz, (gk_fmadds(dx, dx, dy * dy))));
                             if (closest > distance) {
                                 closest = distance;
                                 closest_fp = cur_fp;
@@ -4476,6 +4476,7 @@ static inline bool ftCo_IsNearlyZero(float x)
     return false;
 }
 
+#ifdef __MWERKS__
 #define ftCo_800A9904_sqrtf_store(dst, x, store)                              \
     do {                                                                      \
         if (x > 0.0f) {                                                       \
@@ -4489,6 +4490,18 @@ static inline bool ftCo_IsNearlyZero(float x)
             dst = x;                                                          \
         }                                                                     \
     } while (0)
+#else
+/* MSL's sqrtf as the DOL computes it: the Newton steps fused (gk_sqrtf) */
+#define ftCo_800A9904_sqrtf_store(dst, x, store)                                                  \
+    do {                                                                      \
+        if (x > 0.0f) {                                                       \
+            store = gk_sqrtf(x);                                              \
+            dst = *(f32*) &store;                                                \
+        } else {                                                              \
+            dst = x;                                                          \
+        }                                                                     \
+    } while (0)
+#endif
 
 void ftCo_800A9904(Fighter* fp)
 {
@@ -4539,22 +4552,20 @@ void ftCo_800A9904(Fighter* fp)
                 -(-fp->co_attrs.terminal_velocity - fp->pos_delta.y) / gravity;
         }
         if (terminal_time <= 0.0F) {
-            predicted_y = (fp->pos_delta.y * x_time) + fp->cur_pos.y;
+            predicted_y = gk_fmadds(fp->pos_delta.y, x_time, fp->cur_pos.y);
         } else if (x_time < terminal_time) {
             ftCo_800A9904_sqrtf_store(sqrt_time, x_time, sqrt_time_store);
-            predicted_y = fp->cur_pos.y + (fp->pos_delta.y * x_time -
-                                           0.5 * (*grav_p * sqrt_time));
+            predicted_y = fp->cur_pos.y + (gk_fnmsub(0.5, (*grav_p * sqrt_time), fp->pos_delta.y * x_time));
         } else {
             ftCo_800A9904_sqrtf_store(sqrt_terminal, terminal_time,
                                       sqrt_terminal_store);
             predicted_y =
                 fp->cur_pos.y +
-                (fp->pos_delta.y * terminal_time -
-                 0.5 * (*grav_p * sqrt_terminal) -
+                (gk_fnmsub(0.5, (*grav_p * sqrt_terminal), fp->pos_delta.y * terminal_time) -
                  ((x_time - terminal_time) * ftCo_GetTerminalVelocity(fp)));
         }
         {
-            int stick = 4.7000003F * (data->level + 1) + 80.0f;
+            int stick = gk_fmadds(4.7000003F, (data->level + 1), 80.0f);
             if (x_time < 0.0 || predicted_y < data->x54.y) {
                 ftCo_800B46B8(fp, CpuCmd_LstickXTowardDestination, stick);
             } else {
@@ -4576,6 +4587,7 @@ void ftCo_800A9904(Fighter* fp)
 
 #undef ftCo_800A9904_sqrtf_store
 
+#ifdef __MWERKS__
 #define ftCo_800A9CB4_sqrtf_store(dst, x, store)                              \
     do {                                                                      \
         if (x > 0.0f) {                                                       \
@@ -4589,6 +4601,18 @@ void ftCo_800A9904(Fighter* fp)
             dst = x;                                                          \
         }                                                                     \
     } while (0)
+#else
+/* MSL's sqrtf as the DOL computes it: the Newton steps fused (gk_sqrtf) */
+#define ftCo_800A9CB4_sqrtf_store(dst, x, store)                                                  \
+    do {                                                                      \
+        if (x > 0.0f) {                                                       \
+            store = gk_sqrtf(x);                                              \
+            dst = store;                                                \
+        } else {                                                              \
+            dst = x;                                                          \
+        }                                                                     \
+    } while (0)
+#endif
 
 static inline enum_t ftCo_800A9CB4_inline0(Fighter* fp)
 {
@@ -4724,19 +4748,18 @@ void ftCo_800A9CB4(Fighter* fp)
             -(-fp->co_attrs.terminal_velocity - fp->pos_delta.y) / gravity;
     }
     if (terminal_time <= 0.0f) {
-        y_pos = (fp->pos_delta.y * x_time) + fp->cur_pos.y;
+        y_pos = gk_fmadds(fp->pos_delta.y, x_time, fp->cur_pos.y);
     } else if (x_time < terminal_time) {
         ftCo_800A9CB4_sqrtf_store(sqrt_x_time, x_time, sqrt_x_time_store);
         y_pos = fp->cur_pos.y +
-                (fp->pos_delta.y * x_time - 0.5 * (*grav_p * sqrt_x_time));
+                (gk_fnmsub(0.5, (*grav_p * sqrt_x_time), fp->pos_delta.y * x_time));
     } else {
         ftCo_800A9CB4_sqrtf_store(sqrt_term_time, terminal_time,
                                   sqrt_terminal_time_store);
         sqrt_x_time = *grav_p;
         x_delta_abs = x_time - terminal_time;
         y_pos =
-            fp->cur_pos.y + (fp->pos_delta.y * terminal_time -
-                             0.5 * (sqrt_x_time * sqrt_term_time) -
+            fp->cur_pos.y + (gk_fnmsub(0.5, (sqrt_x_time * sqrt_term_time), fp->pos_delta.y * terminal_time) -
                              (x_delta_abs * fp->co_attrs.terminal_velocity));
     }
     if (x_time < 0.0) {
@@ -7491,14 +7514,14 @@ bool ftCo_800B0E98(Fighter* fp0, Fighter* fp1)
             float x = fp0->pos_delta.x - fp1->pos_delta.x,
                   y = fp0->pos_delta.y - fp1->pos_delta.y,
                   r = fp0->co_attrs.mid_walk_point;
-            if (SQ(x) + SQ(y) > SQ(r)) {
+            if (gk_fmadds((x), (x), SQ(y)) > SQ(r)) {
                 return false;
             }
         }
         {
             float x = fp0->cur_pos.x - fp1->cur_pos.x,
                   y = fp1->cur_pos.y - fp0->cur_pos.y;
-            if (SQ(x) + SQ(y) < SQ(25.0)) {
+            if (gk_fmadds((x), (x), SQ(y)) < SQ(25.0)) {
                 return true;
             }
         }
@@ -7525,7 +7548,7 @@ static inline bool ftCo_800B101C_inline0(Fighter* fp, Fighter* other)
     } else {
         float dx = fp->cur_pos.x - other->cur_pos.x;
         float dy = other->cur_pos.y - fp->cur_pos.y;
-        if (SQ(dx) + SQ(dy) > SQ(25.0)) {
+        if (gk_fmadds((dx), (dx), SQ(dy)) > SQ(25.0)) {
             return true;
         } else if (ftCo_800B0CA8(fp, other)) {
             return false;

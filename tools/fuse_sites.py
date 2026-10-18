@@ -19,7 +19,8 @@ build/linux/compile_commands.json. Without --apply it only reports.
 
 The rewrite follows what the DOL shows mwcc doing:
   a*b + c, c + a*b    fmadds(a, b, c)
-  a*b + c*d           fmadds(a, b, c*d)    the first product fused
+  a*b + c*d           fmadds(a, b, c*d)    the first product fused, when a and b
+                                           are plain variables (not members, elements)
   a*b - c             fmsubs(a, b, c)      (a*b - c*d likewise)
   c - a*b             fnmsubs(a, b, c)
   -(a*b) + c          fnmsubs(a, b, c)     (c + -(a*b) likewise)
@@ -30,6 +31,7 @@ in float (the s forms) or double, never across a change of precision.
 """
 import argparse
 import collections
+import ctypes
 import json
 import os
 import re
@@ -134,20 +136,87 @@ def fp(c):
     return "single" if s == "float" else "double" if s == "double" else None
 
 
+# libclang 17 on has the operators' kinds (the Python bindings may not):
+# inside a macro (SQ(x)) the operands' extents are the whole expansion, so
+# the text between them says nothing.
+_BINOPS = ["", ".*", "->*", "*", "/", "%", "+", "-", "<<", ">>", "<=>", "<", ">", "<=", ">=", "==", "!=",
+           "&", "^", "|", "&&", "||", "=", "*=", "/=", "%=", "+=", "-=", "<<=", ">>=", "&=", "^=", "|=", ","]
+_UNOPS = ["", "++", "--", "++", "--", "&", "*", "+", "-", "~", "!"]
+_binop_kind = _unop_kind = None
+
+
+def _op_kinds():
+    global _binop_kind, _unop_kind
+    if _binop_kind is None:
+        try:
+            _binop_kind = ci.conf.lib.clang_getCursorBinaryOperatorKind
+            _binop_kind.argtypes, _binop_kind.restype = [ci.Cursor], ctypes.c_int
+            _unop_kind = ci.conf.lib.clang_getCursorUnaryOperatorKind
+            _unop_kind.argtypes, _unop_kind.restype = [ci.Cursor], ctypes.c_int
+        except AttributeError:
+            _binop_kind = _unop_kind = False
+    return _binop_kind, _unop_kind
+
+
 def op_of(c, src):
-    """A binary or compound operator's spelling: the text between its operands."""
+    """A binary or compound operator's spelling."""
     kids = list(c.get_children())
     if len(kids) != 2:
         return None
+    binop, _ = _op_kinds()
+    if binop and c.kind in (ci.CursorKind.BINARY_OPERATOR, ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR):
+        k = binop(c)
+        return _BINOPS[k] if 0 < k < len(_BINOPS) else None
     a, b = kids
     if a.extent.end.offset > b.extent.start.offset:
         return None
     return src[a.extent.end.offset:b.extent.start.offset].strip() or None
 
 
+def unop_of(c, src):
+    """A unary operator's spelling."""
+    _, unop = _op_kinds()
+    if unop:
+        k = unop(c)
+        return _UNOPS[k] if 0 < k < len(_UNOPS) else None
+    kids = list(c.get_children())
+    return src[c.extent.start.offset:kids[0].extent.start.offset].strip() if kids else None
+
+
+def _locals_only(m):
+    """A product of plain variables (no member, element or call)."""
+    for k in strip(m).get_children():
+        k = strip(k)
+        if k.kind != ci.CursorKind.DECL_REF_EXPR:
+            return False
+    return True
+
+
+def _overlap(a, b):
+    return a.extent.end.offset > b.extent.start.offset
+
+
+def mul_operands(m, src):
+    """A product's two operands to write out: cursors, or text where it came
+    from SQ(x); None where a macro hides them."""
+    a, c = list(strip(m).get_children())
+    if (a.extent.start.offset, a.extent.end.offset) != (c.extent.start.offset, c.extent.end.offset):
+        return a, c
+    text = src[a.extent.start.offset:a.extent.end.offset].strip()
+    t = re.fullmatch(r"SQ\((.*)\)", text, re.S)
+    if t:
+        return f"({t.group(1)})", f"({t.group(1)})"
+    # the SDK's degree and radian conversions: (a) * a constant
+    t = re.fullmatch(r"MTX(DegToRad|RadToDeg)\((.*)\)", text, re.S)
+    if t:
+        return f"({t.group(2)})", "0.01745329252f" if t.group(1) == "DegToRad" else "57.29577951f"
+    return None
+
+
 class Site:
     def __init__(self, node, kind, prec, a, c, b, assign=None):
         self.node, self.kind, self.prec, self.a, self.c, self.b, self.assign = node, kind, prec, a, c, b, assign
+        self.hidden = False  # inside a macro the source cannot say what to write: counted only
 
 
 def is_mul(n, src, prec):
@@ -156,13 +225,12 @@ def is_mul(n, src, prec):
 
 
 def neg_mul(n, src, prec):
-    """-(a*b): the product's two operands, or None."""
+    """-(a*b): the product, or None."""
     n = strip(n)
     kids = list(n.get_children())
-    if n.kind != ci.CursorKind.UNARY_OPERATOR or len(kids) != 1 or \
-            src[n.extent.start.offset:kids[0].extent.start.offset].strip() != "-":
+    if n.kind != ci.CursorKind.UNARY_OPERATOR or len(kids) != 1 or unop_of(n, src) != "-":
         return None
-    return list(strip(kids[0]).get_children()) if is_mul(kids[0], src, prec) else None
+    return kids[0] if is_mul(kids[0], src, prec) else None
 
 
 def find_sites(fn, src, path):
@@ -176,25 +244,40 @@ def find_sites(fn, src, path):
             return
         prec = fp(n)
         k = n.kind
+
+        def add(node, kind, mul, b, assign=None):
+            ops = mul_operands(mul, src)
+            # the sum's own operands overlap where a macro wrote it
+            hidden = ops is None or (len(list(node.get_children())) == 2 and
+                                     op_of(node, src) is not None and
+                                     not isinstance(b, str) and
+                                     _overlap(*list(node.get_children())))
+            a, c = ops if ops else (None, None)
+            st = Site(node, kind, prec, a, c, b, assign)
+            st.hidden = hidden
+            sites.append(st)
+
         if prec and k == ci.CursorKind.BINARY_OPERATOR and op_of(n, src) in ("+", "-"):
             l, r = list(n.get_children())
             op = op_of(n, src)
             # -(a*b + c): the negation is fused too
             neg = parent is not None and parent.kind == ci.CursorKind.UNARY_OPERATOR and \
-                src[parent.extent.start.offset:n.extent.start.offset].strip().rstrip("(").strip() == "-"
-            if is_mul(l, src, prec):
-                m = list(strip(l).get_children())
+                unop_of(parent, src) == "-"
+            if is_mul(l, src, prec) and is_mul(r, src, prec) and not _locals_only(l):
+                # a*b + c*d: the DOL fuses the first product where its operands
+                # are values in registers (x*x + y*y of two locals, 0x800B0FB8)
+                # and not where they come from memory (the C-stick's squared
+                # length, 0x800DF614; the camera's orbit, 0x8002F1CC)
+                pass
+            elif is_mul(l, src, prec):
                 kind = ("nmadd" if neg else "madd") if op == "+" else "msub"
-                sites.append(Site(parent if neg and op == "+" else n, kind, prec, m[0], m[1], r))
+                add(parent if neg and op == "+" else n, kind, l, r)
             elif is_mul(r, src, prec):
-                m = list(strip(r).get_children())
-                sites.append(Site(n, "madd" if op == "+" else "nmsub", prec, m[0], m[1], l))
+                add(n, "madd" if op == "+" else "nmsub", r, l)
             elif op == "+" and neg_mul(l, src, prec):
-                m = neg_mul(l, src, prec)
-                sites.append(Site(n, "nmsub", prec, m[0], m[1], r))
+                add(n, "nmsub", neg_mul(l, src, prec), r)
             elif op == "+" and neg_mul(r, src, prec):
-                m = neg_mul(r, src, prec)
-                sites.append(Site(n, "nmsub", prec, m[0], m[1], l))
+                add(n, "nmsub", neg_mul(r, src, prec), l)
         elif k == ci.CursorKind.CALL_EXPR and re.match(r"(gk|ppc)_fn?m(add|sub)s?$", n.spelling or ""):
             # already written fused (by hand, or an earlier run): counted, kept,
             # and so are the fused ops in its arguments
@@ -203,11 +286,9 @@ def find_sites(fn, src, path):
             l, r = list(n.get_children())
             lhs = src[l.extent.start.offset:l.extent.end.offset]
             if is_mul(r, src, prec):
-                m = list(strip(r).get_children())
                 # x = f(..., x) evaluates x twice: only a plain lvalue
                 safe = "(" not in lhs and "++" not in lhs and "--" not in lhs
-                sites.append(Site(n, "madd" if op_of(n, src) == "+=" else "nmsub", prec, m[0], m[1], l,
-                                  assign=l if safe else False))
+                add(n, "madd" if op_of(n, src) == "+=" else "nmsub", r, l, assign=l if safe else False)
         for ch in n.get_children():
             visit(ch, n)
 
@@ -223,7 +304,7 @@ def render(node, src, by_node):
     """The node's source with every site inside it rewritten."""
     s = by_node.get(node.hash)
     if s is not None and s.kind is not None:
-        t = lambda c: render(c, src, by_node)
+        t = lambda c: c if isinstance(c, str) else render(c, src, by_node)
         call = f"{HELPER[(s.prec, s.kind)]}({t(s.a)}, {t(s.c)}, {t(s.b)})"
         return f"{t(s.assign)} = {call}" if s.assign is not None else call
     start, end = node.extent.start.offset, node.extent.end.offset
@@ -335,13 +416,14 @@ def main():
             have, used = total(usr)
             if not want and not have:
                 continue
-            ok = have["single"] == want["single"] and have["double"] == want["double"] and \
-                all(s.assign is not False for u in used for s in own_sites(u))
-            totals["match" if ok else "mismatch"] += 1
+            counts = have["single"] == want["single"] and have["double"] == want["double"]
+            hidden = any(s.hidden for u in used for s in own_sites(u))
+            ok = counts and not hidden and all(s.assign is not False for u in used for s in own_sites(u))
+            totals["match" if ok else "in a macro" if counts and hidden else "mismatch"] += 1
             if not args.quiet or not ok:
                 print(f"  {fn.spelling}: DOL {want['single']}+{want['double']}d, C {have['single']}+{have['double']}d"
                       f"{' (with ' + str(len(set(used)) - 1) + ' inlined)' if len(set(used)) > 1 else ''}"
-                      f" {'ok' if ok else 'MISMATCH'}")
+                      f" {'ok' if ok else 'IN A MACRO' if counts and hidden else 'MISMATCH'}")
             if ok:
                 for u in set(used):
                     f = own[u][0]

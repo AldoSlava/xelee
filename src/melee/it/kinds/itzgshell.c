@@ -662,7 +662,7 @@ void it_802DF230(Item_GObj* gobj)
     jobj = GET_JOBJ(gobj);
     angle = MTXRadToDeg(HSD_JObjGetRotationY(jobj));
     child = HSD_JObjGetChild(jobj);
-    angle += MTXRadToDeg(HSD_JObjGetRotationY(child));
+    angle = gk_fmadds((HSD_JObjGetRotationY(child)), 57.29577951f, angle);
 
     if (-90.0f == angle || 90.f == angle) {
         ip->facing_dir = (angle < 0.0f) ? -1.0f : 1.0f;

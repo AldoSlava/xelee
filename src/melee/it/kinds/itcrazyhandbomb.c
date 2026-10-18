@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itcrazyhandbomb.h"
 
 #include "inlines.h"
@@ -90,13 +91,13 @@ void itCrazyhandbomb_UnkMotion0_Phys(Item_GObj* gobj)
 
     switch (HSD_Randi(3)) {
     case 0:
-        rot.x += MTXDegToRad(10.0f * ip->x40_vel.y);
+        rot.x = gk_fmadds((10.0f * ip->x40_vel.y), 0.01745329252f, rot.x);
         break;
     case 1:
-        rot.y += MTXDegToRad(10.0f * ip->x40_vel.y);
+        rot.y = gk_fmadds((10.0f * ip->x40_vel.y), 0.01745329252f, rot.y);
         break;
     case 2:
-        rot.z += MTXDegToRad(10.0f * ip->x40_vel.y);
+        rot.z = gk_fmadds((10.0f * ip->x40_vel.y), 0.01745329252f, rot.z);
         break;
     }
 

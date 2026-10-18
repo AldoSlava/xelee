@@ -99,10 +99,10 @@ float ftCo_Damage_CalcAngle(Fighter* fp, float f)
         return 0;
     } else {
         float result =
-            MTXDegToRad(p_ftCommonData->x148 *
-                            ((f - p_ftCommonData->x14C) /
-                             (p_ftCommonData->x150 - p_ftCommonData->x14C)) +
-                        1);
+            MTXDegToRad(gk_fmadds(p_ftCommonData->x148,
+                                  ((f - p_ftCommonData->x14C) /
+                                   (p_ftCommonData->x150 - p_ftCommonData->x14C)),
+                                  1));
         if (result > MTXDegToRad(p_ftCommonData->x148)) {
             result = MTXDegToRad(p_ftCommonData->x148);
         }

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftnessspeciallw.h"
 
 #include <Runtime/platform.h>
@@ -448,8 +449,7 @@ static inline void getAttrStuff(HSD_GObj* arg0)
         temp_r30->facing_dir = -temp_r30->facing_dir;
     }
     ftPartSetRotY(temp_r30, 0,
-                  -(MTXDegToRad(180.0F / temp_r31->x78_PSI_MAGNET_UNK1) -
-                    ftPartGetRotZ(temp_r30, 0)));
+                  -(gk_fmsubs((180.0F / temp_r31->x78_PSI_MAGNET_UNK1), 0.01745329252f, ftPartGetRotZ(temp_r30, 0))));
 }
 
 /// Ness's grounded PSI Magnet Turnaround Animation callback - _

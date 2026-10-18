@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itlinkboomerang.h"
 
 #include <placeholder.h>
@@ -572,7 +573,7 @@ f32 it_802A13EC(Item_GObj* gobj)
                 ip->xDD4_itemVar.linkboomerang.xF98, &pos);
             dy = pos.y - ip->pos.y;
             dx = pos.x - it_802A13EC_inline(ip);
-            ret = HYPOT(dx, dy);
+            ret = sqrtf(gk_fmadds(dx, dx, dy * dy)); /* HYPOT, fused as the DOL has it */
             if (ip->xDD4_itemVar.linkboomerang.xF80 > 0.0f) {
                 ip->xDD4_itemVar.linkboomerang.xF80--;
             } else if (ip->xDD4_itemVar.linkboomerang.xF80 <= 0.0f) {
