@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grflatzone.h"
 
 #include "grdynamicattr.h"
@@ -462,7 +463,7 @@ void grFlatzone_802176BC(Ground_GObj* gobj)
     case 1:
         if ((gp->u.flatzone2.timer % yakumono_param->unk2C) == 1) {
             HSD_JObjGetTranslation(jobj, &pos);
-            pos.x += yakumono_param->unk38 * gp->u.flatzone2.xC8;
+            pos.x = gk_fmadds(yakumono_param->unk38, gp->u.flatzone2.xC8, pos.x);
             HSD_JObjSetTranslate(jobj, &pos);
         }
         gp->u.flatzone2.timer -= 1;
@@ -486,7 +487,7 @@ void grFlatzone_802176BC(Ground_GObj* gobj)
             gp->u.flatzone2.xD0 = 3;
             gp->u.flatzone2.timer = yakumono_param->unk3C;
             HSD_JObjGetTranslation(jobj, &pos);
-            pos.x = (36.0f * gp->u.flatzone2.xC8) + pos.x;
+            pos.x = gk_fmadds(36.0f, gp->u.flatzone2.xC8, pos.x);
             pos.y -= 27.0f;
             other_x = pos.x;
             other_z = 5.0f + pos.y;

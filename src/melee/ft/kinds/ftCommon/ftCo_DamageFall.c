@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_DamageFall.h"
 
 #include <melee/ft/ftucf.h>
@@ -34,7 +35,7 @@ void ftCo_80090574(Fighter_GObj* gobj)
 static u16 calcShift(float hitlag_mul, FtMotionId msid, int dmg)
 {
     ftCommonData* fcp = p_ftCommonData;
-    return fcp->x168 * ftCommon_CalcHitlag(dmg, msid, hitlag_mul) + fcp->x16C;
+    return gk_fmadds(fcp->x168, ftCommon_CalcHitlag(dmg, msid, hitlag_mul), fcp->x16C);
 }
 
 void ftCo_80090594(Fighter* fp, HitElement element, int dmg, FtMotionId msid,
@@ -74,7 +75,7 @@ Vec2* ftCo_80090690(Fighter* fp, Vec2* shift)
         if (fp_x18F8 == 1) {
             float x = vec->x * fp->facing_dir;
             shift->x = fp->dmg.x1904 * x;
-            shift->y = -fp->dmg.x1900 * x + vec->y;
+            shift->y = gk_fmadds(-fp->dmg.x1900, x, vec->y);
         } else {
             shift->x = vec->x * fp->facing_dir;
             shift->y = vec->y;

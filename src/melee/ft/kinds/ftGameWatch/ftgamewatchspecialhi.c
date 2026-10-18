@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftgamewatchspecialhi.h"
 
 #include <Runtime/platform.h>
@@ -39,7 +40,7 @@ void ftGw_SpecialHi_ItemRescueSetup(HSD_GObj* gobj)
     fp = GET_FIGHTER(gobj);
     if (fp->u.gw.x226C_rescueGObj == NULL) {
         lb_8000B1CC(fp->parts[FtPart_TopN].joint, NULL, &sp10);
-        sp10.y = -((2.5f * ftCommon_GetModelScale(fp)) - sp10.y);
+        sp10.y = -(gk_fmsubs(2.5f, ftCommon_GetModelScale(fp), sp10.y));
         rescueGObj = it_802C8038(gobj, &sp10, FtPart_TopN,
                                  fp->motion_id - ftGw_MS_SpecialHi,
                                  fp->facing_dir, 2.5f);

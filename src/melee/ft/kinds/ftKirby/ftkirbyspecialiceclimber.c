@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftkirbyspecialiceclimber.h"
 
 #include <melee/ft/forward.h>
@@ -181,7 +182,7 @@ void fn_801090D4(Fighter_GObj* gobj)
         Vec3 pos;
         PAD_STACK(8);
         lb_8000B1CC(fp->parts[0].joint, NULL, &pos);
-        pos.x += da->specialn_pp_x_spawn * fp->facing_dir;
+        pos.x = gk_fmadds(da->specialn_pp_x_spawn, fp->facing_dir, pos.x);
         pos.y += da->specialn_pp_y_spawn + fp->u.kb.xC8;
         fp->u.kb.xC0 = it_802C1590(gobj, &pos, It_Kind_Kirby_IceClimberIce,
                                    fp->facing_dir);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grpushon.h"
 
 #include <Runtime/platform.h>
@@ -202,18 +203,14 @@ void grPushOn_802184CC(Ground_GObj* gobj)
     Ground_801C39C0();
     Ground_801C3BB4();
     Stage_UnkSetVec3TCam_Offset(&cam_offset);
-    Ground_801C3880(0.5f * (Stage_GetCamBoundsTopOffset() +
-                            Stage_GetBlastZoneTopOffset()) -
-                    cam_offset.y);
-    Ground_801C3890(0.5f * (Stage_GetCamBoundsBottomOffset() +
-                            Stage_GetBlastZoneBottomOffset()) -
-                    cam_offset.y);
-    Ground_801C38A0(0.5f * (Stage_GetCamBoundsLeftOffset() +
-                            Stage_GetBlastZoneLeftOffset()) -
-                    cam_offset.x);
-    Ground_801C38AC(0.5f * (Stage_GetCamBoundsRightOffset() +
-                            Stage_GetBlastZoneRightOffset()) -
-                    cam_offset.x);
+    Ground_801C3880(gk_fmsubs(0.5f, (Stage_GetCamBoundsTopOffset() +
+                            Stage_GetBlastZoneTopOffset()), cam_offset.y));
+    Ground_801C3890(gk_fmsubs(0.5f, (Stage_GetCamBoundsBottomOffset() +
+                            Stage_GetBlastZoneBottomOffset()), cam_offset.y));
+    Ground_801C38A0(gk_fmsubs(0.5f, (Stage_GetCamBoundsLeftOffset() +
+                            Stage_GetBlastZoneLeftOffset()), cam_offset.x));
+    Ground_801C38AC(gk_fmsubs(0.5f, (Stage_GetCamBoundsRightOffset() +
+                            Stage_GetBlastZoneRightOffset()), cam_offset.x));
 }
 
 bool grPushOn_80218590(Ground_GObj* arg)

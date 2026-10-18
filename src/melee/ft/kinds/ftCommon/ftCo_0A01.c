@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_0A01.h"
 
 #include <Runtime/platform.h>
@@ -1066,7 +1067,7 @@ bool ftCo_800A1F98(int x, float y)
     if (y < slope) {
         return true;
     }
-    if (y < intercept * x + slope) {
+    if (y < gk_fmadds(intercept, x, slope)) {
         return true;
     }
     return false;
@@ -1546,8 +1547,8 @@ s32 ftCo_800A2C80(Fighter* fp)
         ax = bottom_x;
         ay = bottom_y;
     }
-    ex = 1000.0f * dir.x + ax;
-    ey = 1000.0f * dir.y + ay;
+    ex = gk_fmadds(1000.0f, dir.x, ax);
+    ey = gk_fmadds(1000.0f, dir.y, ay);
     line_id = -1;
     blocked = 0;
     result =
@@ -2320,7 +2321,7 @@ s32 ftCo_800A4768(Fighter* fp, Vec3* arg1)
             dx = fp->cur_pos.x - pt.x;
             if (dx > 0.0f) {
                 dy = fp->cur_pos.y - pt.y;
-                dist = dx * dx + dy * dy;
+                dist = gk_fmadds(dx, dx, dy * dy);
                 if (best < 0.0 || best > dist) {
                     best = dist;
                     tmp_x = pt.x - 5.0;
@@ -2335,7 +2336,7 @@ s32 ftCo_800A4768(Fighter* fp, Vec3* arg1)
             dx = fp->cur_pos.x - pt.x;
             if (dx < 0.0f) {
                 dy = fp->cur_pos.y - pt.y;
-                dist = dx * dx + dy * dy;
+                dist = gk_fmadds(dx, dx, dy * dy);
                 if (best < 0.0 || best > dist) {
                     best = dist;
                     arg1->x = pt.x + 5.0;
@@ -3223,7 +3224,7 @@ bool ftCo_800A6700(Fighter* fp, Vec3* arg1, Vec3* arg2)
                 if (!ftCo_800A6700_inline0(fp, px, ay)) {
                     px = px - arg1->x;
                     dy = ay - arg1->y;
-                    dist = px * px + dy * dy;
+                    dist = gk_fmadds(px, px, dy * dy);
                     if (dist > best) {
                         best = dist;
                         arg2->x = ax + 5.0;
@@ -3243,7 +3244,7 @@ bool ftCo_800A6700(Fighter* fp, Vec3* arg1, Vec3* arg2)
                 if (!ftCo_800A6700_inline0(fp, px, by)) {
                     px = px - arg1->x;
                     dy = by - arg1->y;
-                    dist = px * px + dy * dy;
+                    dist = gk_fmadds(px, px, dy * dy);
                     if (dist > best) {
                         best = dist;
                         arg2->x = ax - 5.0;
@@ -4170,12 +4171,12 @@ void ftCo_800A8940(Fighter* fp)
     rnd2 = HSD_Randf();
     width = island->x14.x - island->x8.x;
     if (width > 10.0) {
-        px = (width - 10.0) * rnd2 + (5.0 + chosen->x8.x);
+        px = gk_fmadd((width - 10.0), rnd2, (5.0 + chosen->x8.x));
     } else {
-        px = width * rnd2 + chosen->x8.x;
+        px = gk_fmadds(width, rnd2, chosen->x8.x);
     }
     blocked = 0;
-    py = rnd2 * (island->x14.y - island->x8.y) + chosen->x8.y;
+    py = gk_fmadds(rnd2, (island->x14.y - island->x8.y), chosen->x8.y);
     line_id = -1;
     {
         f32 bottom = py - 100.0f;
@@ -5102,7 +5103,7 @@ bool ftCo_800AAF48(Fighter* fp)
             {
                 continue;
             }
-            if (dy < 2.0F * temp_r29->x558 + temp_r29->x568 &&
+            if (dy < gk_fmadds(2.0F, temp_r29->x558, temp_r29->x568) &&
                 dx < 5.0F * temp_r29->x564)
             {
                 fp->cpu.x60 = 0x12C;
@@ -5135,7 +5136,7 @@ bool ftCo_800AAF48(Fighter* fp)
             {
                 continue;
             }
-            if (dy < 2.0F * temp_r29->x558 + temp_r29->x568 &&
+            if (dy < gk_fmadds(2.0F, temp_r29->x558, temp_r29->x568) &&
                 dx < 5.0F * temp_r29->x564)
             {
                 fp->cpu.x60 = 0x12C;
@@ -7367,9 +7368,9 @@ void ftCo_800B0AF4(Fighter* fp)
         data->rtrigger = data->x448->x5;
         if (fp->x2225_b3) {
             fp->cur_pos.x =
-                0.95 * fp->cur_pos.x + 0.05 * data->x448->cur_pos.x;
+                gk_fmadd(0.95, fp->cur_pos.x, 0.05 * data->x448->cur_pos.x);
             fp->cur_pos.y =
-                0.95 * fp->cur_pos.y + 0.05 * data->x448->cur_pos.y;
+                gk_fmadd(0.95, fp->cur_pos.y, 0.05 * data->x448->cur_pos.y);
             if (fp->motion_id != ftPp_MS_SpecialLw &&
                 fp->motion_id != ftPp_MS_SpecialAirLw)
             {

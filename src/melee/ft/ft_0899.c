@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ft_0899.h"
 
 #include <math.h>
@@ -182,13 +183,13 @@ void ft_80089B08(Fighter_GObj* gobj)
             dy = sp38.y - sp2C.y;
             dx = sp38.x;
             dx -= sp2C.x;
-            line_len = dx * dx + dy * dy;
+            line_len = gk_fmadds(dx, dx, dy * dy);
             (void) line_len;
             if (line_len > 0.0f) {
                 f64 guess = __frsqrte((f64) line_len);
-                guess = 0.5 * guess * (3.0 - guess * guess * line_len);
-                guess = 0.5 * guess * (3.0 - guess * guess * line_len);
-                guess = 0.5 * guess * (3.0 - guess * guess * line_len);
+                guess = 0.5 * guess * (gk_fnmsub(guess * guess, line_len, 3.0));
+                guess = 0.5 * guess * (gk_fnmsub(guess * guess, line_len, 3.0));
+                guess = 0.5 * guess * (gk_fnmsub(guess * guess, line_len, 3.0));
                 line_len_sqrt = (f32) ((f64) line_len * guess);
                 line_len = line_len_sqrt;
             }
@@ -212,8 +213,7 @@ void ft_80089B08(Fighter_GObj* gobj)
                     {
                         mpLineGetNormal(prev_id, &sp1C);
                         adj_angle =
-                            0.5f * ((fp->facing_dir * atan2f(sp1C.x, sp1C.y)) +
-                                    adj_angle);
+                            0.5f * (gk_fmadds(fp->facing_dir, atan2f(sp1C.x, sp1C.y), adj_angle));
                     }
                 }
                 {

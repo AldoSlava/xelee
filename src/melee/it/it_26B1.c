@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "it_26B1.h"
 
 #include <sysdolphin/baselib/forward.h>
@@ -143,7 +144,7 @@ void it_8026B344(HSD_GObj* gobj, Vec3* pos)
     Item* ip;
 
     ip = gobj->user_data;
-    pos->x = ((ip->facing_dir * ip->xBCC_unk.x) + ip->pos.x);
+    pos->x = (gk_fmadds(ip->facing_dir, ip->xBCC_unk.x, ip->pos.x));
     pos->y = (ip->pos.y + ip->xBCC_unk.y);
     pos->z = ip->pos.z;
 }
@@ -217,7 +218,7 @@ void it_8026B40C(Article* article, s32 kind)
 float it_8026B424(int damage)
 {
     ItemCommonData* itCommonData = it_804D6D28;
-    return (int) ((damage * itCommonData->xB8) + itCommonData->xBC);
+    return (int) (gk_fmadds(damage, itCommonData->xB8, itCommonData->xBC));
 }
 
 /// Get heal value of healing items
@@ -1092,7 +1093,7 @@ HSD_GObj* it_8026C258(Vec3* pos, f32 facing_dir)
         {
             f32 dist_x = pos->x - ip->pos.x;
             f32 dist_y = pos->y - ip->pos.y;
-            f32 sq_dist = dist_x * dist_x + dist_y * dist_y;
+            f32 sq_dist = gk_fmadds(dist_x, dist_x, dist_y * dist_y);
 
             if (sq_dist < min_sq_dist) {
                 min_sq_dist = sq_dist;

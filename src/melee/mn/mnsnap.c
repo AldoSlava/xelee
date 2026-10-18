@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mnsnap.h"
 
 #include <placeholder.h>
@@ -2300,9 +2301,9 @@ mnSnap_CreateThumbnails(mnSnap_State* snap, HSD_JObj** thumb_root_ptr,
         HSD_JObjAddAnimAll(jobj2, (HSD_AnimJoint*) *sub_animjoint,
                            (HSD_MatAnimJoint*) *sub_matanim,
                            (HSD_ShapeAnimJoint*) *sub_shapeanim);
-        end_pos.x = step_x * (f32) i + start_pos.x;
-        end_pos.y = step_y * (f32) i + start_pos.y;
-        end_pos.z = step_z * (f32) i + start_pos.z;
+        end_pos.x = gk_fmadds(step_x, (f32) i, start_pos.x);
+        end_pos.y = gk_fmadds(step_y, (f32) i, start_pos.y);
+        end_pos.z = gk_fmadds(step_z, (f32) i, start_pos.z);
         HSD_JObjSetTranslate(jobj2, &end_pos);
         snap->option_jobjs[i] = jobj2;
         HSD_JObjAddChild(*thumb_root_ptr, jobj2);

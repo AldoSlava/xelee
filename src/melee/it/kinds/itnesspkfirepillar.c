@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itnesspkfirepillar.h"
 
 #include <melee/db/db.h>
@@ -130,7 +131,7 @@ bool itNesspkfirepillar_Logic24_DmgReceived(Item_GObj* item_gobj)
 {
     Item* item = GET_ITEM(item_gobj);
     itNessPKFirepillarAttributes* attrs = DP(itNessPKFirepillarAttributes, item->xC4_article_data->x4_specialAttributes);
-    item->xD44_lifeTimer = -((item->xC9C * attrs->x4) - item->xD44_lifeTimer);
+    item->xD44_lifeTimer = -(gk_fmsubs(item->xC9C, attrs->x4, item->xD44_lifeTimer));
     if (item->xD44_lifeTimer <= 0.0F) {
         item->xD44_lifeTimer = get_min_life();
     }

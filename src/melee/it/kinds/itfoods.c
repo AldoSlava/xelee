@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itfoods.h"
 
 #include "types.h"
@@ -39,7 +40,7 @@ void it_8028F9D8(Item_GObj* arg0, Vec3* arg1, f32 arg8)
     DiscVec4* temp_r6 = DP(DiscVec4, temp_r30->xC4_article_data->x4_specialAttributes);
     f32 var_2;
     temp_r30->pos.x =
-        arg1->x + (arg8 * temp_r6[temp_r30->xDD4_itemVar.foods.x0].w);
+        gk_fmadds(arg8, temp_r6[temp_r30->xDD4_itemVar.foods.x0].w, arg1->x);
     var_2 = temp_r6[temp_r30->xDD4_itemVar.foods.x0 + 1].x;
     temp_r30->pos.y = var_2 + arg1->y;
     temp_r30->pos.z = arg1->z;

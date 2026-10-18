@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftnessspecialhi.h"
 
 #include <Runtime/platform.h>
@@ -131,7 +132,7 @@ bool ftNs_SpecialHi_ItemPKThunder_CheckNessCollide(HSD_GObj* gobj)
     switch (fp->mv.ns.specialhi.thunderColl) {
     case 0:
         pos = fp->cur_pos;
-        pos.y += 5.0f * fp->x34_scale.y;
+        pos.y = gk_fmadds(5.0f, fp->x34_scale.y, pos.y);
         it_802AB3F0(fp->u.ns.pkthunder_gobj, &pair, 0);
         if (check_distance(&pos, &pair) == true) {
             fp->mv.ns.specialhi.thunderColl = 2;
@@ -145,7 +146,7 @@ bool ftNs_SpecialHi_ItemPKThunder_CheckNessCollide(HSD_GObj* gobj)
 
     case 1:
         pos2 = fp->cur_pos;
-        pos2.y += 5.0f * fp->x34_scale.y;
+        pos2.y = gk_fmadds(5.0f, fp->x34_scale.y, pos2.y);
         it_802AB3F0(fp->u.ns.pkthunder_gobj, &pair2, 0);
         if (!check_distance(&pos2, &pair2)) {
             fp->mv.ns.specialhi.thunderColl = 0;
@@ -421,7 +422,7 @@ void ftNs_SpecialHi_Enter(
 
         sp40.x = fp->cur_pos.x - fp->mv.ns.specialhi.collPos1.x;
         temp_f2 = fp->x34_scale.y;
-        temp_f1 = (temp_f3 * temp_f2) + fp->cur_pos.y;
+        temp_f1 = gk_fmadds(temp_f3, temp_f2, fp->cur_pos.y);
         sp40.y = temp_f1 - fp->mv.ns.specialhi.collPos1.y;
         sp40.z = 0.0f;
 
@@ -470,10 +471,8 @@ void ftNs_SpecialHi_Enter(
                             ness_attr2->x58_PK_THUNDER_2_UNK1;
                         fighter_data2 = GET_FIGHTER(gobj);
                         ftPartSetRotX(fighter_data2, 0,
-                                      (fighter_data2->facing_dir *
-                                       atan2f(fighter_data2->self_vel.x,
-                                              fighter_data2->self_vel.y)) -
-                                          (float) M_PI_2);
+                                      gk_fmsubs(fighter_data2->facing_dir, atan2f(fighter_data2->self_vel.x,
+                                              fighter_data2->self_vel.y), (float) M_PI_2));
                         fighter_data2 = fp;
                         fighter_data2->death2_cb = NULL;
                         fighter_data2->take_dmg_cb = NULL;
@@ -537,7 +536,7 @@ NessFloatMath_PKThunder2(HSD_GObj* gobj) // Required for 0x80118570 to match
     Fighter* fp = getFighter(gobj);
     float dx = fp->cur_pos.x - fp->mv.ns.specialhi.collPos1.x;
     ftNessAttributes* ness_attr = getFtSpecialAttrs(fp);
-    float dy = 5.0f * fp->x34_scale.y + fp->cur_pos.y -
+    float dy = gk_fmadds(5.0f, fp->x34_scale.y, fp->cur_pos.y) -
                fp->mv.ns.specialhi.collPos1.y;
 
     fp->facing_dir = sign(dx);
@@ -565,8 +564,7 @@ void ftNs_SpecialAirHi_Enter(HSD_GObj* gobj)
     fp->mv.ns.specialhi.unkVar = ness_attr->x58_PK_THUNDER_2_UNK1;
     fp2 = GET_FIGHTER(gobj);
     ftPartSetRotX(fp2, 0,
-                  fp2->facing_dir * atan2f(fp2->self_vel.x, fp2->self_vel.y) -
-                      (float) M_PI_2);
+                  gk_fmsubs(fp2->facing_dir, atan2f(fp2->self_vel.x, fp2->self_vel.y), (float) M_PI_2));
     fp->death2_cb = NULL;
     fp->take_dmg_cb = NULL;
     fp->x1968_jumpsUsed = fp->co_attrs.max_jumps;
@@ -753,9 +751,8 @@ void ftNs_SpecialAirHiHold_Anim(HSD_GObj* gobj)
                 fp1->mv.ns.specialhi.unkVar = ness_attr->x58_PK_THUNDER_2_UNK1;
                 fp2 = GET_FIGHTER(gobj);
                 ftPartSetRotX(fp2, 0,
-                              fp2->facing_dir * atan2f(fp2->self_vel.x,
-                                                       fp2->self_vel.y) -
-                                  (float) M_PI_2);
+                              gk_fmsubs(fp2->facing_dir, atan2f(fp2->self_vel.x,
+                                                       fp2->self_vel.y), (float) M_PI_2));
                 fp1->death2_cb = NULL;
                 fp1->take_dmg_cb = NULL;
                 fp1->x1968_jumpsUsed = fp1->co_attrs.max_jumps;
@@ -957,8 +954,7 @@ void ftNs_SpecialHi_Phys(HSD_GObj* gobj)
     ftNessAttributes* ness_attr = fp0->dat_attrs;
 
     fp0->gr_vel =
-        -(ness_attr->x5C_PK_THUNDER_2_DECELERATION_RATE * fp0->facing_dir -
-          ground_vel);
+        -(gk_fmsubs(ness_attr->x5C_PK_THUNDER_2_DECELERATION_RATE, fp0->facing_dir, ground_vel));
 
     if (fp0->facing_dir == +1) {
         if (fp0->gr_vel <= vel_epsilon) {
@@ -983,8 +979,7 @@ void ftNs_SpecialHi_Phys(HSD_GObj* gobj)
         Fighter* fp = gobj->user_data;
         ftPartSetRotX(
             fp, 0,
-            (fp->facing_dir * atan2f(fp->self_vel.x, fp->self_vel.y)) -
-                (float) M_PI_2);
+            gk_fmsubs(fp->facing_dir, atan2f(fp->self_vel.x, fp->self_vel.y), (float) M_PI_2));
     }
 }
 

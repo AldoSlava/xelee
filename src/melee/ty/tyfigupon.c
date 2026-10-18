@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "tyfigupon.h"
 
 #include <Runtime/platform.h>
@@ -244,8 +245,8 @@ void _tyFigupon_80314C5C(HSD_GObj* gobj)
             float temp_f28 = HSD_JObjGetTranslationX(temp_r29->jobjs[2]);
             float temp_f27 = HSD_JObjGetTranslationY(temp_r29->jobjs[2]);
             float temp_f26 = HSD_JObjGetTranslationZ(temp_r29->jobjs[2]);
-            temp_f30 = (3.0f * HSD_Randf()) + temp_f30;
-            temp_f29 = (3.0f * HSD_Randf()) + temp_f29;
+            temp_f30 = gk_fmadds(3.0f, HSD_Randf(), temp_f30);
+            temp_f29 = gk_fmadds(3.0f, HSD_Randf(), temp_f29);
             {
                 float var_f3 = ABS(temp_f28 - temp_f30);
                 tp->translate.x = -0.74f * (var_f3 / 30.0f);
@@ -984,7 +985,7 @@ void _tyFigupon_80316C24(HSD_GObj* arg0)
             } else {
                 dir = -1;
             }
-            stick_scroll = -((0.2f * (f32) dir) - stick) / 0.8f;
+            stick_scroll = -(gk_fmsubs(0.2f, (f32) dir, stick)) / 0.8f;
         }
     }
 

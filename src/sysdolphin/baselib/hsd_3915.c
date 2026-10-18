@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "hsd_3915.h"
 
 #include <math.h> // IWYU pragma: keep
@@ -304,8 +305,8 @@ void hsd_80391E18(const u8* list, f32 x1, f32 y1, f32 x2, f32 y2)
         GXTexCoord1f32(prev_x);
         GXTexCoord1f32(prev_y);
 
-        prev_x = t * dx + x1;
-        prev_y = t * dy + y1;
+        prev_x = gk_fmadd(t, dx, x1);
+        prev_y = gk_fmadd(t, dy, y1);
 
         /* The gradient words are host-native 0xRRGGBBAA (see hsd_392A.c);
          * aliasing them as bytes reads them back as A,B,G,R here. */
@@ -327,12 +328,12 @@ static inline f32 hsd_80391F28_len(f32 dy, f32 dx)
 {
     f32 len;
 
-    len = (dx * dx) + (dy * dy);
+    len = gk_fmadds(dx, dx, (dy * dy));
     if (len > 0.0F) {
         f64 e = __frsqrte(len);
-        e = 0.5 * e * -(len * (e * e) - 3.0);
-        e = 0.5 * e * -(len * (e * e) - 3.0);
-        e = 0.5 * e * -(len * (e * e) - 3.0);
+        e = 0.5 * e * -(gk_fmsub(len, (e * e), 3.0));
+        e = 0.5 * e * -(gk_fmsub(len, (e * e), 3.0));
+        e = 0.5 * e * -(gk_fmsub(len, (e * e), 3.0));
         e = len * e;
         {
             volatile f32 temp = (f32) e;

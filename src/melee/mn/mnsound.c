@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mnsound.h"
 
 #include <melee/it/forward.h>
@@ -36,9 +37,7 @@ static AnimLoopSettings volume_right = { 4.0F, 7.0F, -0.1F };
 static f32 getVolumePosition(u8 sound_music_mix, const Vec3* pos_0,
                              const Vec3* pos_1)
 {
-    return (((f32) ((s8) sound_music_mix + 100) / 200.0F) *
-            (pos_1->x - pos_0->x)) +
-           pos_0->x;
+    return gk_fmadds(((f32) ((s8) sound_music_mix + 100) / 200.0F), (pos_1->x - pos_0->x), pos_0->x);
 }
 
 static inline void updateVolumeAnim(HSD_JObj* jobj, u8 sound_music_mix,

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itclimbersstring.h"
 
 #include "inlines.h"
@@ -295,15 +296,15 @@ void it_802C2CA8(ItemLink* link, Vec3* target,
     ItemLink* prev = link->prev;
 
     it_802A3C98(&link->pos, target, &dir);
-    link->pos.x = (dir.x * length) + target->x;
-    link->pos.y = (dir.y * length) + target->y;
-    link->pos.z = (dir.z * length) + target->z;
+    link->pos.x = gk_fmadds(dir.x, length, target->x);
+    link->pos.y = gk_fmadds(dir.y, length, target->y);
+    link->pos.z = gk_fmadds(dir.z, length, target->z);
     while (prev != NULL) {
         if (prev->x2C_b0) {
             if (it_802A3C98(&prev->pos, &link->pos, &dir) > attrs->x8) {
-                prev->pos.x = (dir.x * attrs->x8) + link->pos.x;
-                prev->pos.y = (dir.y * attrs->x8) + link->pos.y;
-                prev->pos.z = (dir.z * attrs->x8) + link->pos.z;
+                prev->pos.x = gk_fmadds(dir.x, attrs->x8, link->pos.x);
+                prev->pos.y = gk_fmadds(dir.y, attrs->x8, link->pos.y);
+                prev->pos.z = gk_fmadds(dir.z, attrs->x8, link->pos.z);
             }
         }
         link = prev;
@@ -320,16 +321,16 @@ void it_802C2DB0(ItemLink* cur, Vec3* target,
     PAD_STACK(4);
 
     it_802A3C98(&cur->pos, target, &dir);
-    cur->pos.x = (dir.x * length) + target->x;
-    cur->pos.y = (dir.y * length) + target->y;
-    cur->pos.z = (dir.z * length) + target->z;
+    cur->pos.x = gk_fmadds(dir.x, length, target->x);
+    cur->pos.y = gk_fmadds(dir.y, length, target->y);
+    cur->pos.z = gk_fmadds(dir.z, length, target->z);
     while (prev != NULL) {
         prev->vel.y -= attrs->x14;
         it_802A4420(prev);
         if (it_802A3C98(&prev->pos, &cur->pos, &dir) > attrs->x8) {
-            prev->pos.x = (dir.x * attrs->x8) + cur->pos.x;
-            prev->pos.y = (dir.y * attrs->x8) + cur->pos.y;
-            prev->pos.z = (dir.z * attrs->x8) + cur->pos.z;
+            prev->pos.x = gk_fmadds(dir.x, attrs->x8, cur->pos.x);
+            prev->pos.y = gk_fmadds(dir.y, attrs->x8, cur->pos.y);
+            prev->pos.z = gk_fmadds(dir.z, attrs->x8, cur->pos.z);
         }
         cur = prev;
         prev = prev->prev;
@@ -358,23 +359,23 @@ s32 it_802C2EC4(ItemLink* link, Vec3* target,
             iter->pos = *target;
             dist = it_802A3C98(&iter->pos, &cur->pos, &dir);
             if (dist > attrs->x8) {
-                iter->pos.x = (dir.x * attrs->x8) + cur->pos.x;
-                iter->pos.y = (dir.y * attrs->x8) + cur->pos.y;
-                iter->pos.z = (dir.z * attrs->x8) + cur->pos.z;
+                iter->pos.x = gk_fmadds(dir.x, attrs->x8, cur->pos.x);
+                iter->pos.y = gk_fmadds(dir.y, attrs->x8, cur->pos.y);
+                iter->pos.z = gk_fmadds(dir.z, attrs->x8, cur->pos.z);
             } else if (dist < attrs->xC) {
                 if (it_802A3C98(&iter->pos, target, &dir2) <= 0.1f) {
                     iter->x2C_b0 = false;
                 } else {
-                    iter->pos.x = (dir.x * attrs->xC) + cur->pos.x;
-                    iter->pos.y = (dir.y * attrs->xC) + cur->pos.y;
-                    iter->pos.z = (dir.z * attrs->xC) + cur->pos.z;
+                    iter->pos.x = gk_fmadds(dir.x, attrs->xC, cur->pos.x);
+                    iter->pos.y = gk_fmadds(dir.y, attrs->xC, cur->pos.y);
+                    iter->pos.z = gk_fmadds(dir.z, attrs->xC, cur->pos.z);
                 }
             }
         } else {
             if (it_802A3C98(target, &cur->pos, &dir) > attrs->x8) {
-                iter->pos.x = (dir.x * attrs->x8) + cur->pos.x;
-                iter->pos.y = (dir.y * attrs->x8) + cur->pos.y;
-                iter->pos.z = (dir.z * attrs->x8) + cur->pos.z;
+                iter->pos.x = gk_fmadds(dir.x, attrs->x8, cur->pos.x);
+                iter->pos.y = gk_fmadds(dir.y, attrs->x8, cur->pos.y);
+                iter->pos.z = gk_fmadds(dir.z, attrs->x8, cur->pos.z);
                 iter->x2C_b0 = true;
             } else {
                 return 0;
@@ -404,7 +405,7 @@ s32 it_802C30E8(ItemLink* link, Vec3* target,
     Fighter* fp = GET_FIGHTER(ip->xDD4_itemVar.climbersstring.xC);
     PAD_STACK(8);
 
-    link->vel.y -= 0.9f * attrs->x14;
+    link->vel.y = gk_fnmsubs(0.9f, attrs->x14, link->vel.y);
 
     if (fp->u.pp.x2240.x != 0.0f || fp->u.pp.x2240.y != 0.0f) {
         link->pos = fp->u.pp.x2240;
@@ -419,18 +420,18 @@ s32 it_802C30E8(ItemLink* link, Vec3* target,
             iter->vel.y -= attrs->x14;
             it_802A4420(iter);
             if (it_802A3C98(&iter->pos, &cur->pos, &dir) > attrs->x8) {
-                iter->pos.x = (dir.x * attrs->x8) + cur->pos.x;
-                iter->pos.y = (dir.y * attrs->x8) + cur->pos.y;
-                iter->pos.z = (dir.z * attrs->x8) + cur->pos.z;
+                iter->pos.x = gk_fmadds(dir.x, attrs->x8, cur->pos.x);
+                iter->pos.y = gk_fmadds(dir.y, attrs->x8, cur->pos.y);
+                iter->pos.z = gk_fmadds(dir.z, attrs->x8, cur->pos.z);
             }
         } else {
             if (counter > attrs->x4) {
                 iter->pos = *target;
             } else {
                 if (it_802A3C98(target, &cur->pos, &dir) > attrs->x8) {
-                    iter->pos.x = (dir.x * attrs->x8) + cur->pos.x;
-                    iter->pos.y = (dir.y * attrs->x8) + cur->pos.y;
-                    iter->pos.z = (dir.z * attrs->x8) + cur->pos.z;
+                    iter->pos.x = gk_fmadds(dir.x, attrs->x8, cur->pos.x);
+                    iter->pos.y = gk_fmadds(dir.y, attrs->x8, cur->pos.y);
+                    iter->pos.z = gk_fmadds(dir.z, attrs->x8, cur->pos.z);
                     iter->x2C_b0 = true;
                 } else {
                     return 0;

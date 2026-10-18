@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itparasol.h"
 
 #include <dolphin/mtx.h>
@@ -91,7 +92,7 @@ bool itParasol_UnkMotion2_Anim(Item_GObj* item_gobj)
         ry = HSD_JObjGetRotationY(jobj);
         fm = attrs[2].v + ABS(item->x40_vel.y * attrs[3].v);
         fm *= item->facing_dir;
-        ry = deg_to_rad * fm + ry;
+        ry = gk_fmadds(deg_to_rad, fm, ry);
         HSD_JObjSetRotationY(jobj, ry);
     }
     return false;

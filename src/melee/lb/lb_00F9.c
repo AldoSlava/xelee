@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "lb_00F9.h"
 
 #include <Runtime/platform.h>
@@ -206,12 +207,12 @@ void lb_8000FD48(HSD_JObj* jobj, DynamicsDesc* desc, size_t max_count)
             dx = prev->desc.lb_unk0.unk_2C.x - next->desc.lb_unk0.unk_2C.x;
             dy = prev->desc.lb_unk0.unk_2C.y - next->desc.lb_unk0.unk_2C.y;
             dz = prev->desc.lb_unk0.unk_2C.z - next->desc.lb_unk0.unk_2C.z;
-            if ((dist_sq = dz * dz + (dx * dx + dy * dy)) > 0.0f) {
+            if ((dist_sq = gk_fmadds(dz, dz, (gk_fmadds(dx, dx, dy * dy)))) > 0.0f) {
                 volatile float y;
                 double guess = __frsqrte((double) dist_sq);
-                guess = .5 * guess * (3.0 - guess * guess * dist_sq);
-                guess = .5 * guess * (3.0 - guess * guess * dist_sq);
-                guess = .5 * guess * (3.0 - guess * guess * dist_sq);
+                guess = .5 * guess * (gk_fnmsub(guess * guess, dist_sq, 3.0));
+                guess = .5 * guess * (gk_fnmsub(guess * guess, dist_sq, 3.0));
+                guess = .5 * guess * (gk_fnmsub(guess * guess, dist_sq, 3.0));
                 y = (float) (dist_sq * guess);
                 dist_sq = y;
             }
@@ -319,9 +320,9 @@ float lb_800101C8(Vec3* arg0, Vec3* arg1)
         if (var_r30->x0 == 1) {
             if (arg0->x > var_r30->x10 && arg0->x < var_r30->x18) {
                 if (arg0->y < var_r30->x14 && arg0->y > var_r30->x1C) {
-                    arg1->x += var_r30->x4.x * scale0;
-                    arg1->y += var_r30->x4.y * scale0;
-                    arg1->z += var_r30->x4.z * scale0;
+                    arg1->x = gk_fmadds(var_r30->x4.x, scale0, arg1->x);
+                    arg1->y = gk_fmadds(var_r30->x4.y, scale0, arg1->y);
+                    arg1->z = gk_fmadds(var_r30->x4.z, scale0, arg1->z);
                 }
             }
         } else {
@@ -336,9 +337,9 @@ float lb_800101C8(Vec3* arg0, Vec3* arg1)
                     var_f0 = 1.0f;
                 }
                 scale1 = 1.0 / (var_f0 * var_f0);
-                arg1->x += scale1 * (delta.x * scale0);
-                arg1->y += scale1 * (delta.y * scale0);
-                arg1->z += scale1 * (delta.z * scale0);
+                arg1->x = gk_fmadds(scale1, (delta.x * scale0), arg1->x);
+                arg1->y = gk_fmadds(scale1, (delta.y * scale0), arg1->y);
+                arg1->z = gk_fmadds(scale1, (delta.z * scale0), arg1->z);
             }
         }
     }
@@ -362,7 +363,7 @@ bool lb_800103D8(Vec3* vec, float x0, float x1, float x2, float x3,
             return false;
         }
     } else if ((double) dist0 > 0.0 && (double) dist1 < 0.0) {
-        vec->x = -dist1 / (dist0 - dist1) * (x0 - x2) + x2;
+        vec->x = gk_fmadds(-dist1 / (dist0 - dist1), (x0 - x2), x2);
         vec->y = offset;
         vec->z = 0.0f;
         return true;

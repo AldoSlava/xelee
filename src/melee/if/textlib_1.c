@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <Runtime/platform.h>
 
 #include <printf.h> // IWYU pragma: keep
@@ -563,7 +564,7 @@ struct un_80304138_objalloc_t* un_80304210(struct un_80304138_objalloc_t* arg0,
         f32 x = text->scale_x * (f32) text->w;
         {
             s32 x_pos = (s32) ((f32) arg3 + x);
-            s32 y_pos = (s32) (text->scale_y * (f32) arg0->x0 + (f32) arg4);
+            s32 y_pos = (s32) (gk_fmadds(text->scale_y, (f32) arg0->x0, (f32) arg4));
             un_80303FD4(arg0->x10, obj, arg1, arg2, text->x + x_pos,
                         text->y + y_pos);
         }

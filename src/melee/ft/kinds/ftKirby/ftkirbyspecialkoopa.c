@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <melee/ft/forward.h>
 
 #include "ftkirby.h"
@@ -38,9 +39,8 @@ void ftKb_SpecialNKp_800FA588(Fighter_GObj* gobj)
     offset.y = 0.5f;
     offset.z = 3.0f;
     lb_8000B1CC(fp->parts[12].joint, &offset, &pos);
-    pos.x +=
-        fp->x34_scale.y * (da->specialn_kp_breath_x_offset * fp->facing_dir);
-    pos.y += da->specialn_kp_breath_y_offset * fp->x34_scale.y;
+    pos.x = gk_fmadds(fp->x34_scale.y, (da->specialn_kp_breath_x_offset * fp->facing_dir), pos.x);
+    pos.y = gk_fmadds(da->specialn_kp_breath_y_offset, fp->x34_scale.y, pos.y);
 
     {
         Fighter* fp2 = GET_FIGHTER(gobj);

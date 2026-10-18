@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itnesspkflashexplode.h"
 
 #include <Runtime/platform.h>
@@ -96,20 +97,16 @@ bool itNessPKFlashExplode_UnkMotion0_Anim(Item_GObj* gobj)
     itFlashExplAttributes* attr = DP(itFlashExplAttributes, ip->xC4_article_data->x4_specialAttributes);
     HSD_JObj* jobj = GET_JOBJ(gobj);
     Vec3 scale;
-    scale.x = scale.y = scale.z = (ip->xDD4_itemVar.pkflushexplode.xDD4 *
-                                   ((attr->x8_FLASH_EXPL_GRAPHIC_SIZE_GROWTH -
+    scale.x = scale.y = scale.z = gk_fmadds(ip->xDD4_itemVar.pkflushexplode.xDD4, ((attr->x8_FLASH_EXPL_GRAPHIC_SIZE_GROWTH -
                                      attr->x4_FLASH_EXPL_GRAPHIC_SIZE_INIT) /
-                                    attr->x0_FLASH_EXPL_HITBOX_SIZE_MUL)) +
-                                  attr->x4_FLASH_EXPL_GRAPHIC_SIZE_INIT;
+                                    attr->x0_FLASH_EXPL_HITBOX_SIZE_MUL), attr->x4_FLASH_EXPL_GRAPHIC_SIZE_INIT);
     HSD_JObjSetScale(jobj, &scale);
 
     if (ip->xDB4_itcmd_var2 == 0 &&
         ip->x5D4_hitboxes[0].hit.state != HitCapsule_Disabled)
     {
         it_80272460(&ip->x5D4_hitboxes[0].hit,
-                    (ip->xDD4_itemVar.pkflushexplode.xDD4 *
-                     attr->x10_FLASH_EXPL_DAMAGE_MUL) +
-                        attr->xC_FLASH_EXPL_BASE_DAMAGE,
+                    gk_fmadds(ip->xDD4_itemVar.pkflushexplode.xDD4, attr->x10_FLASH_EXPL_DAMAGE_MUL, attr->xC_FLASH_EXPL_BASE_DAMAGE),
                     gobj);
         ip->xDB4_itcmd_var2 = 1;
     }

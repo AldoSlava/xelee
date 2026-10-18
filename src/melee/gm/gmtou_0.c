@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "gmtou_0.h"
 
 #include <placeholder.h>
@@ -229,8 +230,8 @@ void fn_80190ABC(int mode)
         HSD_SisLib_803A7664(tm->x518[0]);
         for (mode = 0; mode < 0x24; mode++) {
             fn_8018ECA8(mode + state->x6 * 4, 0xFF, 0,
-                        149.0f * (f32) (mode % 4) + 537.0f,
-                        47.0f * (f32) (mode / 4) + 409.0f, 0);
+                        gk_fmadds(149.0f, (f32) (mode % 4), 537.0f),
+                        gk_fmadds(47.0f, (f32) (mode / 4), 409.0f), 0);
         }
         break;
     }
@@ -245,7 +246,7 @@ void fn_80190ABC(int mode)
                 continue;
             }
             {
-                f32 pos_y = 48.5999985f * (f32) i + 183.0f;
+                f32 pos_y = gk_fmadds(48.5999985f, (f32) i, 183.0f);
                 fn_8018ECA8(tm->x37[idx].x9, tm->x37[idx].x0, 1, 143.0f, pos_y,
                             2);
                 idx = *start + i;
@@ -833,7 +834,7 @@ void fn_80191D38(HSD_GObj* gobj)
     }
 
     fn_8018FDC4(jobj, 666.0f,
-                -((2.6200008f * (f32) (idx - lbl_804799B8.x3)) - 12.800008f),
+                -(gk_fmsubs(2.6200008f, (f32) (idx - lbl_804799B8.x3), 12.800008f)),
                 0.1f);
 
     if (tm->x37[idx].x5 != 0) {
@@ -881,7 +882,7 @@ void fn_80191E9C(HSD_GObj* gobj)
     }
 
     fn_8018FDC4(jobj, 666.0f,
-                -((2.6200008f * (f32) (idx - lbl_804799B8.x3)) - 12.800008f),
+                -(gk_fmsubs(2.6200008f, (f32) (idx - lbl_804799B8.x3), 12.800008f)),
                 0.1f);
     fn_8019044C(jobj, (f32) tm->x37[idx].x2);
 }
@@ -1045,8 +1046,8 @@ void fn_8019237C(HSD_GObj* gobj)
     }
 
     fn_8019044C(jobj, (f32) lbl_804799B8.xA);
-    fn_8018FDC4(jobj, (7.18999958f * (f32) (lbl_804799B8.x5 % 4)) + -1.8f,
-                -((2.3f * (f32) ((s32) lbl_804799B8.x5 / 4)) - 2.7f), 666.0f);
+    fn_8018FDC4(jobj, gk_fmadds(7.18999958f, (f32) (lbl_804799B8.x5 % 4), -1.8f),
+                -(gk_fmsubs(2.3f, (f32) ((s32) lbl_804799B8.x5 / 4), 2.7f)), 666.0f);
 }
 
 static inline HSD_JObj* fn_8019249C_get_jobj(HSD_GObj* gobj)
@@ -1365,8 +1366,8 @@ void fn_80192E6C(void)
         new_var3 = jobj;
         if (j != 0x19) {
             fn_8018FF9C(new_var3, 0.65f, 0.66f, 666.0f);
-            fn_8018FDC4(new_var3, (6.0f * (f32) (j % 5)) + -3.0f,
-                        -((4.500006f * (f32) (new_var = j / 5)) - 2.3f), 0.2f);
+            fn_8018FDC4(new_var3, gk_fmadds(6.0f, (f32) (j % 5), -3.0f),
+                        -(gk_fmsubs(4.500006f, (f32) (new_var = j / 5), 2.3f)), 0.2f);
         } else {
             fn_8018FDC4(new_var3, -1.0f, 10.099993f, 0.2f);
         }
@@ -1426,7 +1427,7 @@ void fn_80193308(void)
                                           0.0f, 360.0f, 40.0f);
         text = tm->x4E8[i];
         text->pos_x = 123.0f;
-        y = (35.7f * (f32) i) + 113.0f;
+        y = gk_fmadds(35.7f, (f32) i, 113.0f);
         text->pos_y = y;
         text->pos_z = 0.0f;
         tm->x4E8[i]->hidden = 1;

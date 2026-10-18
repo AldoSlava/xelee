@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itklap.h"
 
 #include <math.h>
@@ -290,8 +291,8 @@ void it_802E215C(Item_GObj* gobj)
     Quaternion quat;
 
     Ground_801C4DA0(&pos, &angle);
-    pos.x += 6.0f * -sinf(angle);
-    pos.y += 6.0f * cosf(angle);
+    pos.x = gk_fmadds(6.0f, -sinf(angle), pos.x);
+    pos.y = gk_fmadds(6.0f, cosf(angle), pos.y);
     ip->pos = pos;
     HSD_JObjSetTranslate(jobj, &ip->pos);
     quat.x = 1.5707964f;

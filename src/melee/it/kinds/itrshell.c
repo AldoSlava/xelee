@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itrshell.h"
 
 #include <Runtime/platform.h>
@@ -124,7 +125,7 @@ set_vel:
 
 add_vel:
     it_8028D390(gobj);
-    ip->x40_vel.x += -ip->xCCC_incDamageDirection * (ip->xCA0 * attrs->x24);
+    ip->x40_vel.x = gk_fmadds(-ip->xCCC_incDamageDirection, (ip->xCA0 * attrs->x24), ip->x40_vel.x);
     goto check_speed;
 
 check_speed:
@@ -183,7 +184,7 @@ set_vel:
 
 add_vel:
     it_8028D390(gobj);
-    ip->x40_vel.x += attrs->x2C * -ip->xCD0;
+    ip->x40_vel.x = gk_fmadds(attrs->x2C, -ip->xCD0, ip->x40_vel.x);
     goto check_speed;
 
 check_speed:
@@ -312,7 +313,7 @@ f32 it_8028D56C(Item_GObj* gobj, f32 f1, f32 f2)
 {
     itRshellAttributes* attrs =
         DP(itRshellAttributes, GET_ITEM(gobj)->xC4_article_data->x4_specialAttributes);
-    f32 f = (f1 * -attrs->x14.x) + (-attrs->x14.y * f2);
+    f32 f = gk_fmadds(f1, -attrs->x14.x, (-attrs->x14.y * f2));
     return f * attrs->x14.z;
 }
 

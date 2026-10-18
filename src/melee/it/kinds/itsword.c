@@ -1,5 +1,6 @@
 /// @file
 /// @todo A lot of duplicate code here, can maybe be cleaned up with inlines.
+#include <pc/gekko_fp.h>
 #include "itsword.h"
 
 #include <Runtime/platform.h>
@@ -83,7 +84,7 @@ void it_80284E30(Item_GObj* gobj)
     {
         Vec3 scale;
         if (ip->msid == 2) {
-            float temp_scale = 1.5f * ip->xDD4_itemVar.sword.x40 + scale_y;
+            float temp_scale = gk_fmadds(1.5f, ip->xDD4_itemVar.sword.x40, scale_y);
             scale.x = temp_scale;
             scale.y = scale_y + ip->xDD4_itemVar.sword.x40;
             scale.z = temp_scale;

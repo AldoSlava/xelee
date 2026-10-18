@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "stage.h"
 
 #include "ground.h"
@@ -188,8 +189,8 @@ void Stage_80224CAC(Vec3* arg0)
         Vec3 last_vec;
         f32 temp_f4 = (arg0->z / -another_vec.z);
 
-        last_vec.x = (another_vec.x * temp_f4) + arg0->x;
-        last_vec.y = (another_vec.y * temp_f4) + arg0->y;
+        last_vec.x = gk_fmadds(another_vec.x, temp_f4, arg0->x);
+        last_vec.y = gk_fmadds(another_vec.y, temp_f4, arg0->y);
         last_vec.z = 0.0F;
         *arg0 = last_vec;
     }

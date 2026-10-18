@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "lbcollision.h"
 
 #include <Runtime/platform.h>
@@ -378,8 +379,8 @@ float lbColl_80005EBC(const Vec3* arg0, const Vec3* arg1, const Vec3* arg2,
     d2.y = sp50.y - sp38.y;
     d2.z = sp50.z - sp38.z;
 
-    d1_dot_d1 = d1.x * d1.x + d1.y * d1.y + d1.z * d1.z;
-    d1_dot_d2 = d1.x * d2.x + d1.y * d2.y + d1.z * d2.z;
+    d1_dot_d1 = gk_fmadds(d1.z, d1.z, gk_fmadds(d1.x, d1.x, d1.y * d1.y));
+    d1_dot_d2 = gk_fmadds(d1.z, d2.z, gk_fmadds(d1.x, d2.x, d1.y * d2.y));
 
     scale = -d1_dot_d2 / d1_dot_d1;
     if (scale > 1.0) {
@@ -388,12 +389,12 @@ float lbColl_80005EBC(const Vec3* arg0, const Vec3* arg1, const Vec3* arg2,
         scale = 0.0F;
     }
 
-    x = d1.x * scale + sp50.x - arg2->x;
-    y = d1.y * scale + sp50.y - arg2->y;
-    z = d1.z * scale + sp50.z - arg2->z;
+    x = gk_fmadds(d1.x, scale, sp50.x) - arg2->x;
+    y = gk_fmadds(d1.y, scale, sp50.y) - arg2->y;
+    z = gk_fmadds(d1.z, scale, sp50.z) - arg2->z;
 
     *arg3 = scale;
-    return x * x + y * y + z * z;
+    return gk_fmadds(z, z, gk_fmadds(x, x, y * y));
 }
 
 float lbColl_80005FC0(Vec3* arg0, Vec3* arg1, Vec3* arg2, float* arg3)
@@ -417,8 +418,8 @@ float lbColl_80005FC0(Vec3* arg0, Vec3* arg1, Vec3* arg2, float* arg3)
     d2.x = sp50.x - sp38.x;
     d2.y = sp50.y - sp38.y;
 
-    d1_dot_d1 = d1.x * d1.x + d1.y * d1.y;
-    d1_dot_d2 = d1.x * d2.x + d1.y * d2.y;
+    d1_dot_d1 = gk_fmadds(d1.x, d1.x, d1.y * d1.y);
+    d1_dot_d2 = gk_fmadds(d1.x, d2.x, d1.y * d2.y);
 
     scale = -d1_dot_d2 / d1_dot_d1;
     if (scale > 1.0) {
@@ -427,11 +428,11 @@ float lbColl_80005FC0(Vec3* arg0, Vec3* arg1, Vec3* arg2, float* arg3)
         scale = 0.0F;
     }
 
-    x = d1.x * scale + sp50.x - arg2->x;
-    y = d1.y * scale + sp50.y - arg2->y;
+    x = gk_fmadds(d1.x, scale, sp50.x) - arg2->x;
+    y = gk_fmadds(d1.y, scale, sp50.y) - arg2->y;
 
     *arg3 = scale;
-    return x * x + y * y;
+    return gk_fmadds(x, x, y * y);
 }
 
 static inline bool end(Vec3* a, Vec3* b, float unk_sum)
@@ -440,7 +441,7 @@ static inline bool end(Vec3* a, Vec3* b, float unk_sum)
     float y = a->y - b->y;
     float z = a->z - b->z;
 
-    if (unk_sum * unk_sum < z * z + (x * x + y * y)) {
+    if (unk_sum * unk_sum < gk_fmadds(z, z, (gk_fmadds(x, x, y * y)))) {
         return false;
     }
 
@@ -618,20 +619,16 @@ bool lbColl_80006094(Vec3* arg0, Vec3* arg1, Vec3* arg2, Vec3* arg3,
                         d2_z = arg3_z - arg5_offset.z;
                         offset_delta_x = arg4_offset.x - arg5_offset.x;
                         d1_len_sq =
-                            (d1_z * d1_z) + ((d1_x * d1_x) + (d1_y * d1_y));
+                            gk_fmadds(d1_z, d1_z, (gk_fmadds(d1_x, d1_x, (d1_y * d1_y))));
                         d2_len_sq =
-                            (d2_z * d2_z) + ((d2_x * d2_x) + (d2_y * d2_y));
+                            gk_fmadds(d2_z, d2_z, (gk_fmadds(d2_x, d2_x, (d2_y * d2_y))));
                         d1_dot_d2 =
-                            (d1_z * d2_z) + ((d1_x * d2_x) + (d1_y * d2_y));
+                            gk_fmadds(d1_z, d2_z, (gk_fmadds(d1_x, d2_x, (d1_y * d2_y))));
                         offset_delta_z = arg4_offset.z - arg5_offset.z;
-                        d2_dot_offset_delta = (d2_z * offset_delta_z) +
-                                              ((d2_x * offset_delta_x) +
-                                               (d2_y * offset_delta_y));
-                        d1_dot_offset_delta = (d1_z * offset_delta_z) +
-                                              ((d1_x * offset_delta_x) +
-                                               (d1_y * offset_delta_y));
+                        d2_dot_offset_delta = gk_fmadds(d2_z, offset_delta_z, (gk_fmadds(d2_x, offset_delta_x, (d2_y * offset_delta_y))));
+                        d1_dot_offset_delta = gk_fmadds(d1_z, offset_delta_z, (gk_fmadds(d1_x, offset_delta_x, (d1_y * offset_delta_y))));
                         denom =
-                            (d1_len_sq * d2_len_sq) - (d1_dot_d2 * d1_dot_d2);
+                            gk_fmsubs(d1_len_sq, d2_len_sq, (d1_dot_d2 * d1_dot_d2));
 
                         {
                             float arg5_scl;
@@ -661,23 +658,19 @@ bool lbColl_80006094(Vec3* arg0, Vec3* arg1, Vec3* arg2, Vec3* arg3,
                                     float arg1_mid_x;
                                     float arg1_mid_y;
 
-                                    mid.y = 0.5 * d2_y + arg5_offset.y;
-                                    mid.x = 0.5 * d2_x + arg5_offset.x;
+                                    mid.y = gk_fmadd(0.5, d2_y, arg5_offset.y);
+                                    mid.x = gk_fmadd(0.5, d2_x, arg5_offset.x);
                                     arg4_mid_y = arg4_offset.y - mid.y;
                                     arg1_mid_y = arg1->y - mid.y;
-                                    mid.z = 0.5 * d2_z + arg5_offset.z;
+                                    mid.z = gk_fmadd(0.5, d2_z, arg5_offset.z);
                                     arg4_mid_x = arg4_offset.x - mid.x;
                                     arg1_mid_x = arg1_x - mid.x;
                                     arg4_offset_z = arg4_offset.z - mid.z;
                                     arg1_mid_z = arg1->z - mid.z;
 
                                     // lhs and rhs each the same inline
-                                    if ((arg4_offset_z * arg4_offset_z +
-                                         ((arg4_mid_x * arg4_mid_x) +
-                                          (arg4_mid_y * arg4_mid_y))) <
-                                        ((arg1_mid_z * arg1_mid_z) +
-                                         ((arg1_mid_x * arg1_mid_x) +
-                                          (arg1_mid_y * arg1_mid_y))))
+                                    if ((gk_fmadds(arg4_offset_z, arg4_offset_z, (gk_fmadds(arg4_mid_x, arg4_mid_x, (arg4_mid_y * arg4_mid_y))))) <
+                                        (gk_fmadds(arg1_mid_z, arg1_mid_z, (gk_fmadds(arg1_mid_x, arg1_mid_x, (arg1_mid_y * arg1_mid_y))))))
                                     {
                                         float scale;
 
@@ -688,12 +681,8 @@ bool lbColl_80006094(Vec3* arg0, Vec3* arg1, Vec3* arg2, Vec3* arg3,
                                         d1.z = arg3_z - arg2->z;
                                         {
                                             a2 = vec4;
-                                            dot0 = (d1.z * (c3.z - a2.z)) +
-                                                   ((d1.x * (c3.x - a2.x)) +
-                                                    (d1.y * (c3.y - a2.y)));
-                                            scale = -dot0 / ((d1.z * d1.z) +
-                                                             ((d1.x * d1.x) +
-                                                              (d1.y * d1.y)));
+                                            dot0 = gk_fmadds(d1.z, (c3.z - a2.z), (gk_fmadds(d1.x, (c3.x - a2.x), (d1.y * (c3.y - a2.y)))));
+                                            scale = -dot0 / (gk_fmadds(d1.z, d1.z, (gk_fmadds(d1.x, d1.x, (d1.y * d1.y)))));
                                         }
                                         if (scale > 1.0) {
                                             scale = 1.0F;
@@ -711,12 +700,8 @@ bool lbColl_80006094(Vec3* arg0, Vec3* arg1, Vec3* arg2, Vec3* arg3,
                                             float scale;
 
                                             b0 = *arg1;
-                                            dot1 = (d2.z * (c2.z - b0.z)) +
-                                                   ((d2.x * (c2.x - b0.x)) +
-                                                    (d2.y * (c2.y - b0.y)));
-                                            scale = -dot1 / ((d2.z * d2.z) +
-                                                             ((d2.x * d2.x) +
-                                                              (d2.y * d2.y)));
+                                            dot1 = gk_fmadds(d2.z, (c2.z - b0.z), (gk_fmadds(d2.x, (c2.x - b0.x), (d2.y * (c2.y - b0.y)))));
+                                            scale = -dot1 / (gk_fmadds(d2.z, d2.z, (gk_fmadds(d2.x, d2.x, (d2.y * d2.y)))));
 
                                             if (scale > 1.0) {
                                                 scale = 1.0F;
@@ -729,12 +714,10 @@ bool lbColl_80006094(Vec3* arg0, Vec3* arg1, Vec3* arg2, Vec3* arg3,
                                     }
                                 } else {
                                     arg4_scl =
-                                        ((d1_dot_d2 * d2_dot_offset_delta) -
-                                         (d2_len_sq * d1_dot_offset_delta)) /
+                                        (gk_fmsubs(d1_dot_d2, d2_dot_offset_delta, (d2_len_sq * d1_dot_offset_delta))) /
                                         denom;
                                     arg5_scl =
-                                        ((d1_len_sq * d2_dot_offset_delta) -
-                                         (d1_dot_d2 * d1_dot_offset_delta)) /
+                                        (gk_fmsubs(d1_len_sq, d2_dot_offset_delta, (d1_dot_d2 * d1_dot_offset_delta))) /
                                         denom;
                                     if (arg4_scl > 1.0 || arg4_scl < 0.0 ||
                                         arg5_scl > 1.0 || arg5_scl < 0.0)
@@ -787,13 +770,13 @@ bool lbColl_80006094(Vec3* arg0, Vec3* arg1, Vec3* arg2, Vec3* arg3,
                                 }
                             }
 
-                            arg4->x = d1_x * arg4_scl + arg4_offset.x;
-                            arg4->y = d1_y * arg4_scl + arg4_offset.y;
-                            arg4->z = d1_z * arg4_scl + arg4_offset.z;
+                            arg4->x = gk_fmadds(d1_x, arg4_scl, arg4_offset.x);
+                            arg4->y = gk_fmadds(d1_y, arg4_scl, arg4_offset.y);
+                            arg4->z = gk_fmadds(d1_z, arg4_scl, arg4_offset.z);
 
-                            arg5->x = d2_x * arg5_scl + arg5_offset.x;
-                            arg5->y = d2_y * arg5_scl + arg5_offset.y;
-                            arg5->z = d2_z * arg5_scl + arg5_offset.z;
+                            arg5->x = gk_fmadds(d2_x, arg5_scl, arg5_offset.x);
+                            arg5->y = gk_fmadds(d2_y, arg5_scl, arg5_offset.y);
+                            arg5->z = gk_fmadds(d2_z, arg5_scl, arg5_offset.z);
                         }
                     }
                     return end(arg4, arg5, unk_sum);
@@ -938,26 +921,26 @@ bool lbColl_800067F8(Vec3* a, Vec3* b, Vec3* c, Vec3* d, Vec3* e, Vec3* f,
                         diff_dc.y = d_y - c1_y;
 
                         sqdist2_ba =
-                            diff_ba.x * diff_ba.x + diff_ba.y * diff_ba.y;
+                            gk_fmadds(diff_ba.x, diff_ba.x, diff_ba.y * diff_ba.y);
                         sqdist2_dc =
-                            diff_dc.x * diff_dc.x + diff_dc.y * diff_dc.y;
+                            gk_fmadds(diff_dc.x, diff_dc.x, diff_dc.y * diff_dc.y);
                         dot2_diff_ba_dc =
-                            diff_ba.x * diff_dc.x + diff_ba.y * diff_dc.y;
+                            gk_fmadds(diff_ba.x, diff_dc.x, diff_ba.y * diff_dc.y);
                         diff_ac_x = a1.x - c1.x;
 
                         dot2_diff_dc_ac =
-                            diff_dc.x * diff_ac_x + diff_dc.y * diff_ac_y;
+                            gk_fmadds(diff_dc.x, diff_ac_x, diff_dc.y * diff_ac_y);
 
                         {
                             y_product = diff_ba.y * diff_ac_y;
                             dot2_diff_ba_ac =
-                                diff_ba.x * diff_ac_x + y_product;
+                                gk_fmadds(diff_ba.x, diff_ac_x, y_product);
                         }
 
                         {
                             dot_squared = dot2_diff_ba_dc * dot2_diff_ba_dc;
                             determinant =
-                                sqdist2_ba * sqdist2_dc - dot_squared;
+                                gk_fmsubs(sqdist2_ba, sqdist2_dc, dot_squared);
                         }
 
                         {
@@ -980,17 +963,15 @@ bool lbColl_800067F8(Vec3* a, Vec3* b, Vec3* c, Vec3* d, Vec3* e, Vec3* f,
                                 float a_mid_y;
                                 float b_mid_y;
 
-                                mid.y = 0.5 * diff_dc.y + c1_y;
-                                mid.x = 0.5 * diff_dc.x + c1.x;
+                                mid.y = gk_fmadd(0.5, diff_dc.y, c1_y);
+                                mid.x = gk_fmadd(0.5, diff_dc.x, c1.x);
                                 a_mid_y = a1_y - mid.y;
                                 b_mid_y = b_y - mid.y;
                                 {
                                     float a_mid_x = a1.x - mid.x;
                                     float b_mid_x = b_x - mid.x;
-                                    if ((a_mid_x * a_mid_x +
-                                         a_mid_y * a_mid_y) <
-                                        (b_mid_x * b_mid_x +
-                                         b_mid_y * b_mid_y))
+                                    if ((gk_fmadds(a_mid_x, a_mid_x, a_mid_y * a_mid_y)) <
+                                        (gk_fmadds(b_mid_x, b_mid_x, b_mid_y * b_mid_y)))
                                     {
                                         float scale;
 
@@ -1001,12 +982,8 @@ bool lbColl_800067F8(Vec3* a, Vec3* b, Vec3* c, Vec3* d, Vec3* e, Vec3* f,
                                         d1.z = d->z - c->z;
                                         {
                                             a2 = a0;
-                                            dot0 = d1.z * (c3.z - a2.z) +
-                                                   ((d1.x * (c3.x - a2.x)) +
-                                                    (d1.y * (c3.y - a2.y)));
-                                            scale = -dot0 / ((d1.z * d1.z) +
-                                                             ((d1.x * d1.x) +
-                                                              (d1.y * d1.y)));
+                                            dot0 = gk_fmadds(d1.z, (c3.z - a2.z), (gk_fmadds(d1.x, (c3.x - a2.x), (d1.y * (c3.y - a2.y)))));
+                                            scale = -dot0 / (gk_fmadds(d1.z, d1.z, (gk_fmadds(d1.x, d1.x, (d1.y * d1.y)))));
                                         }
                                         if (scale > 1.0) {
                                             scale = 1.0F;
@@ -1024,12 +1001,8 @@ bool lbColl_800067F8(Vec3* a, Vec3* b, Vec3* c, Vec3* d, Vec3* e, Vec3* f,
                                             float scale;
 
                                             b0 = *b;
-                                            dot1 = d2.z * (c2.z - b0.z) +
-                                                   ((d2.x * (c2.x - b0.x)) +
-                                                    (d2.y * (c2.y - b0.y)));
-                                            scale = -dot1 / ((d2.z * d2.z) +
-                                                             ((d2.x * d2.x) +
-                                                              (d2.y * d2.y)));
+                                            dot1 = gk_fmadds(d2.z, (c2.z - b0.z), (gk_fmadds(d2.x, (c2.x - b0.x), (d2.y * (c2.y - b0.y)))));
+                                            scale = -dot1 / (gk_fmadds(d2.z, d2.z, (gk_fmadds(d2.x, d2.x, (d2.y * d2.y)))));
                                             if (scale > 1.0) {
                                                 scale = 1.0F;
                                             } else if (scale < 0.0) {
@@ -1040,11 +1013,9 @@ bool lbColl_800067F8(Vec3* a, Vec3* b, Vec3* c, Vec3* d, Vec3* e, Vec3* f,
                                     }
                                 }
                             } else {
-                                scl_e = ((dot2_diff_ba_dc * dot2_diff_dc_ac) -
-                                         (sqdist2_dc * dot2_diff_ba_ac)) /
+                                scl_e = (gk_fmsubs(dot2_diff_ba_dc, dot2_diff_dc_ac, (sqdist2_dc * dot2_diff_ba_ac))) /
                                         determinant;
-                                scl_f = ((sqdist2_ba * dot2_diff_dc_ac) -
-                                         (dot2_diff_ba_dc * dot2_diff_ba_ac)) /
+                                scl_f = (gk_fmsubs(sqdist2_ba, dot2_diff_dc_ac, (dot2_diff_ba_dc * dot2_diff_ba_ac))) /
                                         determinant;
                                 if ((scl_e > 1.0) || (scl_e < 0.0) ||
                                     (scl_f > 1.0) || (scl_f < 0.0))
@@ -1084,12 +1055,12 @@ bool lbColl_800067F8(Vec3* a, Vec3* b, Vec3* c, Vec3* d, Vec3* e, Vec3* f,
                                 }
                             }
 
-                            e->x = diff_ba.x * scl_e + a1.x;
-                            e->y = diff_ba.y * scl_e + a1_y;
+                            e->x = gk_fmadds(diff_ba.x, scl_e, a1.x);
+                            e->y = gk_fmadds(diff_ba.y, scl_e, a1_y);
                             e->z = 0.0f;
 
-                            f->x = diff_dc.x * scl_f + c1.x;
-                            f->y = diff_dc.y * scl_f + c1_y;
+                            f->x = gk_fmadds(diff_dc.x, scl_f, c1.x);
+                            f->y = gk_fmadds(diff_dc.y, scl_f, c1_y);
                             f->z = 0.0f;
                         }
                     }
@@ -1100,7 +1071,7 @@ bool lbColl_800067F8(Vec3* a, Vec3* b, Vec3* c, Vec3* d, Vec3* e, Vec3* f,
     {
         float x = e->x - f->x;
         float y = e->y - f->y;
-        distance_sq = x * x + y * y;
+        distance_sq = gk_fmadds(x, x, y * y);
         if (sum_pq * sum_pq < distance_sq) {
             return false;
         }

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "textdraw.h"
 
 #include <Runtime/platform.h>
@@ -201,15 +202,15 @@ void DevText_Draw(DevText* text)
             GXColor color = text->bg_color;
             GXColor* color_ptr = &color;
             DrawRectangle(text->x - 8, text->y - 8,
-                          text->scale_x * text->w + 8,
-                          text->scale_y * text->h + 8, color_ptr);
+                          gk_fmadds(text->scale_x, text->w, 8),
+                          gk_fmadds(text->scale_y, text->h, 8), color_ptr);
         }
         {
             GXColor color = text->bg_color;
             GXColor* color_ptr = &color;
             DrawRectangle(text->x - 4, text->y - 4,
-                          text->scale_x * text->w + 4,
-                          text->scale_y * text->h + 4, color_ptr);
+                          gk_fmadds(text->scale_x, text->w, 4),
+                          gk_fmadds(text->scale_y, text->h, 4), color_ptr);
         }
     }
     if ((text->flags & DEVTEXT_FLAG_HIDETEXT) == 0) {
@@ -242,8 +243,8 @@ void DevText_Draw(DevText* text)
                 text->unk = 0;
             } else if (8 < text->unk) {
                 GXColor color = { 0xFF, 0xFF, 0xFF, 0xC0 };
-                DrawRectangle(text->x + text->scale_x * text->cursor_x,
-                              text->y + text->scale_y * text->cursor_y - 4,
+                DrawRectangle(gk_fmadds(text->scale_x, text->cursor_x, text->x),
+                              gk_fmadds(text->scale_y, text->cursor_y, text->y) - 4,
                               text->scale_x, text->scale_y, &color);
             }
         }

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mndiagram2.h"
 
 #include <sysdolphin/baselib/forward.h>
@@ -666,8 +667,7 @@ void mnDiagram2_CreateStatRow(HSD_GObj* gobj, u8 is_name_mode, u8 stat_type,
                                                     entity),
                             0);
                         HSD_JObjSetTranslateX(jobj, base->icon_pos.x);
-                        HSD_JObjSetTranslateY(jobj, (f30 * (f32) row_idx) +
-                                                        base->icon_pos.y);
+                        HSD_JObjSetTranslateY(jobj, gk_fmadds(f30, (f32) row_idx, base->icon_pos.y));
                         HSD_JObjSetTranslateZ(jobj, base->icon_pos.z);
 
                         HSD_JObjAddChild(data->icon_parent, jobj);

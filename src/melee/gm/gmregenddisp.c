@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <melee/ft/forward.h>
 
 #include <math.h>
@@ -163,9 +164,9 @@ void gm_801A85E4(HSD_JObj* jobj, s32 arg1, s32 arg2)
             idx = arg2 + 2;
         }
         angle =
-            0.017453292f * ((45.0f * (f32) idx) + (2.0f * HSD_Randf()) - 1.0f);
+            0.017453292f * (gk_fmadds(45.0f, (f32) idx, (2.0f * HSD_Randf())) - 1.0f);
         HSD_JObjSetTranslateX(jobj, 25.0f * cosf(angle));
-        HSD_JObjSetTranslateZ(jobj, 0.9f * ((25.0f * -sinf(angle)) + -18.0f));
+        HSD_JObjSetTranslateZ(jobj, 0.9f * (gk_fmadds(25.0f, -sinf(angle), -18.0f)));
     } else if (arg1 <= 0xC) {
         arg2 = 0xC - arg1;
         temp_idx = arg2 + 8;
@@ -175,9 +176,9 @@ void gm_801A85E4(HSD_JObj* jobj, s32 arg1, s32 arg2)
             idx = arg2 + 8;
         }
         angle = 0.017453292f *
-                ((25.714285f * (f32) (idx - 5)) + (4.0f * HSD_Randf()) - 2.0f);
+                (gk_fmadds(25.714285f, (f32) (idx - 5), (4.0f * HSD_Randf())) - 2.0f);
         HSD_JObjSetTranslateX(jobj, 50.0f * cosf(angle));
-        HSD_JObjSetTranslateZ(jobj, 0.9f * ((50.0f * -sinf(angle)) + -18.0f));
+        HSD_JObjSetTranslateZ(jobj, 0.9f * (gk_fmadds(50.0f, -sinf(angle), -18.0f)));
     } else if (arg1 <= 0x15) {
         arg2 = 0x15 - arg1;
         temp_idx = arg2 + 0x11;
@@ -187,9 +188,9 @@ void gm_801A85E4(HSD_JObj* jobj, s32 arg1, s32 arg2)
             idx = arg2 + 0x11;
         }
         angle =
-            0.017453292f * ((22.5f * (f32) (idx - 0xD)) + HSD_Randf() - 0.5f);
+            0.017453292f * (gk_fmadds(22.5f, (f32) (idx - 0xD), HSD_Randf()) - 0.5f);
         HSD_JObjSetTranslateX(jobj, 75.0f * cosf(angle));
-        HSD_JObjSetTranslateZ(jobj, 0.8f * ((75.0f * -sinf(angle)) + -18.0f));
+        HSD_JObjSetTranslateZ(jobj, 0.8f * (gk_fmadds(75.0f, -sinf(angle), -18.0f)));
     } else if (arg1 == 0x16) {
         HSD_JObjSetTranslateX(jobj, -80.0f);
         HSD_JObjSetTranslateZ(jobj, -70.0f);

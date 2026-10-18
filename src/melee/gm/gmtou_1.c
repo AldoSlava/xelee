@@ -1,4 +1,5 @@
 
+#include <pc/gekko_fp.h>
 #include <placeholder.h>
 
 #include "forward.h"
@@ -581,11 +582,11 @@ void fn_80196FFC(HSD_GObj* gobj)
 
     players = tm->x30;
     if ((s32) players == 4) {
-        x = (13.0f * (f32) pnum) + -19.5f;
+        x = gk_fmadds(13.0f, (f32) pnum, -19.5f);
     } else if ((s32) players == 3) {
-        x = 6.5f + ((13.0f * (f32) pnum) - 19.5f);
+        x = 6.5f + (gk_fmsubs(13.0f, (f32) pnum, 19.5f));
     } else {
-        x = 6.5f + ((13.0f * (2.0f * (f32) pnum)) - 19.5f);
+        x = 6.5f + (gk_fmsubs(13.0f, (2.0f * (f32) pnum), 19.5f));
     }
 
     HSD_JObjSetTranslateX(jobj, x);
@@ -1294,14 +1295,14 @@ void fn_80198EBC(void)
         HSD_MObjRemoveAnimByFlags(c->u.dobj->mobj, 4);
 
         if (td->x30 == 4) {
-            pos = 73.0f + (240.0f * (f32) i + 152.0f);
+            pos = 73.0f + (gk_fmadds(240.0f, (f32) i, 152.0f));
         } else if (td->x30 == 3) {
-            pos = 73.0f + (240.0f * (f32) i + 270.0f);
+            pos = 73.0f + (gk_fmadds(240.0f, (f32) i, 270.0f));
         } else {
-            pos = 73.0f + (240.0f * (2.0f * (f32) i) + 270.0f);
+            pos = 73.0f + (gk_fmadds(240.0f, (2.0f * (f32) i), 270.0f));
         }
         fn_8018ECA8(td->x4B8[i].x6, td->x4B8[i].x0, 5,
-                    0.99f * (pos - 320.0f) - 261.0f, -42.0f, 5);
+                    gk_fmsubs(0.99f, (pos - 320.0f), 261.0f), -42.0f, 5);
 
         td->x524[2]->hidden = true;
 
@@ -1345,11 +1346,11 @@ void fn_80198EBC(void)
         fn_8018FBD8(gobj, i);
 
         if ((s32) td->x30 == 4) {
-            pos = 13.0f * (f32) i + -19.5f;
+            pos = gk_fmadds(13.0f, (f32) i, -19.5f);
         } else if ((s32) td->x30 == 3) {
-            pos = 6.5f + (13.0f * (f32) i - 19.5f);
+            pos = 6.5f + (gk_fmsubs(13.0f, (f32) i, 19.5f));
         } else {
-            pos = 6.5f + (13.0f * (2.0f * (f32) i) - 19.5f);
+            pos = 6.5f + (gk_fmsubs(13.0f, (2.0f * (f32) i), 19.5f));
         }
         /* 2.8f - 1 ulp (0x4033332F) */
         fn_8018FDC4(jobj, pos - 2.7999989986419678f, 6.8f, 0.001f);

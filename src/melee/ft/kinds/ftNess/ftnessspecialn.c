@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftnessspecialn.h"
 
 #include <Runtime/platform.h>
@@ -104,7 +105,7 @@ void ftNs_PKFlash_Init(HSD_GObj* gobj)
 
         lb_8000B1CC(fighter_data2->parts[FtPart_L2ndNa].joint, NULL, &vec);
         vec.z = 0.0f;
-        vec.y += 3.0f * fighter_data2->x34_scale.y;
+        vec.y = gk_fmadds(3.0f, fighter_data2->x34_scale.y, vec.y);
 
         {
             HSD_GObj* flash_GObj = it_802AA8C0(

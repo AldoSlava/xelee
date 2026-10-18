@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftkirbyspecialpikachu.h"
 
 #include <melee/ft/forward.h>
@@ -67,22 +68,18 @@ void ftKb_PkSpecialN_Anim(Fighter_GObj* gobj)
             fp->cmd_vars[ftPk_SpecialN_Cmd1] = true;
             switch (fp->u.kb.hat.kind) {
             case Ft_Kind_Pikachu:
-                it_pos.x = (fp->x34_scale.y * (da->specialn_pk_spawn_offset.x *
-                                               fp->facing_dir)) +
-                           fp->cur_pos.x;
-                it_pos.y = (da->specialn_pk_spawn_offset.y * fp->x34_scale.y) +
-                           fp->cur_pos.y;
+                it_pos.x = gk_fmadds(fp->x34_scale.y, (da->specialn_pk_spawn_offset.x *
+                                               fp->facing_dir), fp->cur_pos.x);
+                it_pos.y = gk_fmadds(da->specialn_pk_spawn_offset.y, fp->x34_scale.y, fp->cur_pos.y);
                 it_pos.z = 0.0f;
                 itPikachuThunderJolt_Spawn(gobj, &it_pos, fp->facing_dir,
                                            da->specialn_pk_itkind);
                 ft_PlaySFX(fp, 240076, 127, 64);
                 break;
             case Ft_Kind_Pichu:
-                it_pos.x = (fp->x34_scale.y * (da->specialn_pc_spawn_offset.x *
-                                               fp->facing_dir)) +
-                           fp->cur_pos.x;
-                it_pos.y = (da->specialn_pc_spawn_offset.y * fp->x34_scale.y) +
-                           fp->cur_pos.y;
+                it_pos.x = gk_fmadds(fp->x34_scale.y, (da->specialn_pc_spawn_offset.x *
+                                               fp->facing_dir), fp->cur_pos.x);
+                it_pos.y = gk_fmadds(da->specialn_pc_spawn_offset.y, fp->x34_scale.y, fp->cur_pos.y);
                 it_pos.z = 0.0f;
                 itPikachuThunderJolt_Spawn(gobj, &it_pos, fp->facing_dir,
                                            da->specialn_pc_itkind);
@@ -114,12 +111,9 @@ void ftKb_PkSpecialAirN_Anim(Fighter_GObj* gobj)
             switch (fp->u.kb.hat.kind) {
             case Ft_Kind_Pikachu:
                 it_pos.x =
-                    (fp->x34_scale.y *
-                     (da->specialairn_pk_spawn_offset.x * fp->facing_dir)) +
-                    fp->cur_pos.x;
+                    gk_fmadds(fp->x34_scale.y, (da->specialairn_pk_spawn_offset.x * fp->facing_dir), fp->cur_pos.x);
                 it_pos.y =
-                    (da->specialairn_pk_spawn_offset.y * fp->x34_scale.y) +
-                    fp->cur_pos.y;
+                    gk_fmadds(da->specialairn_pk_spawn_offset.y, fp->x34_scale.y, fp->cur_pos.y);
                 it_pos.z = 0.0f;
                 itPikachuThunderJolt_Spawn(gobj, &it_pos, fp->facing_dir,
                                            da->specialn_pk_itkind);
@@ -127,12 +121,9 @@ void ftKb_PkSpecialAirN_Anim(Fighter_GObj* gobj)
                 break;
             case Ft_Kind_Pichu:
                 it_pos.x =
-                    (fp->x34_scale.y *
-                     (da->specialairn_pc_spawn_offset.x * fp->facing_dir)) +
-                    fp->cur_pos.x;
+                    gk_fmadds(fp->x34_scale.y, (da->specialairn_pc_spawn_offset.x * fp->facing_dir), fp->cur_pos.x);
                 it_pos.y =
-                    (da->specialairn_pc_spawn_offset.y * fp->x34_scale.y) +
-                    fp->cur_pos.y;
+                    gk_fmadds(da->specialairn_pc_spawn_offset.y, fp->x34_scale.y, fp->cur_pos.y);
                 it_pos.z = 0.0f;
                 itPikachuThunderJolt_Spawn(gobj, &it_pos, fp->facing_dir,
                                            da->specialn_pc_itkind);

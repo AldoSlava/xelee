@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_ItemThrow.h"
 
 #include <Runtime/platform.h>
@@ -540,10 +541,10 @@ void ftCo_80095EFC(Fighter_GObj* gobj)
                         ITEM_THROW_ATTRS(fp->motion_id)->x8;
                     throw_speed = scale.value;
                     interpolation =
-                        fsm * (fp->mv.co.itemthrow4.x8.x - vec0.x) + vec0.x;
+                        gk_fmadds(fsm, (fp->mv.co.itemthrow4.x8.x - vec0.x), vec0.x);
                     vec2.x = interpolation;
                     interpolation =
-                        fsm * (fp->mv.co.itemthrow4.x8.y - vec0.y) + vec0.y;
+                        gk_fmadds(fsm, (fp->mv.co.itemthrow4.x8.y - vec0.y), vec0.y);
                     vec2.y = interpolation;
                     vec2.z = 0;
                     pl_8003E978(fp->player_idx, fp->is_sub_fighter,

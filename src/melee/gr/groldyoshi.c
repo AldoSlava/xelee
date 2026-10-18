@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "groldyoshi.h"
 
 #include <Runtime/platform.h>
@@ -356,7 +357,7 @@ void grOldYoshi_8020F088(Ground_GObj* arg)
         }
         grAnime_801C8138(arg, gp->map_id, 0);
         dVar10 = HSD_Randf();
-        dVar9 = yakumono_param->x18 * (dVar10 * 2.0f - 1.0f);
+        dVar9 = yakumono_param->x18 * (gk_fmsubs(dVar10, 2.0f, 1.0f));
         HSD_JObjSetTranslateY(arg->hsd_obj, dVar9);
     } else {
         HSD_JObj* jobj = Ground_801C3FA4(arg, gp->u.oldyoshiguest.xC6);
@@ -446,7 +447,7 @@ float grOldYoshi_8020F31C(float param1, float param2, float param3,
     } else {
         fVar2 = param1;
     }
-    fVar4 = fVar3 * (-param2 * 0.5f * fVar3) + (fVar3 * fVar2);
+    fVar4 = gk_fmadds(fVar3, (-param2 * 0.5f * fVar3), (fVar3 * fVar2));
     param1 = grOldYoshi_8020F31C_inline(param1, param2, param3, param4, fVar4);
     if (param1 > param5) {
         return param5;

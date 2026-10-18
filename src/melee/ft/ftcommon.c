@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftcommon.h"
 
 #include <melee/it/forward.h>
@@ -657,7 +658,7 @@ void ftCommon_8007DA24(Fighter* fp)
 
 float ftCommon_CalcHitlag(int dmg, FtMotionId msid, float mul)
 {
-    int tmp = dmg * p_ftCommonData->x198 + p_ftCommonData->x19C;
+    int tmp = gk_fmadds(dmg, p_ftCommonData->x198, p_ftCommonData->x19C);
     float result = (int) (tmp * mul);
     if ((unsigned) msid - ftCo_MS_Squat <= 1) {
         result = (int) (result * p_ftCommonData->x1A0);
@@ -774,8 +775,8 @@ void ftCommon_8007DD7C(HSD_GObj* gobj, Vec3* v)
             {
                 ftCommon_8007F8B4(cur_ft, &sp24);
                 vtmp = &cur_ft->x2C4;
-                temp_f0 = (temp_r31->x * arg_ft->facing_dir + v->x) -
-                          (cur_ft->facing_dir * vtmp->x + sp24.x);
+                temp_f0 = (gk_fmadds(temp_r31->x, arg_ft->facing_dir, v->x)) -
+                          (gk_fmadds(cur_ft->facing_dir, vtmp->x, sp24.x));
                 if (ABS(temp_f0) < temp_r31->y + vtmp->y) {
                     if (temp_f0) {
                         arg_ft->xF8_playerNudgeVel.x +=
@@ -834,8 +835,8 @@ void ftCommon_8007DFD0(HSD_GObj* gobj, Vec3* arg1)
         {
             ftCommon_8007F8B4(temp_r3, &sp1C);
             tmp = &temp_r3->x2C4;
-            temp_f1 = (temp_r31->x * fp->facing_dir + arg1->x) -
-                      (temp_r3->facing_dir * tmp->x + sp1C.x);
+            temp_f1 = (gk_fmadds(temp_r31->x, fp->facing_dir, arg1->x)) -
+                      (gk_fmadds(temp_r3->facing_dir, tmp->x, sp1C.x));
             if (ABS(temp_f1) < temp_r31->y + tmp->y) {
                 fp->xF8_playerNudgeVel.y -= p_ftCommonData->x45C;
             }
@@ -979,9 +980,9 @@ void ftCommon_8007E3EC(HSD_GObj* gobj)
         sp10.x -= fp->x1A7C.x;
         sp10.y -= fp->x1A7C.y;
         sp10.z -= fp->x1A7C.z;
-        fp->x1A7C.x += sp10.x * fp->x1A6C;
-        fp->x1A7C.y += sp10.y * fp->x1A6C;
-        fp->x1A7C.z += sp10.z * fp->x1A6C;
+        fp->x1A7C.x = gk_fmadds(sp10.x, fp->x1A6C, fp->x1A7C.x);
+        fp->x1A7C.y = gk_fmadds(sp10.y, fp->x1A6C, fp->x1A7C.y);
+        fp->x1A7C.z = gk_fmadds(sp10.z, fp->x1A6C, fp->x1A7C.z);
         HSD_JObjSetTranslate(jobj, &fp->x1A7C);
     }
 }
@@ -1212,7 +1213,7 @@ void ftCommon_8007ED2C(Fighter* fp)
 
 void ftCommon_8007ED50(Fighter* fp, s32 arg1)
 {
-    float tmp = arg1 * p_ftCommonData->x138 + p_ftCommonData->x13C;
+    float tmp = gk_fmadds(arg1, p_ftCommonData->x138, p_ftCommonData->x13C);
     s32 val2 = tmp;
     if ((s32) tmp < 1) {
         return;
@@ -1222,7 +1223,7 @@ void ftCommon_8007ED50(Fighter* fp, s32 arg1)
 
 void ftCommon_8007EE0C(Fighter* fp, s32 arg1)
 {
-    float tmp = arg1 * p_ftCommonData->xEC + p_ftCommonData->xF0;
+    float tmp = gk_fmadds(arg1, p_ftCommonData->xEC, p_ftCommonData->xF0);
     s32 val2 = tmp;
     if ((s32) tmp < 1) {
         return;
@@ -1621,7 +1622,7 @@ void ftCommon_8007FDA0(HSD_GObj* gobj)
 
     fp = gobj->user_data;
     temp_r30 = &fp->co_attrs.x130;
-    phi_f31 = my_fminf(p_ftCommonData->x710 * fp->x2024 + p_ftCommonData->x708,
+    phi_f31 = my_fminf(gk_fmadds(p_ftCommonData->x710, fp->x2024, p_ftCommonData->x708),
                        p_ftCommonData->x70C);
     temp_f1 = 1.0f / phi_f31;
     sp20.x = temp_r30->x;
@@ -1711,8 +1712,7 @@ void ftCommon_80080174(Fighter* fp)
     }
     if (fp->x1980 != NULL) {
         v = &fp->co_attrs.x130;
-        if ((phi_f2 = p_ftCommonData->x710 * fp->x2024 +
-                      p_ftCommonData->x708) > (phi_f3 = p_ftCommonData->x70C))
+        if ((phi_f2 = gk_fmadds(p_ftCommonData->x710, fp->x2024, p_ftCommonData->x708)) > (phi_f3 = p_ftCommonData->x70C))
         {
             phi_f2 = phi_f3;
         }

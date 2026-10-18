@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itpeachtoadspore.h"
 
 #include <melee/it/forward.h>
@@ -56,12 +57,12 @@ void it_802BE2E8(Item_GObj* item_gobj, HSD_GObj* arg1)
     item_1->xDAC_itcmd_var0 = 0;
 
     rand = HSD_Randf();
-    speed = attr->x0_min_speed + attr->x4_max_speed_offset * rand;
+    speed = gk_fmadds(attr->x4_max_speed_offset, rand, attr->x0_min_speed);
 
     rand = HSD_Randf();
     double_angle = ((f32) M_PI) - attr->xc_angle;
     angle_offset = attr->xc_angle * rand;
-    angle = 0.5F * double_angle + angle_offset;
+    angle = gk_fmadds(0.5F, double_angle, angle_offset);
 
     item_1->x40_vel.x = item_1->facing_dir * (speed * sinf(angle));
     item_1->x40_vel.y = speed * cosf(angle);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <melee/ft/forward.h>
 
 #include <placeholder.h>
@@ -71,7 +72,7 @@ void ftKb_SpecialNSk_8010603C(Fighter_GObj* gobj)
                 } else {
                     y_offset = da->specialn_sk_graphic_y_offset_air;
                 }
-                pos.y += fp->x34_scale.y * y_offset;
+                pos.y = gk_fmadds(fp->x34_scale.y, y_offset, pos.y);
             }
             pos.z = 0.0f;
             {
@@ -474,19 +475,12 @@ void fn_80106DB0(Fighter_GObj* gobj)
             Vec3 pos = fp->cur_pos;
             PAD_STACK(4);
             if (fp->ground_or_air == GA_Ground) {
-                pos.x +=
-                    fp->x34_scale.y *
-                    (da->specialn_sk_graphic_x_offset_ground * fp->facing_dir);
-                pos.y += fp->x34_scale.y *
-                         (da->specialn_sk_graphic_y_offset_ground +
-                          ftKb_Init_803CB770[perm_randi(9)]);
+                pos.x = gk_fmadds(fp->x34_scale.y, (da->specialn_sk_graphic_x_offset_ground * fp->facing_dir), pos.x);
+                pos.y = gk_fmadds(fp->x34_scale.y, (da->specialn_sk_graphic_y_offset_ground +
+                          ftKb_Init_803CB770[perm_randi(9)]), pos.y);
             } else {
-                pos.x +=
-                    fp->x34_scale.y *
-                    (da->specialn_sk_graphic_x_offset_air * fp->facing_dir);
-                pos.y += fp->x34_scale.y *
-                         (2.0f * ftKb_Init_803CB770[perm_randi(9)] +
-                          da->specialn_sk_graphic_y_offset_air);
+                pos.x = gk_fmadds(fp->x34_scale.y, (da->specialn_sk_graphic_x_offset_air * fp->facing_dir), pos.x);
+                pos.y = gk_fmadds(fp->x34_scale.y, (gk_fmadds(2.0f, ftKb_Init_803CB770[perm_randi(9)], da->specialn_sk_graphic_y_offset_air)), pos.y);
             }
             pos.z = 0.0f;
             {

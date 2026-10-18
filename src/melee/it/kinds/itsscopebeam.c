@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itsscopebeam.h"
 
 #include <math.h>
@@ -163,7 +164,7 @@ bool itSscopebeam_UnkMotion9_Coll(Item_GObj* gobj)
             rand = HSD_Randf();
             lbVector_RotateAboutUnitAxis(
                 &vel, &axis,
-                (2.0f * angle) + (ip->facing_dir * (attrs->x78 * rand)));
+                gk_fmadds(2.0f, angle, (ip->facing_dir * (attrs->x78 * rand))));
             ip->x40_vel.x = vel.x;
             ip->x40_vel.y = vel.y;
             if (ip->x40_vel.y <= 0.0f) {

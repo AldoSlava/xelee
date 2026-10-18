@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftseakspecialhi.h"
 
 #include <melee/ft/forward.h>
@@ -381,9 +382,9 @@ static inline float my_sqrtf(float x)
 
         if (x > 0.0f) {
             double guess = __frsqrte(x);
-            guess = 0.5 * guess * (3.0 - guess * guess * x);
-            guess = 0.5 * guess * (3.0 - guess * guess * x);
-            guess = 0.5 * guess * (3.0 - guess * guess * x);
+            guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+            guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+            guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
             y = (float) (x * guess);
             return y;
         }
@@ -427,7 +428,7 @@ void ftSk_SpecialHi_80113838(Fighter_GObj* gobj)
                     {
                         f32 temp_f6;
                         temp_f6 =
-                            ((attributes->x44 * stick_mag) + attributes->x48) *
+                            (gk_fmadds(attributes->x44, stick_mag, attributes->x48)) *
                             cosf(temp_f1_5);
                         fp->gr_vel = fp->facing_dir * temp_f6;
                     }
@@ -489,9 +490,9 @@ void ftSk_SpecialHi_80113A30(Fighter_GObj* gobj)
     }
     fp->self_vel.x =
         fp->facing_dir *
-        (((attributes->x44 * var_f31) + attributes->x48) * cosf(var_f30));
+        ((gk_fmadds(attributes->x44, var_f31, attributes->x48)) * cosf(var_f30));
     fp->self_vel.y =
-        ((attributes->x44 * var_f31) + attributes->x48) * sinf(var_f30);
+        (gk_fmadds(attributes->x44, var_f31, attributes->x48)) * sinf(var_f30);
     Fighter_ChangeMotionState(gobj, 0x167, 0U, 35.0f, 1.0f, 0.0f, NULL);
     ftAnim_8006EBA4(gobj);
     ftAnim_SetAnimRate(gobj, 0.0f);

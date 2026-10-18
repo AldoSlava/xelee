@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "tydisplay.h"
 
 #include <Runtime/platform.h>
@@ -1052,7 +1053,7 @@ void _tyDisplay_80319994(s32 arg0)
                     cur->pos[0].x = 0.0f;
                     cur->pos[0].z = 0.0f;
                 } else {
-                    cur->pos[0].x = 9.0f * (f32) col + xoff;
+                    cur->pos[0].x = gk_fmadds(9.0f, (f32) col, xoff);
                     if (pivot != 0) {
                         cur->pos[0].z = -9.0f * (f32) row;
                     } else {
@@ -1293,7 +1294,7 @@ void _tyDisplay_8031A4EC(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x20 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x20 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     zero = 0;
@@ -1306,7 +1307,7 @@ void _tyDisplay_8031A4EC(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x24 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x24 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     cfg->x30 = Toy_80305EB4();
@@ -1321,7 +1322,7 @@ void _tyDisplay_8031A4EC(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x30 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x30 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     val = cfg->x34;
@@ -1333,7 +1334,7 @@ void _tyDisplay_8031A4EC(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x34 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x34 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     if (cfg->x74 != 0) {
@@ -1357,7 +1358,7 @@ void _tyDisplay_8031A4EC(HSD_GObj* arg0)
     {
         stick = cfg->x20;
         if (stick != zero) {
-            cfg->x10 = -(stick * (0.02f * fov) - cfg->x10);
+            cfg->x10 = -(gk_fmsubs(stick, (0.02f * fov), cfg->x10));
             if (cfg->x10 < -cfg->x1C) {
                 cfg->x10 = -cfg->x1C;
             }
@@ -1370,7 +1371,7 @@ void _tyDisplay_8031A4EC(HSD_GObj* arg0)
     {
         stick = cfg->x24;
         if (stick != zero) {
-            cfg->x0C = (stick * (0.02f * fov)) + cfg->x0C;
+            cfg->x0C = gk_fmadds(stick, (0.02f * fov), cfg->x0C);
             if (cfg->x0C < -cfg->x18) {
                 cfg->x0C = -cfg->x18;
             }
@@ -1454,7 +1455,7 @@ void _tyDisplay_8031A94C(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x20 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x20 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     val = cfg->x24;
@@ -1466,7 +1467,7 @@ void _tyDisplay_8031A94C(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x24 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x24 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     cfg->x30 = Toy_80305EB4();
@@ -1481,7 +1482,7 @@ void _tyDisplay_8031A94C(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x30 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x30 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     val = cfg->x34;
@@ -1493,7 +1494,7 @@ void _tyDisplay_8031A94C(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        cfg->x34 = -(0.2f * (f32) sign - val) / 0.8f;
+        cfg->x34 = -(gk_fmsubs(0.2f, (f32) sign, val)) / 0.8f;
     }
 
     if (cfg->x74 != 0) {
@@ -1561,7 +1562,7 @@ void _tyDisplay_8031A94C(HSD_GObj* arg0)
             f32 stick = cfg->x20;
             f32 zero = 0.0f;
             if (stick != zero) {
-                cfg->x10 = -(stick * (0.02f * fov) - cfg->x10);
+                cfg->x10 = -(gk_fmsubs(stick, (0.02f * fov), cfg->x10));
                 if (cfg->x10 < -cfg->x1C) {
                     cfg->x10 = -cfg->x1C;
                 }
@@ -1572,7 +1573,7 @@ void _tyDisplay_8031A94C(HSD_GObj* arg0)
             {
                 f32 stick2 = cfg->x24;
                 if (stick2 != zero) {
-                    cfg->x0C = (stick2 * (0.02f * fov)) + cfg->x0C;
+                    cfg->x0C = gk_fmadds(stick2, (0.02f * fov), cfg->x0C);
                     if (cfg->x0C < -cfg->x18) {
                         cfg->x0C = -cfg->x18;
                     }

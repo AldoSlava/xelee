@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftlib.h"
 #include <pc/pc.h>
 #include <stdlib.h>
@@ -162,7 +163,7 @@ HSD_GObj* ftLib_FindNearestOpponent(Vec3* pos, HSD_GObj* gobj)
         ftLib_GetCameraBonePos(cur, &cur_v);
         dx = pos->x - cur_v.x;
         dy = pos->y - cur_v.y;
-        dist = (dx * dx) + (dy * dy);
+        dist = gk_fmadds(dx, dx, (dy * dy));
 
         if (dist < min_dist) {
             min_dist = dist;
@@ -218,7 +219,7 @@ Fighter_GObj* ftLib_FindNearestOpponentInDir(Vec3* v, Fighter_GObj* gobj,
 
         dx = v->x - sp24.x;
         dy = v->y - sp24.y;
-        diff = dx * dx + dy * dy;
+        diff = gk_fmadds(dx, dx, dy * dy);
 
         if (diff < min_diff) {
             min_diff = diff;

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ittarucann.h"
 
 #include <sysdolphin/baselib/forward.h>
@@ -103,8 +104,8 @@ void it_80295F38(Item_GObj* gobj)
             angle -= 2.0 * M_PI;
         }
         launch_pos = ip->pos;
-        launch_pos.x += 8.0f * cosf(angle);
-        launch_pos.y += 8.0f * sinf(angle);
+        launch_pos.x = gk_fmadds(8.0f, cosf(angle), launch_pos.x);
+        launch_pos.y = gk_fmadds(8.0f, sinf(angle), launch_pos.y);
         ftCo_800C92E4(ip->xDD4_itemVar.tarucann.x20, &launch_pos, &ip->pos,
                       &params, (f32) (180.0 / M_PI) * angle);
         it_802975F4(gobj);
@@ -219,7 +220,7 @@ void it_802962E0(Item_GObj* gobj)
                 var_f1 = -var_f1;
             }
             if (var_f1 < da->x18) {
-                ip->xDD4_itemVar.tarucann.x10 += temp_f2 * da->x10;
+                ip->xDD4_itemVar.tarucann.x10 = gk_fmadds(temp_f2, da->x10, ip->xDD4_itemVar.tarucann.x10);
             }
         } else {
             temp_f1 = ip->xDD4_itemVar.tarucann.x10;
@@ -259,14 +260,11 @@ void it_802962E0(Item_GObj* gobj)
         if (var_f2 < 0.0f) {
             var_f2 = -var_f2;
         }
-        ip->xDD4_itemVar.tarucann.xC +=
-            ip->xDD4_itemVar.tarucann.x28 *
-            (0.12217305f * var_f2 * -ip->facing_dir);
+        ip->xDD4_itemVar.tarucann.xC = gk_fmadds(ip->xDD4_itemVar.tarucann.x28, (0.12217305f * var_f2 * -ip->facing_dir), ip->xDD4_itemVar.tarucann.xC);
     } else {
-        ip->xDD4_itemVar.tarucann.xC +=
-            0.10471976f * -ip->facing_dir * ip->xDD4_itemVar.tarucann.x28;
+        ip->xDD4_itemVar.tarucann.xC = gk_fmadds(0.10471976f * -ip->facing_dir, ip->xDD4_itemVar.tarucann.x28, ip->xDD4_itemVar.tarucann.xC);
     }
-    ip->xDD4_itemVar.tarucann.xC += da->x50 * -ip->facing_dir;
+    ip->xDD4_itemVar.tarucann.xC = gk_fmadds(da->x50, -ip->facing_dir, ip->xDD4_itemVar.tarucann.xC);
 }
 
 bool itTarucann_UnkMotion0_Anim(Item_GObj* gobj)

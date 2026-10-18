@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "gricemt.h"
 
 #include <Runtime/platform.h>
@@ -854,8 +855,7 @@ void stageGObj10_GObjProc(Ground_GObj* arg0)
             gp->u.icemt10.x0.state.cur = 0.0f;
         } else {
             ratio = gp->u.icemt10.x0.state.cur / yakumono_param->xA0;
-            if (gp->u.icemt10.x0.state.cur * ratio -
-                    (ratio * (0.5f * yakumono_param->xA0 * ratio)) >
+            if (gk_fmsubs(gp->u.icemt10.x0.state.cur, ratio, (ratio * (0.5f * yakumono_param->xA0 * ratio))) >
                 dist)
             {
                 gp->u.icemt10.x0.state.cur -= yakumono_param->xA0;
@@ -1271,9 +1271,9 @@ void stageGObj8_GObjProc(Ground_GObj* arg0)
     cur = HSD_JObjGetTranslationY(jobj);
     cur = cur - mul;
     if (cur > 0.5f * (3500.0f * Ground_801C0498())) {
-        cur = -(3500.0f * Ground_801C0498() - cur);
+        cur = -(gk_fmsubs(3500.0f, Ground_801C0498(), cur));
     } else if (cur < 0.5f * -(3500.0f * Ground_801C0498())) {
-        cur += 3500.0f * Ground_801C0498();
+        cur = gk_fmadds(3500.0f, Ground_801C0498(), cur);
     }
     HSD_JObjSetTranslateY(jobj, cur);
 }
@@ -1660,8 +1660,7 @@ float grIceMt_801F993C(int under_id, int upper_id)
     }
     HSD_ASSERT(2722, under_ix<ICEMT_FIELD_MAX);
 
-    return -((y * icemt_field[upper_ix].x8) -
-             (y * icemt_field[under_ix].x4 + yakumono_param->x40));
+    return -(gk_fmsubs(y, icemt_field[upper_ix].x8, (gk_fmadds(y, icemt_field[under_ix].x4, yakumono_param->x40))));
 }
 
 bool grIceMt_801F9ACC(struct grIceMt_GObj9_GObj10_UnderUpperIdPair* ids_,
@@ -1845,7 +1844,7 @@ void grIceMt_801FA0BC(struct grIceMt_GObj9_GObj10_UnderUpperIdPair* ids)
         HSD_ASSERT (2884, mgobj);
         jobj = mgobj->hsd_obj;
         HSD_ASSERT(2886, jobj);
-        HSD_JObjSetTranslateY(jobj, -20.0f * Ground_801C0498() + frame);
+        HSD_JObjSetTranslateY(jobj, gk_fmadds(-20.0f, Ground_801C0498(), frame));
         Ground_801C3214(ids->under);
         Ground_UpdateMapColl(mgobj);
         Ground_801C32AC(ids->under);

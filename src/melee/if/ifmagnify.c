@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ifmagnify.h"
 
 #include <stddef.h>
@@ -374,17 +375,14 @@ void ifMagnify_802FBBDC(HSD_GObj* gobj, intptr_t code)
                 if (((s32) x_class - 1) == 0) {
                     x_blend = 1.0f -
                               ((world_pos.x - Stage_GetCamBoundsLeftOffset()) /
-                               ((0.5f * (Stage_GetCamBoundsLeftOffset() +
-                                         Stage_GetCamBoundsRightOffset())) -
-                                Stage_GetCamBoundsLeftOffset()));
+                               (gk_fmsubs(0.5f, (Stage_GetCamBoundsLeftOffset() +
+                                         Stage_GetCamBoundsRightOffset()), Stage_GetCamBoundsLeftOffset())));
                 } else {
                     x_blend =
-                        1.0f - ((world_pos.x -
-                                 (0.5f * (Stage_GetCamBoundsLeftOffset() +
-                                          Stage_GetCamBoundsRightOffset()))) /
-                                (Stage_GetCamBoundsRightOffset() -
-                                 (0.5f * (Stage_GetCamBoundsLeftOffset() +
-                                          Stage_GetCamBoundsRightOffset()))));
+                        1.0f - ((gk_fnmsubs(0.5f, (Stage_GetCamBoundsLeftOffset() +
+                                          Stage_GetCamBoundsRightOffset()), world_pos.x)) /
+                                (gk_fnmsubs(0.5f, (Stage_GetCamBoundsLeftOffset() +
+                                          Stage_GetCamBoundsRightOffset()), Stage_GetCamBoundsRightOffset())));
                 }
             }
             x_inv = 1.0f - x_blend;
@@ -412,17 +410,14 @@ void ifMagnify_802FBBDC(HSD_GObj* gobj, intptr_t code)
                 if (((s32) y_class - 1) == 0) {
                     y_blend =
                         1.0f - ((Stage_GetCamBoundsTopOffset() - world_pos.y) /
-                                -((0.5f * (Stage_GetCamBoundsTopOffset() +
-                                           Stage_GetCamBoundsBottomOffset())) -
-                                  Stage_GetCamBoundsTopOffset()));
+                                -(gk_fmsubs(0.5f, (Stage_GetCamBoundsTopOffset() +
+                                           Stage_GetCamBoundsBottomOffset()), Stage_GetCamBoundsTopOffset())));
                 } else {
                     y_blend =
-                        1.0f - (((0.5f * (Stage_GetCamBoundsTopOffset() +
-                                          Stage_GetCamBoundsBottomOffset())) -
-                                 world_pos.y) /
-                                ((0.5f * (Stage_GetCamBoundsTopOffset() +
-                                          Stage_GetCamBoundsBottomOffset())) -
-                                 Stage_GetCamBoundsBottomOffset()));
+                        1.0f - ((gk_fmsubs(0.5f, (Stage_GetCamBoundsTopOffset() +
+                                          Stage_GetCamBoundsBottomOffset()), world_pos.y)) /
+                                (gk_fmsubs(0.5f, (Stage_GetCamBoundsTopOffset() +
+                                          Stage_GetCamBoundsBottomOffset()), Stage_GetCamBoundsBottomOffset())));
                 }
             }
             y_inv = 1.0f - y_blend;
@@ -435,14 +430,10 @@ void ifMagnify_802FBBDC(HSD_GObj* gobj, intptr_t code)
             mix1 = x_blend * y_blend;
             mix2 = x_blend * y_inv;
             mix3 = x_inv * y_inv;
-            result.a = (u8) ((colors[0].a * mix1) + (colors[1].a * mix0) +
-                             (colors[2].a * mix2) + (colors[3].a * mix3));
-            result.r = (u8) ((colors[0].r * mix1) + (colors[1].r * mix0) +
-                             (colors[2].r * mix2) + (colors[3].r * mix3));
-            result.g = (u8) ((colors[0].g * mix1) + (colors[1].g * mix0) +
-                             (colors[2].g * mix2) + (colors[3].g * mix3));
-            result.b = (u8) ((colors[0].b * mix1) + (colors[1].b * mix0) +
-                             (colors[2].b * mix2) + (colors[3].b * mix3));
+            result.a = (u8) (gk_fmadds(colors[3].a, mix3, gk_fmadds(colors[2].a, mix2, gk_fmadds(colors[0].a, mix1, (colors[1].a * mix0)))));
+            result.r = (u8) (gk_fmadds(colors[3].r, mix3, gk_fmadds(colors[2].r, mix2, gk_fmadds(colors[0].r, mix1, (colors[1].r * mix0)))));
+            result.g = (u8) (gk_fmadds(colors[3].g, mix3, gk_fmadds(colors[2].g, mix2, gk_fmadds(colors[0].g, mix1, (colors[1].g * mix0)))));
+            result.b = (u8) (gk_fmadds(colors[3].b, mix3, gk_fmadds(colors[2].b, mix2, gk_fmadds(colors[0].b, mix1, (colors[1].b * mix0)))));
 
             HSD_SetEraseColor(result.r, result.g, result.b, result.a);
             HSD_CObjEraseScreen(cobj, 1, 0, 1);

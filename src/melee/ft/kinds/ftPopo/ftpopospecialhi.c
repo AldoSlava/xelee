@@ -1,4 +1,5 @@
 
+#include <pc/gekko_fp.h>
 #include "ftpopospecialhi.h"
 
 #include <melee/ft/forward.h>
@@ -42,9 +43,9 @@ static inline float my_sqrtf(float x, volatile float* y)
 {
     if (x > 0) {
         double guess = __frsqrte(x);
-        guess = 0.5f * guess * (3.0f - guess * guess * x);
-        guess = 0.5f * guess * (3.0f - guess * guess * x);
-        guess = 0.5f * guess * (3.0f - guess * guess * x);
+        guess = 0.5f * guess * (gk_fnmsub(guess * guess, x, 3.0f));
+        guess = 0.5f * guess * (gk_fnmsub(guess * guess, x, 3.0f));
+        guess = 0.5f * guess * (gk_fnmsub(guess * guess, x, 3.0f));
         *y = (x * guess);
         return *y;
     }
@@ -67,7 +68,7 @@ void ftPp_SpecialS_80120E68(Fighter_GObj* gobj)
         fp->self_vel.x = fp2->cur_pos.x - fp->cur_pos.x;
         fp->self_vel.y = fp2->cur_pos.y - fp->cur_pos.y;
         fp->self_vel.z = 0.0F;
-        fp->self_vel.x = -(3.0F * fp2->facing_dir - fp->self_vel.x);
+        fp->self_vel.x = -(gk_fmsubs(3.0F, fp2->facing_dir, fp->self_vel.x));
         fp->self_vel.y += 5.0F;
         lbVector_Normalize(&fp->self_vel);
         dx = SQ(fp->cur_pos.x - fp2->cur_pos.x);

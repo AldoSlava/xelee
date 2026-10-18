@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <Runtime/platform.h>
 
 #include <melee/ft/forward.h>
@@ -134,7 +135,7 @@ void ftPp_SpecialHi_0_Phys(Fighter_GObj* gobj)
 {
     Fighter* fp = GET_FIGHTER(gobj);
     if (!ftNn_Init_801230D0(gobj)) {
-        fp->cur_pos.x = -((8.0f * fp->facing_dir) - fp->cur_pos.x);
+        fp->cur_pos.x = -(gk_fmsubs(8.0f, fp->facing_dir, fp->cur_pos.x));
         ftCo_Fall_Enter(gobj);
     }
 }
@@ -274,8 +275,8 @@ void ftNn_Init_801237F8(Fighter_GObj* nana_gobj)
     nana_fp->self_vel.x =
         nana_fp->facing_dir * (attrs->x13C * cosf(attrs->x140));
     nana_fp->self_vel.y = attrs->x13C * sinf(attrs->x140);
-    nana_fp->cur_pos.x += 4.0f * nana_fp->facing_dir * nana_fp->x34_scale.y;
-    nana_fp->cur_pos.y += 7.0f * nana_fp->x34_scale.y;
+    nana_fp->cur_pos.x = gk_fmadds(4.0f * nana_fp->facing_dir, nana_fp->x34_scale.y, nana_fp->cur_pos.x);
+    nana_fp->cur_pos.y = gk_fmadds(7.0f, nana_fp->x34_scale.y, nana_fp->cur_pos.y);
     Fighter_ChangeMotionState(nana_gobj, 365, Ft_MF_None, 0.0f, 1.0f, 0.0f,
                               NULL);
     nana_fp->accessory4_cb = fn_80123218;

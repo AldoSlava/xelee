@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftmewtwospeciallw.h"
 
 #include <Runtime/platform.h>
@@ -219,7 +220,7 @@ void ftMt_SpecialLw_CreateDisable(HSD_GObj* gobj)
 
         lb_8000B1CC(fp->parts[FtPart_L3rdNb].joint, NULL, &sp18);
 
-        sp18.x += (mewtwoAttrs->x80_MEWTWO_DISABLE_OFFSET_X * fp->facing_dir);
+        sp18.x = gk_fmadds(mewtwoAttrs->x80_MEWTWO_DISABLE_OFFSET_X, fp->facing_dir, sp18.x);
         sp18.y += mewtwoAttrs->x84_MEWTWO_DISABLE_OFFSET_Y;
 
         fp->u.mt.x222C_disableGObj =

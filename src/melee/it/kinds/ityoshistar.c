@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ityoshistar.h"
 
 #include "inlines.h"
@@ -100,7 +101,7 @@ void itYoshistar_UnkMotion0_Phys(Item_GObj* item_gobj)
     ItemAttr* attr = item->xCC_item_attr;
     StarAttrs* star = DP(StarAttrs, item->xC4_article_data->x4_specialAttributes);
     it_80272860(item_gobj, attr->x10_fall_speed, attr->x14_fall_speed_max);
-    item->x40_vel.x += star->accel * item->facing_dir;
+    item->x40_vel.x = gk_fmadds(star->accel, item->facing_dir, item->x40_vel.x);
 }
 
 bool itYoshistar_UnkMotion0_Coll(Item_GObj* item_gobj)

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "iteffect.h"
 
 #include <math.h>
@@ -40,11 +41,11 @@ void it_802787B4(Item_GObj* item_gobj, s32 arg1)
 static inline void it_80278800_rand_vec(Vec3* out, Vec3* v)
 {
     f32 f = HSD_Randf();
-    out->x += 2.0f * v->x * (f - 0.5f);
+    out->x = gk_fmadds(2.0f * v->x, (f - 0.5f), out->x);
     f = HSD_Randf();
-    out->y += 2.0f * v->y * (f - 0.5f);
+    out->y = gk_fmadds(2.0f * v->y, (f - 0.5f), out->y);
     f = HSD_Randf();
-    out->z += 2.0f * v->z * (f - 0.5f);
+    out->z = gk_fmadds(2.0f * v->z, (f - 0.5f), out->z);
 }
 
 void it_80278800(Item_GObj* item_gobj, s32 ef_id, s32 arg2, Vec3* arg3,

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mndiagram.h"
 
 #include <melee/gm/forward.h>
@@ -2076,10 +2077,10 @@ void mnDiagram_DrawCellValue(HSD_GObj* arg0, u8 col, u8 row, int arg3)
         requestIntegerAnimFrame(jobj, digit);
         HSD_JObjAnimAll(jobj);
         if (col < 7) {
-            HSD_JObjSetTranslateX(jobj, (x_spacing * (f32) i) + col_offset);
+            HSD_JObjSetTranslateX(jobj, gk_fmadds(x_spacing, (f32) i, col_offset));
         } else {
             HSD_JObjSetTranslateX(jobj,
-                                  (x_spacing * (f32) i) + col_offset + 0.4f);
+                                  gk_fmadds(x_spacing, (f32) i, col_offset) + 0.4f);
         }
         if (row < 10) {
             HSD_JObjSetTranslateY(jobj, row_offset);

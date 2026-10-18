@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "lbvector.h"
 
 #include <Runtime/platform.h>
@@ -132,9 +133,7 @@ static float lbvector_sin(float angle)
     } else if (angle < -M_PI) {
         angle += M_TAU;
     }
-    return 0.9878619909286499f * angle -
-           0.15527099370956421f * angle * angle * angle +
-           0.0056429998949170113f * angle * angle * angle * angle * angle;
+    return gk_fmadds(0.0056429998949170113f * angle * angle * angle * angle, angle, gk_fmsubs(0.9878619909286499f, angle, 0.15527099370956421f * angle * angle * angle));
 }
 
 static float lbvector_cos(float angle)
@@ -145,9 +144,7 @@ static float lbvector_cos(float angle)
     } else if (angle < -M_PI) {
         angle += M_TAU;
     }
-    return 0.9878619909286499f * angle -
-           0.15527099370956421f * angle * angle * angle +
-           0.0056429998949170113f * angle * angle * angle * angle * angle;
+    return gk_fmadds(0.0056429998949170113f * angle * angle * angle * angle, angle, gk_fmsubs(0.9878619909286499f, angle, 0.15527099370956421f * angle * angle * angle));
 }
 
 /// 8000D8F4
@@ -226,17 +223,17 @@ void lbVector_Rotate(Vec3* v, int axis, float angle)
     switch (axis) {
     case 1: // rotate about x axis
         x = v->x;
-        y = v->y * c - v->z * s;
-        z = v->y * s + v->z * c;
+        y = gk_fmsubs(v->y, c, v->z * s);
+        z = gk_fmadds(v->y, s, v->z * c);
         break;
     case 2: // rotate about y axis
-        x = v->x * c + v->z * s;
+        x = gk_fmadds(v->x, c, v->z * s);
         y = v->y;
-        z = v->z * c - v->x * s;
+        z = gk_fmsubs(v->z, c, v->x * s);
         break;
     case 4: // rotate about z axis
-        x = v->x * c - v->y * s;
-        y = v->x * s + v->y * c;
+        x = gk_fmsubs(v->x, c, v->y * s);
+        y = gk_fmadds(v->x, s, v->y * c);
         z = v->z;
         break;
     }
@@ -257,10 +254,10 @@ static void order_sdata2(void)
 void lbVector_Mirror(Vec3* a, Vec3* unit_mirror_axis)
 {
     float f =
-        (unit_mirror_axis->x * a->x + unit_mirror_axis->y * a->y) * -2.0f;
+        (gk_fmadds(unit_mirror_axis->x, a->x, unit_mirror_axis->y * a->y)) * -2.0f;
 
-    a->x += unit_mirror_axis->x * f;
-    a->y += unit_mirror_axis->y * f;
+    a->x = gk_fmadds(unit_mirror_axis->x, f, a->x);
+    a->y = gk_fmadds(unit_mirror_axis->y, f, a->y);
 }
 
 /// 8000DCA8 - returns <a/|a|, b/|b|>, which is the cosine of the angle between
@@ -295,17 +292,17 @@ Vec3* lbVector_8000DE38(const Vec3 points[3], Vec3* v, float c)
         c = 0.0f;
     }
 
-    var1 = points[0].x * 2.0f - points[1].x * 4.0f + points[2].x * 2.0f;
-    var2 = points[0].x * -3.0f + points[1].x * 4.0f - points[2].x;
-    v->x = points[0].x + (var1 * c * c + var2 * c);
+    var1 = gk_fmadds(points[2].x, 2.0f, gk_fmsubs(points[0].x, 2.0f, points[1].x * 4.0f));
+    var2 = gk_fmadds(points[0].x, -3.0f, points[1].x * 4.0f) - points[2].x;
+    v->x = points[0].x + (gk_fmadds(var1 * c, c, var2 * c));
 
-    var1 = points[0].y * 2.0f - points[1].y * 4.0f + points[2].y * 2.0f;
-    var2 = points[0].y * -3.0f + points[1].y * 4.0f - points[2].y;
-    v->y = points[0].y + (var1 * c * c + var2 * c);
+    var1 = gk_fmadds(points[2].y, 2.0f, gk_fmsubs(points[0].y, 2.0f, points[1].y * 4.0f));
+    var2 = gk_fmadds(points[0].y, -3.0f, points[1].y * 4.0f) - points[2].y;
+    v->y = points[0].y + (gk_fmadds(var1 * c, c, var2 * c));
 
-    var1 = points[0].z * 2.0f - points[1].z * 4.0f + points[2].z * 2.0f;
-    var2 = points[0].z * -3.0f + points[1].z * 4.0f - points[2].z;
-    v->z = points[0].z + (var1 * c * c + var2 * c);
+    var1 = gk_fmadds(points[2].z, 2.0f, gk_fmsubs(points[0].z, 2.0f, points[1].z * 4.0f));
+    var2 = gk_fmadds(points[0].z, -3.0f, points[1].z * 4.0f) - points[2].z;
+    v->z = points[0].z + (gk_fmadds(var1 * c, c, var2 * c));
 
     return v;
 }
@@ -443,13 +440,12 @@ Vec3* lbVector_WorldToScreen(HSD_CObj* cobj, const Vec3* pos3d,
         mvMtx = HSD_CObjGetViewingMtxPtr(cobj);
     }
 
-    f1 = mvMtx[2][0] * pos3d->x + mvMtx[2][1] * pos3d->y +
-         mvMtx[2][2] * pos3d->z + mvMtx[2][3];
+    f1 = gk_fmadds(mvMtx[2][2], pos3d->z, gk_fmadds(mvMtx[2][0], pos3d->x, mvMtx[2][1] * pos3d->y)) + mvMtx[2][3];
     if (f1 > -0.01f) {
         f1 = -f1 - 0.01f;
-        point.x += mvMtx[2][0] * f1;
-        point.y += mvMtx[2][1] * f1;
-        point.z += mvMtx[2][2] * f1;
+        point.x = gk_fmadds(mvMtx[2][0], f1, point.x);
+        point.y = gk_fmadds(mvMtx[2][1], f1, point.y);
+        point.z = gk_fmadds(mvMtx[2][2], f1, point.z);
     }
 
     GXProject(point.x, point.y, point.z, mvMtx, projection, viewport,
@@ -480,13 +476,13 @@ void lbVector_CreateEulerMatrix(Mtx m, Quaternion* angles)
     m[2][0] = -sy;
 
     // column 2
-    m[0][1] = cz * sxsy - cx * sz;
-    m[1][1] = sz * sxsy + cx * cz;
+    m[0][1] = gk_fmsubs(cz, sxsy, cx * sz);
+    m[1][1] = gk_fmadds(sz, sxsy, cx * cz);
     m[2][1] = sx * cy;
 
     // column 3
-    m[0][2] = cz * cxsy + sx * sz;
-    m[1][2] = sz * cxsy - sx * cz;
+    m[0][2] = gk_fmadds(cz, cxsy, sx * sz);
+    m[1][2] = gk_fmsubs(sz, cxsy, sx * cz);
     m[2][2] = cx * cy;
 
     // column 4 - no translational component

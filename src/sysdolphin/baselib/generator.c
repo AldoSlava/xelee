@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "generator.h"
 
 #include <math.h>
@@ -294,9 +295,9 @@ void hsd_8039D71C(HSD_Generator* gen)
         f32 vx = gen->vel.x;
         f32 vy = gen->vel.y;
         f32 vz = gen->vel.z;
-        gen->vel.x = col0_x * vx + col1_x * vy + cx * vz;
-        gen->vel.y = col0_y * vx + col1_y * vy + cy * vz;
-        gen->vel.z = col0_z * vx + col1_z * vy + cz * vz;
+        gen->vel.x = gk_fmadds(cx, vz, gk_fmadds(col0_x, vx, col1_x * vy));
+        gen->vel.y = gk_fmadds(cy, vz, gk_fmadds(col0_y, vx, col1_y * vy));
+        gen->vel.z = gk_fmadds(cz, vz, gk_fmadds(col0_z, vx, col1_z * vy));
     }
 
     if ((gen->type & 0xF) == 1) {
@@ -304,11 +305,11 @@ void hsd_8039D71C(HSD_Generator* gen)
         f32 ay = gen->aux.line.y2;
         f32 az = gen->aux.line.z2;
         gen->aux.line.x2 =
-            jobj->mtx[0][0] * ax + jobj->mtx[0][1] * ay + jobj->mtx[0][2] * az;
+            gk_fmadds(jobj->mtx[0][2], az, gk_fmadds(jobj->mtx[0][0], ax, jobj->mtx[0][1] * ay));
         gen->aux.line.y2 =
-            jobj->mtx[1][0] * ax + jobj->mtx[1][1] * ay + jobj->mtx[1][2] * az;
+            gk_fmadds(jobj->mtx[1][2], az, gk_fmadds(jobj->mtx[1][0], ax, jobj->mtx[1][1] * ay));
         gen->aux.line.z2 =
-            jobj->mtx[2][0] * ax + jobj->mtx[2][1] * ay + jobj->mtx[2][2] * az;
+            gk_fmadds(jobj->mtx[2][2], az, gk_fmadds(jobj->mtx[2][0], ax, jobj->mtx[2][1] * ay));
     }
 }
 
@@ -997,7 +998,7 @@ void hsd_8039EE24(u32 mask)
         if (gen->random < 0.0F) {
             gen->count -= gen->random;
         } else {
-            gen->count += gen->random * HSD_Randf();
+            gen->count = gk_fmadds(gen->random, HSD_Randf(), gen->count);
         }
         if (gen->count >= 1.0F) {
             gen->count = hsd_8039DAD4(gen);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Dash.h"
 
 #include <melee/ft/forward.h>
@@ -137,7 +138,7 @@ void ftCo_Dash_IASA(Fighter_GObj* gobj)
     {
         float friction = ft_GetGroundFrictionMultiplier(fp);
         float temp_f0 = fp->gr_vel * p_ftCommonData->x54;
-        fp->gr_vel += -temp_f0 * friction;
+        fp->gr_vel = gk_fmadds(-temp_f0, friction, fp->gr_vel);
     }
 }
 

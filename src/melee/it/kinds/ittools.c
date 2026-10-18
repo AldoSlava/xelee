@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ittools.h"
 
 #include <placeholder.h>
@@ -127,7 +128,7 @@ bool itTools_UnkMotion4_Anim(Item_GObj* gobj)
     HSD_JObj* jobj = GET_JOBJ(gobj);
     itToolsAttributes* attrs = DP(itToolsAttributes, ip->xC4_article_data->x4_specialAttributes);
     f32 rz = HSD_JObjGetRotationZ(jobj);
-    rz += attrs->motions[ip->xDD4_itemVar.tools.x0].xC * ip->facing_dir;
+    rz = gk_fmadds(attrs->motions[ip->xDD4_itemVar.tools.x0].xC, ip->facing_dir, rz);
     HSD_JObjSetRotationZ(jobj, rz);
     ip->xD44_lifeTimer -= 1.0f;
     if (ip->xD44_lifeTimer <= 0.0f) {

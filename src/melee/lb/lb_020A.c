@@ -7,6 +7,7 @@
  * plant a fighter's legs on the ground.
  */
 
+#include <pc/gekko_fp.h>
 #include "lb_020A.h"
 
 #include <math.h>
@@ -61,9 +62,9 @@ void fn_80020AEC(HSD_JObj* jobj, Mtx out)
 
         if (scale_sq > 0.0f) {
             f64 e = __frsqrte(scale_sq);
-            e = 0.5 * e * -(((f64) scale_sq * (e * e)) - 3.0);
-            e = 0.5 * e * -(((f64) scale_sq * (e * e)) - 3.0);
-            e = 0.5 * e * -(((f64) scale_sq * (e * e)) - 3.0);
+            e = 0.5 * e * -(gk_fmsub((f64) scale_sq, (e * e), 3.0));
+            e = 0.5 * e * -(gk_fmsub((f64) scale_sq, (e * e), 3.0));
+            e = 0.5 * e * -(gk_fmsub((f64) scale_sq, (e * e), 3.0));
             scale_mag = (f32) ((f64) scale_sq * e);
             scale_sq = scale_mag;
         }
@@ -220,9 +221,9 @@ static inline f32 sqrtf_store(f32 x, volatile f32* y)
 {
     if (x > 0.0f) {
         f64 guess = __frsqrte((f64) x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
         *y = (f32) (x * guess);
         return *y;
     }
@@ -285,38 +286,37 @@ void lbBgFlash_80021410(IKState* data)
         f32 x;
 
         nx = *(f32*) &axis;
-        dot = -((nz * data->pos1.z) +
-                ((nx * data->pos1.x) + (ny * data->pos1.y)));
+        dot = -(gk_fmadds(nz, data->pos1.z, (gk_fmadds(nx, data->pos1.x, (ny * data->pos1.y)))));
 
         x = data->pos4.x;
 
-        d = -(dot + ((data->pos4.z * nz) + ((x * nx) + (data->pos4.y * ny))));
-        data->pos4.x = (d * nx) + x;
-        data->pos4.y = (d * ny) + data->pos4.y;
-        data->pos4.z = (d * nz) + data->pos4.z;
+        d = -(dot + (gk_fmadds(data->pos4.z, nz, (gk_fmadds(x, nx, (data->pos4.y * ny))))));
+        data->pos4.x = gk_fmadds(d, nx, x);
+        data->pos4.y = gk_fmadds(d, ny, data->pos4.y);
+        data->pos4.z = gk_fmadds(d, nz, data->pos4.z);
 
         {
             f32 x = data->pos0.x;
             d = -(dot +
-                  ((data->pos0.z * nz) + ((x * nx) + (data->pos0.y * ny))));
-            data->pos0.x = (d * nx) + x;
+                  (gk_fmadds(data->pos0.z, nz, (gk_fmadds(x, nx, (data->pos0.y * ny))))));
+            data->pos0.x = gk_fmadds(d, nx, x);
         }
-        data->pos0.y = (d * ny) + data->pos0.y;
-        data->pos0.z = (d * nz) + data->pos0.z;
+        data->pos0.y = gk_fmadds(d, ny, data->pos0.y);
+        data->pos0.z = gk_fmadds(d, nz, data->pos0.z);
 
         {
             f32 x = data->pos1.x;
             d = -(dot +
-                  ((data->pos1.z * nz) + ((x * nx) + (data->pos1.y * ny))));
-            data->pos1.x = (d * nx) + x;
+                  (gk_fmadds(data->pos1.z, nz, (gk_fmadds(x, nx, (data->pos1.y * ny))))));
+            data->pos1.x = gk_fmadds(d, nx, x);
         }
-        data->pos1.y = (d * ny) + data->pos1.y;
-        data->pos1.z = (d * nz) + data->pos1.z;
+        data->pos1.y = gk_fmadds(d, ny, data->pos1.y);
+        data->pos1.z = gk_fmadds(d, nz, data->pos1.z);
     }
 
     pDiff = lbVector_Diff(&data->pos0, &data->pos1, &diff_pos0_pos1);
-    dot = (axis.z * pDiff->z) + ((axis.x * pDiff->x) + (axis.y * pDiff->y));
-    sin_val = sqrtf_store(1.0f - (dot * dot), &sin_mag);
+    dot = gk_fmadds(axis.z, pDiff->z, (gk_fmadds(axis.x, pDiff->x, (axis.y * pDiff->y))));
+    sin_val = sqrtf_store(gk_fnmsubs(dot, dot, 1.0f), &sin_mag);
     data->len0 = data->len0 * sin_val;
 
     lbVector_Diff(&data->pos4, &data->pos0, &temp_delta);

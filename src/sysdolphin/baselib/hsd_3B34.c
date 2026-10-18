@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "hsd_3B34.h"
 
 #include <placeholder.h>
@@ -347,24 +348,18 @@ static void fn_803B376C(u8* arg0)
         scratch_f28_2 = (f32) (scratch_r29 - scratch_r30);
         work_r4[0] = (s32) (0.707107 * (f64) (scratch_f6 + scratch_f30));
         work_r4[4] = (s32) (0.707107 * (f64) (scratch_f6 - scratch_f30));
-        work_r4[6] = (s32) ((-0.92388 * (f64) scratch_f27_2) +
-                            (0.382683 * (f64) scratch_f26));
-        work_r4[2] = (s32) ((0.382683 * (f64) scratch_f27_2) +
-                            (0.92388 * (f64) scratch_f26));
+        work_r4[6] = (s32) (gk_fmadd(-0.92388, (f64) scratch_f27_2, (0.382683 * (f64) scratch_f26)));
+        work_r4[2] = (s32) (gk_fmadd(0.382683, (f64) scratch_f27_2, (0.92388 * (f64) scratch_f26)));
         scratch_f8_2 = (f32) (0.707107 * (f64) (scratch_f8 - scratch_f11_2));
         scratch_f11_3 = (f32) (0.707107 * (f64) (scratch_f8 + scratch_f11_2));
         scratch_f30_2 = scratch_f11_3 + scratch_f28_2;
         scratch_f26_2 = -scratch_f27_3 + scratch_f8_2;
         scratch_f28_3 = -scratch_f11_3 + scratch_f28_2;
         scratch_f27_4 = scratch_f27_3 + scratch_f8_2;
-        work_r4[7] = (s32) ((0.980785 * (f64) scratch_f26_2) +
-                            (0.19509 * (f64) scratch_f30_2));
-        work_r4[5] = (s32) ((0.83147 * (f64) scratch_f27_4) +
-                            (0.55557 * (f64) scratch_f28_3));
-        work_r4[3] = (s32) ((-0.55557 * (f64) scratch_f27_4) +
-                            (0.83147 * (f64) scratch_f28_3));
-        work_r4[1] = (s32) ((-0.19509 * (f64) scratch_f26_2) +
-                            (0.980785 * (f64) scratch_f30_2));
+        work_r4[7] = (s32) (gk_fmadd(0.980785, (f64) scratch_f26_2, (0.19509 * (f64) scratch_f30_2)));
+        work_r4[5] = (s32) (gk_fmadd(0.83147, (f64) scratch_f27_4, (0.55557 * (f64) scratch_f28_3)));
+        work_r4[3] = (s32) (gk_fmadd(-0.55557, (f64) scratch_f27_4, (0.83147 * (f64) scratch_f28_3)));
+        work_r4[1] = (s32) (gk_fmadd(-0.19509, (f64) scratch_f26_2, (0.980785 * (f64) scratch_f30_2)));
         work_r4 += 8;
     }
     work_r4_2 = (s32*) arg0;
@@ -392,10 +387,8 @@ static void fn_803B376C(u8* arg0)
         scratch_f29_2 = (f32) (scratch_r31_2 - scratch_r30_2);
         work_r4_2[0] = (s32) (0.707107 * (f64) (scratch_f6_2 + scratch_f29));
         work_r4_2[32] = (s32) (0.707107 * (f64) (scratch_f6_2 - scratch_f29));
-        work_r4_2[48] = (s32) ((-0.92388 * (f64) scratch_f28_5) +
-                               (0.382683 * (f64) scratch_f27_5));
-        work_r4_2[16] = (s32) ((0.382683 * (f64) scratch_f28_5) +
-                               (0.92388 * (f64) scratch_f27_5));
+        work_r4_2[48] = (s32) (gk_fmadd(-0.92388, (f64) scratch_f28_5, (0.382683 * (f64) scratch_f27_5)));
+        work_r4_2[16] = (s32) (gk_fmadd(0.382683, (f64) scratch_f28_5, (0.92388 * (f64) scratch_f27_5)));
         scratch_f8_4 = (f32) (0.707107 * (f64) (scratch_f8_3 - scratch_f11_5));
         scratch_f11_6 =
             (f32) (0.707107 * (f64) (scratch_f8_3 + scratch_f11_5));
@@ -403,14 +396,10 @@ static void fn_803B376C(u8* arg0)
         scratch_f27_6 = -scratch_f28_6 + scratch_f8_4;
         scratch_f29_3 = -scratch_f11_6 + scratch_f29_2;
         scratch_f28_7 = scratch_f28_6 + scratch_f8_4;
-        work_r4_2[56] = (s32) ((0.980785 * (f64) scratch_f27_6) +
-                               (0.19509 * (f64) scratch_f30_4));
-        work_r4_2[40] = (s32) ((0.83147 * (f64) scratch_f28_7) +
-                               (0.55557 * (f64) scratch_f29_3));
-        work_r4_2[24] = (s32) ((-0.55557 * (f64) scratch_f28_7) +
-                               (0.83147 * (f64) scratch_f29_3));
-        work_r4_2[8] = (s32) ((-0.19509 * (f64) scratch_f27_6) +
-                              (0.980785 * (f64) scratch_f30_4));
+        work_r4_2[56] = (s32) (gk_fmadd(0.980785, (f64) scratch_f27_6, (0.19509 * (f64) scratch_f30_4)));
+        work_r4_2[40] = (s32) (gk_fmadd(0.83147, (f64) scratch_f28_7, (0.55557 * (f64) scratch_f29_3)));
+        work_r4_2[24] = (s32) (gk_fmadd(-0.55557, (f64) scratch_f28_7, (0.83147 * (f64) scratch_f29_3)));
+        work_r4_2[8] = (s32) (gk_fmadd(-0.19509, (f64) scratch_f27_6, (0.980785 * (f64) scratch_f30_4)));
         work_r4_2 += 1;
     }
     for (work_ctr = 0; 0x40 > work_ctr; work_ctr++) {

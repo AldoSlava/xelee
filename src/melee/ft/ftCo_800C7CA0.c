@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_800C7CA0.h"
 
 #include <placeholder.h>
@@ -107,8 +108,7 @@ void fn_800C7DC4(HSD_GObj* gobj, s32 motion_state, Vec3* normal, Vec3* offset)
         goto t2;
     }
 t1:
-    fp->cur_pos.x = -(fp->x68C_transNPos.z * -fp->facing_dir -
-                      (fp->cur_pos.x + offset->x));
+    fp->cur_pos.x = -(gk_fmsubs(fp->x68C_transNPos.z, -fp->facing_dir, (fp->cur_pos.x + offset->x)));
     goto end;
 t2:
     fp->cur_pos.y = fp->x68C_transNPos.y + (fp->cur_pos.y + offset->y);

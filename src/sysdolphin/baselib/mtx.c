@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mtx.h"
 
 #include <math.h>
@@ -13,9 +14,7 @@ HSD_ObjAllocData HSD_Mtx_804C233C;
 /// Calculates the determinant of the top 3x3 section of a 3x4 matrix
 static inline f32 HSD_CalcDeterminantMatrix3x4(Mtx m)
 {
-    return m[0][0] * m[1][1] * m[2][2] + m[0][1] * m[1][2] * m[2][0] +
-           m[0][2] * m[1][0] * m[2][1] - m[2][0] * m[1][1] * m[0][2] -
-           m[1][0] * m[0][1] * m[2][2] - m[0][0] * m[2][1] * m[1][2];
+    return gk_fnmsubs(m[0][0] * m[2][1], m[1][2], gk_fnmsubs(m[1][0] * m[0][1], m[2][2], gk_fnmsubs(m[2][0] * m[1][1], m[0][2], gk_fmadds(m[0][2] * m[1][0], m[2][1], gk_fmadds(m[0][0] * m[1][1], m[2][2], m[0][1] * m[1][2] * m[2][0])))));
 }
 
 void HSD_MtxInverse(Mtx src, Mtx dest)
@@ -38,22 +37,19 @@ void HSD_MtxInverse(Mtx src, Mtx dest)
 
     det = 1.0f / det;
 
-    dest[0][0] = ((*m)[1][1] * (*m)[2][2] - (*m)[2][1] * (*m)[1][2]) * det;
-    dest[0][1] = -((*m)[0][1] * (*m)[2][2] - (*m)[2][1] * (*m)[0][2]) * det;
-    dest[0][2] = ((*m)[0][1] * (*m)[1][2] - (*m)[1][1] * (*m)[0][2]) * det;
-    dest[1][0] = -((*m)[1][0] * (*m)[2][2] - (*m)[2][0] * (*m)[1][2]) * det;
-    dest[1][1] = ((*m)[0][0] * (*m)[2][2] - (*m)[2][0] * (*m)[0][2]) * det;
-    dest[1][2] = -((*m)[0][0] * (*m)[1][2] - (*m)[1][0] * (*m)[0][2]) * det;
-    dest[2][0] = ((*m)[1][0] * (*m)[2][1] - (*m)[2][0] * (*m)[1][1]) * det;
-    dest[2][1] = -((*m)[0][0] * (*m)[2][1] - (*m)[2][0] * (*m)[0][1]) * det;
-    dest[2][2] = ((*m)[0][0] * (*m)[1][1] - (*m)[1][0] * (*m)[0][1]) * det;
+    dest[0][0] = (gk_fmsubs((*m)[1][1], (*m)[2][2], (*m)[2][1] * (*m)[1][2])) * det;
+    dest[0][1] = -(gk_fmsubs((*m)[0][1], (*m)[2][2], (*m)[2][1] * (*m)[0][2])) * det;
+    dest[0][2] = (gk_fmsubs((*m)[0][1], (*m)[1][2], (*m)[1][1] * (*m)[0][2])) * det;
+    dest[1][0] = -(gk_fmsubs((*m)[1][0], (*m)[2][2], (*m)[2][0] * (*m)[1][2])) * det;
+    dest[1][1] = (gk_fmsubs((*m)[0][0], (*m)[2][2], (*m)[2][0] * (*m)[0][2])) * det;
+    dest[1][2] = -(gk_fmsubs((*m)[0][0], (*m)[1][2], (*m)[1][0] * (*m)[0][2])) * det;
+    dest[2][0] = (gk_fmsubs((*m)[1][0], (*m)[2][1], (*m)[2][0] * (*m)[1][1])) * det;
+    dest[2][1] = -(gk_fmsubs((*m)[0][0], (*m)[2][1], (*m)[2][0] * (*m)[0][1])) * det;
+    dest[2][2] = (gk_fmsubs((*m)[0][0], (*m)[1][1], (*m)[1][0] * (*m)[0][1])) * det;
 
-    dest[0][3] = -(dest[0][2] * src[2][3] -
-                   (-dest[0][0] * src[0][3] - dest[0][1] * src[1][3]));
-    dest[1][3] = -(dest[1][2] * src[2][3] -
-                   (-dest[1][0] * src[0][3] - dest[1][1] * src[1][3]));
-    dest[2][3] = -(dest[2][2] * src[2][3] -
-                   (-dest[2][0] * src[0][3] - dest[2][1] * src[1][3]));
+    dest[0][3] = -(gk_fmsubs(dest[0][2], src[2][3], (gk_fmsubs(-dest[0][0], src[0][3], dest[0][1] * src[1][3]))));
+    dest[1][3] = -(gk_fmsubs(dest[1][2], src[2][3], (gk_fmsubs(-dest[1][0], src[0][3], dest[1][1] * src[1][3]))));
+    dest[2][3] = -(gk_fmsubs(dest[2][2], src[2][3], (gk_fmsubs(-dest[2][0], src[0][3], dest[2][1] * src[1][3]))));
 }
 
 void HSD_MtxInverseConcat(Mtx inv, Mtx src, Mtx dest)
@@ -82,75 +78,66 @@ void HSD_MtxInverseConcat(Mtx inv, Mtx src, Mtx dest)
         }
     } else {
         det = 1.0f / det;
-        temp1 = ((inv[1][1] * inv[2][2]) - (inv[2][1] * inv[1][2])) * det;
-        temp2 = (-((inv[0][1] * inv[2][2]) - (inv[2][1] * inv[0][2]))) * det;
+        temp1 = (gk_fmsubs(inv[1][1], inv[2][2], (inv[2][1] * inv[1][2]))) * det;
+        temp2 = (-(gk_fmsubs(inv[0][1], inv[2][2], (inv[2][1] * inv[0][2])))) * det;
         new_var = inv[1][1];
-        temp3 = (-((inv[1][0] * inv[2][2]) - (inv[2][0] * inv[1][2]))) * det;
-        temp7 = ((inv[0][1] * inv[1][2]) - (new_var * inv[0][2])) * det;
-        temp4 = ((inv[0][0] * inv[2][2]) - (inv[2][0] * inv[0][2])) * det;
-        temp8 = (-((inv[0][0] * inv[1][2]) - (inv[1][0] * inv[0][2]))) * det;
-        temp5 = ((inv[1][0] * inv[2][1]) - (inv[2][0] * new_var)) * det;
-        temp6 = (-((inv[0][0] * inv[2][1]) - (inv[2][0] * inv[0][1]))) * det;
-        temp9 = ((inv[0][0] * inv[1][1]) - (inv[1][0] * inv[0][1])) * det;
-        temp10 = -((temp7 * inv[2][3]) -
-                   (((-temp1) * inv[0][3]) - (temp2 * inv[1][3])));
-        temp11 = -((temp8 * inv[2][3]) -
-                   (((-temp3) * inv[0][3]) - (temp4 * inv[1][3])));
-        temp12 = -((temp9 * inv[2][3]) -
-                   (((-temp5) * (new_var = inv[0][3])) - (temp6 * inv[1][3])));
+        temp3 = (-(gk_fmsubs(inv[1][0], inv[2][2], (inv[2][0] * inv[1][2])))) * det;
+        temp7 = (gk_fmsubs(inv[0][1], inv[1][2], (new_var * inv[0][2]))) * det;
+        temp4 = (gk_fmsubs(inv[0][0], inv[2][2], (inv[2][0] * inv[0][2]))) * det;
+        temp8 = (-(gk_fmsubs(inv[0][0], inv[1][2], (inv[1][0] * inv[0][2])))) * det;
+        temp5 = (gk_fmsubs(inv[1][0], inv[2][1], (inv[2][0] * new_var))) * det;
+        temp6 = (-(gk_fmsubs(inv[0][0], inv[2][1], (inv[2][0] * inv[0][1])))) * det;
+        temp9 = (gk_fmsubs(inv[0][0], inv[1][1], (inv[1][0] * inv[0][1]))) * det;
+        temp10 = -(gk_fmsubs(temp7, inv[2][3], (gk_fmsubs((-temp1), inv[0][3], (temp2 * inv[1][3])))));
+        temp11 = -(gk_fmsubs(temp8, inv[2][3], (gk_fmsubs((-temp3), inv[0][3], (temp4 * inv[1][3])))));
+        temp12 = -(gk_fmsubs(temp9, inv[2][3], (gk_fmsubs((-temp5), (new_var = inv[0][3]), (temp6 * inv[1][3])))));
 
         if (inv == dest || src == dest) {
             m[0][0] =
-                temp7 * src[2][0] + (temp1 * src[0][0] + temp2 * src[1][0]);
+                gk_fmadds(temp7, src[2][0], (gk_fmadds(temp1, src[0][0], temp2 * src[1][0])));
             m[0][1] =
-                temp7 * src[2][1] + (temp1 * src[0][1] + temp2 * src[1][1]);
+                gk_fmadds(temp7, src[2][1], (gk_fmadds(temp1, src[0][1], temp2 * src[1][1])));
             m[0][2] =
-                temp7 * src[2][2] + (temp1 * src[0][2] + temp2 * src[1][2]);
-            m[0][3] = temp7 * src[2][3] +
-                      (temp1 * src[0][3] + temp2 * src[1][3]) + temp10;
+                gk_fmadds(temp7, src[2][2], (gk_fmadds(temp1, src[0][2], temp2 * src[1][2])));
+            m[0][3] = gk_fmadds(temp7, src[2][3], (gk_fmadds(temp1, src[0][3], temp2 * src[1][3]))) + temp10;
             m[1][0] =
-                temp8 * src[2][0] + (temp3 * src[0][0] + temp4 * src[1][0]);
+                gk_fmadds(temp8, src[2][0], (gk_fmadds(temp3, src[0][0], temp4 * src[1][0])));
             m[1][1] =
-                temp8 * src[2][1] + (temp3 * src[0][1] + temp4 * src[1][1]);
+                gk_fmadds(temp8, src[2][1], (gk_fmadds(temp3, src[0][1], temp4 * src[1][1])));
             m[1][2] =
-                temp8 * src[2][2] + (temp3 * src[0][2] + temp4 * src[1][2]);
-            m[1][3] = temp8 * src[2][3] +
-                      (temp3 * src[0][3] + temp4 * src[1][3]) + temp11;
+                gk_fmadds(temp8, src[2][2], (gk_fmadds(temp3, src[0][2], temp4 * src[1][2])));
+            m[1][3] = gk_fmadds(temp8, src[2][3], (gk_fmadds(temp3, src[0][3], temp4 * src[1][3]))) + temp11;
             m[2][0] =
-                temp9 * src[2][0] + (temp5 * src[0][0] + temp6 * src[1][0]);
+                gk_fmadds(temp9, src[2][0], (gk_fmadds(temp5, src[0][0], temp6 * src[1][0])));
             m[2][1] =
-                temp9 * src[2][1] + (temp5 * src[0][1] + temp6 * src[1][1]);
+                gk_fmadds(temp9, src[2][1], (gk_fmadds(temp5, src[0][1], temp6 * src[1][1])));
             m[2][2] =
-                temp9 * src[2][2] + (temp5 * src[0][2] + temp6 * src[1][2]);
-            m[2][3] = temp9 * src[2][3] +
-                      (temp5 * src[0][3] + temp6 * src[1][3]) + temp12;
+                gk_fmadds(temp9, src[2][2], (gk_fmadds(temp5, src[0][2], temp6 * src[1][2])));
+            m[2][3] = gk_fmadds(temp9, src[2][3], (gk_fmadds(temp5, src[0][3], temp6 * src[1][3]))) + temp12;
 
             MTXCopy(m, dest);
         } else {
             dest[0][0] =
-                temp7 * src[2][0] + (temp1 * src[0][0] + temp2 * src[1][0]);
+                gk_fmadds(temp7, src[2][0], (gk_fmadds(temp1, src[0][0], temp2 * src[1][0])));
             dest[0][1] =
-                temp7 * src[2][1] + (temp1 * src[0][1] + temp2 * src[1][1]);
+                gk_fmadds(temp7, src[2][1], (gk_fmadds(temp1, src[0][1], temp2 * src[1][1])));
             dest[0][2] =
-                temp7 * src[2][2] + (temp1 * src[0][2] + temp2 * src[1][2]);
-            dest[0][3] = temp7 * src[2][3] +
-                         (temp1 * src[0][3] + temp2 * src[1][3]) + temp10;
+                gk_fmadds(temp7, src[2][2], (gk_fmadds(temp1, src[0][2], temp2 * src[1][2])));
+            dest[0][3] = gk_fmadds(temp7, src[2][3], (gk_fmadds(temp1, src[0][3], temp2 * src[1][3]))) + temp10;
             dest[1][0] =
-                temp8 * src[2][0] + (temp3 * src[0][0] + temp4 * src[1][0]);
+                gk_fmadds(temp8, src[2][0], (gk_fmadds(temp3, src[0][0], temp4 * src[1][0])));
             dest[1][1] =
-                temp8 * src[2][1] + (temp3 * src[0][1] + temp4 * src[1][1]);
+                gk_fmadds(temp8, src[2][1], (gk_fmadds(temp3, src[0][1], temp4 * src[1][1])));
             dest[1][2] =
-                temp8 * src[2][2] + (temp3 * src[0][2] + temp4 * src[1][2]);
-            dest[1][3] = temp8 * src[2][3] +
-                         (temp3 * src[0][3] + temp4 * src[1][3]) + temp11;
+                gk_fmadds(temp8, src[2][2], (gk_fmadds(temp3, src[0][2], temp4 * src[1][2])));
+            dest[1][3] = gk_fmadds(temp8, src[2][3], (gk_fmadds(temp3, src[0][3], temp4 * src[1][3]))) + temp11;
             dest[2][0] =
-                temp9 * src[2][0] + (temp5 * src[0][0] + temp6 * src[1][0]);
+                gk_fmadds(temp9, src[2][0], (gk_fmadds(temp5, src[0][0], temp6 * src[1][0])));
             dest[2][1] =
-                temp9 * src[2][1] + (temp5 * src[0][1] + temp6 * src[1][1]);
+                gk_fmadds(temp9, src[2][1], (gk_fmadds(temp5, src[0][1], temp6 * src[1][1])));
             dest[2][2] =
-                temp9 * src[2][2] + (temp5 * src[0][2] + temp6 * src[1][2]);
-            dest[2][3] = temp9 * src[2][3] +
-                         (temp5 * src[0][3] + temp6 * src[1][3]) + temp12;
+                gk_fmadds(temp9, src[2][2], (gk_fmadds(temp5, src[0][2], temp6 * src[1][2])));
+            dest[2][3] = gk_fmadds(temp9, src[2][3], (gk_fmadds(temp5, src[0][3], temp6 * src[1][3]))) + temp12;
         }
     }
 }
@@ -178,23 +165,23 @@ void HSD_MtxInverseTranspose(Mtx src, Mtx dest)
         // This needs to be in a different order than in HSD_MtxInverse for
         // some reason
         dest[0][0] =
-            (((*m)[1][1] * (*m)[2][2]) - ((*m)[2][1] * (*m)[1][2])) * det;
+            (gk_fmsubs((*m)[1][1], (*m)[2][2], ((*m)[2][1] * (*m)[1][2]))) * det;
         dest[1][0] =
-            -(((*m)[0][1] * (*m)[2][2]) - ((*m)[2][1] * (*m)[0][2])) * det;
+            -(gk_fmsubs((*m)[0][1], (*m)[2][2], ((*m)[2][1] * (*m)[0][2]))) * det;
         dest[2][0] =
-            (((*m)[0][1] * (*m)[1][2]) - ((*m)[1][1] * (*m)[0][2])) * det;
+            (gk_fmsubs((*m)[0][1], (*m)[1][2], ((*m)[1][1] * (*m)[0][2]))) * det;
         dest[0][1] =
-            -(((*m)[1][0] * (*m)[2][2]) - ((*m)[2][0] * (*m)[1][2])) * det;
+            -(gk_fmsubs((*m)[1][0], (*m)[2][2], ((*m)[2][0] * (*m)[1][2]))) * det;
         dest[1][1] =
-            (((*m)[0][0] * (*m)[2][2]) - ((*m)[2][0] * (*m)[0][2])) * det;
+            (gk_fmsubs((*m)[0][0], (*m)[2][2], ((*m)[2][0] * (*m)[0][2]))) * det;
         dest[2][1] =
-            -(((*m)[0][0] * (*m)[1][2]) - ((*m)[1][0] * (*m)[0][2])) * det;
+            -(gk_fmsubs((*m)[0][0], (*m)[1][2], ((*m)[1][0] * (*m)[0][2]))) * det;
         dest[0][2] =
-            (((*m)[1][0] * (*m)[2][1]) - ((*m)[2][0] * (*m)[1][1])) * det;
+            (gk_fmsubs((*m)[1][0], (*m)[2][1], ((*m)[2][0] * (*m)[1][1]))) * det;
         dest[1][2] =
-            -(((*m)[0][0] * (*m)[2][1]) - ((*m)[2][0] * (*m)[0][1])) * det;
+            -(gk_fmsubs((*m)[0][0], (*m)[2][1], ((*m)[2][0] * (*m)[0][1]))) * det;
         dest[2][2] =
-            (((*m)[0][0] * (*m)[1][1]) - ((*m)[1][0] * (*m)[0][1])) * det;
+            (gk_fmsubs((*m)[0][0], (*m)[1][1], ((*m)[1][0] * (*m)[0][1]))) * det;
         dest[0][3] = 0;
         dest[1][3] = 0;
         dest[2][3] = 0;
@@ -342,11 +329,11 @@ void HSD_MkRotationMtx(Mtx arg0, Vec3* arg1)
     arg0[1][0] = cosY * sinZ;
     arg0[2][0] = -sinY;
     temp2 = cosX * sinY;
-    arg0[0][1] = (cosZ * temp1) - (cosX * sinZ);
-    arg0[1][1] = (sinZ * temp1) + (cosX * cosZ);
+    arg0[0][1] = gk_fmsubs(cosZ, temp1, (cosX * sinZ));
+    arg0[1][1] = gk_fmadds(sinZ, temp1, (cosX * cosZ));
     arg0[2][1] = sinX * cosY;
-    arg0[0][2] = (cosZ * temp2) + (sinX * sinZ);
-    arg0[1][2] = (sinZ * temp2) - (sinX * cosZ);
+    arg0[0][2] = gk_fmadds(cosZ, temp2, (sinX * sinZ));
+    arg0[1][2] = gk_fmsubs(sinZ, temp2, (sinX * cosZ));
     arg0[2][2] = cosX * cosY;
     arg0[0][3] = 0;
     arg0[1][3] = 0;
@@ -397,11 +384,11 @@ void HSD_MtxSRT(Mtx m, Vec3* vec1, Vec3* vec2, Vec3* vec3, Vec3* vec4)
     m[0][0] = cosZ * (vec1x_2 * cosY);
     m[1][0] = sinZ * (vec1x_1 * cosY);
     m[2][0] = -vec1x * sinY;
-    m[0][1] = vec1y_2 * ((cosZ * (sinX * sinY)) - (cosX * sinZ));
-    m[1][1] = vec1y_1 * ((sinZ * (sinX * sinY)) + (cosX * cosZ));
+    m[0][1] = vec1y_2 * (gk_fmsubs(cosZ, (sinX * sinY), (cosX * sinZ)));
+    m[1][1] = vec1y_1 * (gk_fmadds(sinZ, (sinX * sinY), (cosX * cosZ)));
     m[2][1] = cosY * (vec1y * sinX);
-    m[0][2] = vec1z_2 * ((cosZ * (cosX * sinY)) + (sinX * sinZ));
-    m[1][2] = vec1z_1 * ((sinZ * (cosX * sinY)) - (sinX * cosZ));
+    m[0][2] = vec1z_2 * (gk_fmadds(cosZ, (cosX * sinY), (sinX * sinZ)));
+    m[1][2] = vec1z_1 * (gk_fmsubs(sinZ, (cosX * sinY), (sinX * cosZ)));
     m[2][2] = cosY * (vec1z * cosX);
     m[0][3] = vec3->x;
     m[1][3] = vec3->y;
@@ -439,20 +426,20 @@ void HSD_MtxScaledAdd(Mtx arg0, Mtx arg1, Mtx arg2, f32 arg3)
     f32* arr1 = (&arg1[0][0]);
     f32* arr2 = (&arg2[0][0]);
 
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
 
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
 
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
-    *arr2++ = *arr1++ + (arg3 * *arr0++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
+    *arr2++ = gk_fmadds(arg3, *arr0++, *arr1++);
 }
 
 void* HSD_VecAlloc(void)

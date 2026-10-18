@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itlinkbomb.h"
 
 #include <melee/it/forward.h>
@@ -517,7 +518,7 @@ void itLinkbomb_UnkMotion4_Phys(HSD_GObj* gobj)
         temp_f2 = item->x40_vel.x;
         if (temp_f2 != zero) {
             item->x40_vel.x =
-                (sa->x2C * item->xDD4_itemVar.linkbomb.x4) + temp_f2;
+                gk_fmadds(sa->x2C, item->xDD4_itemVar.linkbomb.x4, temp_f2);
         }
         if (ABS(item->x40_vel.x) < sa->x30) {
             item->x40_vel.x = zero;

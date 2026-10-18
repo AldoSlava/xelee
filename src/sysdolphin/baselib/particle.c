@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "particle.h"
 
 #include "generator.h"
@@ -500,7 +501,7 @@ void hsd_80398F8C(HSD_Particle* pp, f32 angle)
     {
         f32 azimuth;
 
-        temp = vy * sin_a + vz * cos_a;
+        temp = gk_fmadds(vy, sin_a, vz * cos_a);
         abs_temp = temp;
         *(s32*) &abs_temp &= 0x7FFFFFFF;
         if (abs_temp < 1.1754944e-38F) {
@@ -517,12 +518,12 @@ void hsd_80398F8C(HSD_Particle* pp, f32 angle)
         cos_e = cosf(azimuth);
     }
 
-    vx = (vx * vx + vy * vy) + vz * vz;
+    vx = gk_fmadds(vz, vz, (gk_fmadds(vx, vx, vy * vy)));
     if (vx > 0.0F) {
         f64 x = __frsqrte((f64) vx);
-        x = 0.5 * x * -(((f64) vx * (x * x)) - 3.0);
-        x = 0.5 * x * -(((f64) vx * (x * x)) - 3.0);
-        x = 0.5 * x * -(((f64) vx * (x * x)) - 3.0);
+        x = 0.5 * x * -(gk_fmsub((f64) vx, (x * x), 3.0));
+        x = 0.5 * x * -(gk_fmsub((f64) vx, (x * x), 3.0));
+        x = 0.5 * x * -(gk_fmsub((f64) vx, (x * x), 3.0));
         magnitude = (f32) ((f64) vx * x);
         vx = magnitude;
     }
@@ -535,11 +536,9 @@ void hsd_80398F8C(HSD_Particle* pp, f32 angle)
     sin_rand = sin_angle * sinf(rand_angle);
     cos_angle = vx * cosf(angle_copy);
 
-    pp->vel.x = cos_rand * cos_e + cos_angle * sin_e;
-    pp->vel.y = cos_e * (cos_angle * sin_a) +
-                (sin_e * (-cos_rand * sin_a) + sin_rand * cos_a);
-    pp->vel.z = cos_e * (cos_angle * cos_a) +
-                (sin_e * (-cos_rand * cos_a) - sin_rand * sin_a);
+    pp->vel.x = gk_fmadds(cos_rand, cos_e, cos_angle * sin_e);
+    pp->vel.y = gk_fmadds(cos_e, (cos_angle * sin_a), (gk_fmadds(sin_e, (-cos_rand * sin_a), sin_rand * cos_a)));
+    pp->vel.z = gk_fmadds(cos_e, (cos_angle * cos_a), (gk_fmsubs(sin_e, (-cos_rand * cos_a), sin_rand * sin_a)));
 }
 
 s32 hsd_803991D8(HSD_Generator* gen, HSD_JObj* jobj, f32 force, f32 range)
@@ -557,7 +556,7 @@ s32 hsd_803991D8(HSD_Generator* gen, HSD_JObj* jobj, f32 force, f32 range)
     dx = jobj->mtx[0][3] - gen->fric;
     dy = jobj->mtx[1][3] - gen->size;
     dz = jobj->mtx[2][3] - gen->radius;
-    dist_sq = dx * dx + dy * dy + dz * dz;
+    dist_sq = gk_fmadds(dz, dz, gk_fmadds(dx, dx, dy * dy));
 
     if (dist_sq <= range * range) {
         return 1;
@@ -568,9 +567,9 @@ s32 hsd_803991D8(HSD_Generator* gen, HSD_JObj* jobj, f32 force, f32 range)
     }
 
     scale = force / dist_sq;
-    gen->pos.z += scale * dx;
-    gen->vel.x += scale * dy;
-    gen->vel.y += scale * dz;
+    gen->pos.z = gk_fmadds(scale, dx, gen->pos.z);
+    gen->vel.x = gk_fmadds(scale, dy, gen->vel.x);
+    gen->vel.y = gk_fmadds(scale, dz, gen->vel.y);
     return 0;
 }
 

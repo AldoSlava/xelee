@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itkirbycutterbeam.h"
 
 #include <math.h>
@@ -87,7 +88,7 @@ void itKirbycutterbeam_UnkMotion0_Phys(Item_GObj* gobj)
                     sinf(ip->xDD4_itemVar.kirbycutterbeam.angle);
     if (ip->ground_or_air == GA_Ground) {
         if (ip->x40_vel.y < 0.0f) {
-            ip->x40_vel.y += (0.05f * ip->x40_vel.y);
+            ip->x40_vel.y = gk_fmadds(0.05f, ip->x40_vel.y, ip->x40_vel.y);
         }
     }
     ip->x40_vel.z = 0.0f;

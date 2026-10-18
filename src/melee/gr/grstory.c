@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grstory.h"
 
 #include "granime.h"
@@ -277,7 +278,7 @@ void grStory_801E3418(Ground_GObj* gobj)
             it_802D8618(i, &pos, temp_r29, 25.0F * i);
 
             // Jitter the vertical position of the each subsequent shy guy
-            pos.y = 3.0F * frand_amp1() + yakumono_param->vpos[spawn_pattern];
+            pos.y = gk_fmadds(3.0F, frand_amp1(), yakumono_param->vpos[spawn_pattern]);
         }
     }
 }

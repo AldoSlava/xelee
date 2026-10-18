@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "it_2725.h"
 
 #include <math.h>
@@ -348,7 +349,7 @@ void itColl_BounceOffVictim(Item_GObj* gobj)
     Item* item = GET_ITEM(gobj);
     item->x40_vel.x *= it_804D6D28->x58_float;
     item->x40_vel.y =
-        (item->x40_vel.y * it_804D6D28->x5C_float) + it_804D6D28->x60_float;
+        gk_fmadds(item->x40_vel.y, it_804D6D28->x5C_float, it_804D6D28->x60_float);
 }
 
 void it_80272DE4(HSD_JObj* jobj, f32 scale)

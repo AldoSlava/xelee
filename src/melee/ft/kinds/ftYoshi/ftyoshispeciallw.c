@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftyoshispeciallw.h"
 
 #include <melee/ft/forward.h>
@@ -32,7 +33,7 @@ void fn_8012E644(Fighter_GObj* gobj)
     PAD_STACK(4);
 
     lb_8000B1CC(fp->parts[FtPart_TransN].joint, NULL, &transn_pos);
-    star_pos.x = (-1.0f * da->speciallw_star_offset.x) + transn_pos.x;
+    star_pos.x = gk_fmadds(-1.0f, da->speciallw_star_offset.x, transn_pos.x);
     star_pos.y = transn_pos.y + da->speciallw_star_offset.y;
     star_pos.z = transn_pos.z;
     it_802B2FC8(gobj, &star_pos, -1.0f);

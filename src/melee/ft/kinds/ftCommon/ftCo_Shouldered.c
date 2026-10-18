@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Shouldered.h"
 
 #include <Runtime/platform.h>
@@ -45,8 +46,7 @@ void ftCo_8009C640(Fighter_GObj* gobj, FtMotionId msid)
     Fighter* fp = gobj->user_data;
     PAD_STACK(8);
     ftCommon_InitGrab(fp, 0,
-                      (int) (fp->dmg.x1830_percent * p_ftCommonData->x4A0 +
-                             p_ftCommonData->x4A4));
+                      (int) (gk_fmadds(fp->dmg.x1830_percent, p_ftCommonData->x4A0, p_ftCommonData->x4A4)));
     fp->mv.co.shouldered.x0 = 0;
     fp->mv.co.shouldered.x4 = 0;
     ftCo_8009C5A4(gobj, msid);

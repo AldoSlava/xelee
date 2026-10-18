@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grlib.h"
 
 #include <sysdolphin/baselib/forward.h>
@@ -308,8 +309,8 @@ static inline bool PointInsideColl(CollData* cd, Vec3* point, float offset)
     bottom = cd->ecb.bottom.y;
     topn = cd->cur_pos.y;
     height = top - bottom;
-    comp = 0.5f * height + offset;
-    y = 0.5f * (top + bottom) + topn - point->y;
+    comp = gk_fmadds(0.5f, height, offset);
+    y = gk_fmadds(0.5f, (top + bottom), topn) - point->y;
     if (ABS(y) > comp) {
         return false;
     }
@@ -318,8 +319,8 @@ static inline bool PointInsideColl(CollData* cd, Vec3* point, float offset)
     left = cd->ecb.left.x;
     topn = cd->cur_pos.x;
     width = right - left;
-    comp = 0.5f * width + offset;
-    x = 0.5f * (left + right) + topn - point->x;
+    comp = gk_fmadds(0.5f, width, offset);
+    x = gk_fmadds(0.5f, (left + right), topn) - point->x;
     if (ABS(x) > comp) {
         return false;
     }

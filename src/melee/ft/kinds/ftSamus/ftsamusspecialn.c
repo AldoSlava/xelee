@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftsamusspecialn.h"
 
 #include <Runtime/platform.h>
@@ -421,7 +422,7 @@ void ftSs_SpecialS_8012A074(Fighter_GObj* gobj)
         Vec3 position;
         fp->u.ss.x2238++;
         lb_8000B1CC(fp->parts[FtPart_56].joint, NULL, &position);
-        position.x += samus_attr->x34 * fp->facing_dir;
+        position.x = gk_fmadds(samus_attr->x34, fp->facing_dir, position.x);
 
         if (fp->motion_id == ftSs_MS_SpecialS ||
             fp->motion_id == ftSs_MS_SpecialAirS)

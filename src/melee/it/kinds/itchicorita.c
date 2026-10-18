@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itchicorita.h"
 
 #include <melee/it/forward.h>
@@ -234,7 +235,7 @@ void it_802C9B20(Item_GObj* chicorita_gobj)
     chicorita = GET_ITEM((HSD_GObj*) chicorita_gobj);
     attr = DP(itChicoritaLeafAttr, chicorita->xC4_article_data->x4_specialAttributes);
     spawn.prev_pos = chicorita->pos;
-    spawn.prev_pos.x += attr->x8 * chicorita->facing_dir;
+    spawn.prev_pos.x = gk_fmadds(attr->x8, chicorita->facing_dir, spawn.prev_pos.x);
     spawn.prev_pos.y += attr->xC;
     it_8026BB88(chicorita_gobj, &spawn.pos);
     spawn.facing_dir = chicorita->facing_dir;

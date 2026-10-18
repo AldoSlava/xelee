@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itzeldadinfireexplode.h"
 
 #include <placeholder.h>
@@ -105,12 +106,11 @@ bool itZeldadinfireexplode_UnkMotion0_Anim(Item_GObj* gobj)
 
     temp_f1 = (attrs->x8 - attrs->x4) / attrs->x0;
     scale.x = scale.y = scale.z =
-        ip->xDD4_itemVar.zeldadinfireexplode.xDD4 * temp_f1 + attrs->x4;
+        gk_fmadds(ip->xDD4_itemVar.zeldadinfireexplode.xDD4, temp_f1, attrs->x4);
     HSD_JObjSetScale(jobj, &scale);
 
     if (ip->x5D4_hitboxes[0].hit.state != HitCapsule_Disabled) {
-        temp_f1 = (ip->xDD4_itemVar.zeldadinfireexplode.xDD4 * attrs->x10 +
-                   attrs->xC);
+        temp_f1 = (gk_fmadds(ip->xDD4_itemVar.zeldadinfireexplode.xDD4, attrs->x10, attrs->xC));
         it_80272460(&ip->x5D4_hitboxes[0].hit, temp_f1, gobj);
 
         if (ip->xDD4_itemVar.zeldadinfireexplode.xDD8 == 0.0f) {

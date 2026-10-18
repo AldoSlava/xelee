@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mnevent.h"
 
 #include <melee/ft/forward.h>
@@ -172,7 +173,7 @@ static inline void mnEvent_CreateIconForSlot(s32 idx, HSD_GObj** slot,
     spacing = HSD_JObjGetTranslationY(*jobj_0A);
     spacing = HSD_JObjGetTranslationY(*jobj_0C) - spacing;
     HSD_JObjGetTranslation(*jobj_0A, pos);
-    pos->y = pos->y + (f32) idx * spacing;
+    pos->y = gk_fmadds((f32) idx, spacing, pos->y);
 
     icon_gobj = GObj_Create(6, 7, 0x80);
     icon_jobj = HSD_JObjLoadJoint(DP(HSD_Joint, assets->joint));
@@ -216,7 +217,7 @@ void mnEvent_8024D15C(s32 idx, s32 event_id)
         spacing = HSD_JObjGetTranslationY(jobj_0C) - spacing;
         HSD_JObjGetTranslation(jobj_0A, &pos);
 
-        pos.y = -(((f32) idx * spacing) + pos.y);
+        pos.y = -(gk_fmadds((f32) idx, spacing, pos.y));
 
         if (data->gobjs[idx] != NULL) {
             HSD_GObj** gobjs = data->gobjs;

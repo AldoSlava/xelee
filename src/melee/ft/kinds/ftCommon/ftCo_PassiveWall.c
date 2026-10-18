@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_PassiveWall.h"
 
 #include <Runtime/platform.h>
@@ -100,7 +101,7 @@ void ftCo_800C1E64(Fighter_GObj* gobj, int msid, int timer, int vel_y_exponent,
                       (1 << 0) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 10),
                       NULL, &ef_pos);
         fp->cur_pos.x =
-            -(fp->x68C_transNPos.z * -fp->facing_dir - pos_x_offset);
+            -(gk_fmsubs(fp->x68C_transNPos.z, -fp->facing_dir, pos_x_offset));
     }
     ft_80081F2C(gobj);
     ft_800881D8(fp, DP(FtSFX, fp->ft_data->x4C_sfx)->x24, 0x7F, 0x40);

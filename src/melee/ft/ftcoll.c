@@ -206,7 +206,7 @@ static inline void updateClankDamage(Fighter* fp, HitCapsule* hit, int int_dmg,
         fp->dmg.int_value = int_dmg;
         if (hit->x40_b1 == true && fp->ground_or_air == GA_Ground) {
             fp->dmg.x191C =
-                int_dmg * p_ftCommonData->x3D0 + p_ftCommonData->x3D4;
+                gk_fmadds(int_dmg, p_ftCommonData->x3D0, p_ftCommonData->x3D4);
             {
                 float facing_dir;
                 if (compare_other_first ? other_pos->x > fp->cur_pos.x

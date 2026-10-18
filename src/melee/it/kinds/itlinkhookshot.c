@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itlinkhookshot.h"
 
 #include <math.h>
@@ -167,7 +168,7 @@ static inline HSD_JObj* it_link_get_joint_c(Item* arg0)
 
 static inline f32 it_link_lerp(f32 a, f32 b, f32 t)
 {
-    return t * a + (1.0F - t) * b;
+    return gk_fmadds(t, a, (1.0F - t) * b);
 }
 
 static inline void it_link_attr_math(itLinkHookshotAttributes* attr, s32 arg2,
@@ -383,8 +384,7 @@ bool itLinkhookshot_UnkMotion8_Anim(Item_GObj* arg0)
     }
     temp_f1 = (f32) var_r5 / (f32) attr->x2C;
     jobj->child->child->rotate.z = 6.2831855f * temp_f1;
-    temp_f0 = (f32) ((0.6499999761581421 * (1.0 - (f64) temp_f1)) +
-                     0.3499999940395355);
+    temp_f0 = (f32) (gk_fmadd(0.6499999761581421, (1.0 - (f64) temp_f1), 0.3499999940395355));
     jobj->child->child->scale.x = temp_f0;
     jobj->child->child->scale.y = temp_f0;
     return 0;

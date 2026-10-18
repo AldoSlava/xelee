@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itdosei.h"
 
 #include <math.h>
@@ -78,7 +79,7 @@ static inline void HSD_JObjSetRotationZeroWithMtxDirty(Item_GObj* gobj)
 static inline f32 itDosei_FacingAngle(Item_GObj* gobj, f32 m)
 {
     f32 facing_dir = GET_ITEM(gobj)->facing_dir;
-    f32 angle = (facing_dir * M_PI_2) + (facing_dir * m);
+    f32 angle = gk_fmadd(facing_dir, M_PI_2, (facing_dir * m));
     return angle;
 }
 
@@ -187,7 +188,7 @@ bool itDosei_UnkMotion1_Anim(Item_GObj* gobj)
     ip->xDD4_itemVar.dosei.xDE4 = ip->pos;
     ip2 = gobj->user_data;
     frame_speed =
-        0.5F * (ip2->x378_itemColl.floor.normal.x * ip2->facing_dir) + 1.0F;
+        gk_fmadds(0.5F, (ip2->x378_itemColl.floor.normal.x * ip2->facing_dir), 1.0F);
     jobj = gobj->hsd_obj;
     ip->x5D0_animFrameSpeed = frame_speed;
     lb_8000BA0C(jobj, frame_speed);

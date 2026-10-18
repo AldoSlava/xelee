@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itunknown.h"
 
 #include <math.h>
@@ -82,7 +83,7 @@ void itUnknown_UnkMotion0_Phys(Item_GObj* gobj)
     Item* ip = GET_ITEM(gobj);
     itUnknownAttributes* attr = DP(itUnknownAttributes, ip->xC4_article_data->x4_specialAttributes);
     it_80272860(gobj, attr->xC, attr->x10);
-    ip->x40_vel.x += attr->x4 * ip->xDD4_itemVar.unknown.x60;
+    ip->x40_vel.x = gk_fmadds(attr->x4, ip->xDD4_itemVar.unknown.x60, ip->x40_vel.x);
 }
 
 bool itUnknown_UnkMotion0_Coll(Item_GObj* gobj)

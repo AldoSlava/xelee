@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Attack100.h"
 #include "inlines.h"
 #include <melee/ft/fighter.h>
@@ -31,9 +32,9 @@ float ftCo_800DA824(Fighter* fp)
     handicap = Player_GetHandicap(fp->player_idx);
     temp = (f32) handicap;
     temp = co->x35C - temp;
-    temp = co->x358 * temp + co->x354;
+    temp = gk_fmadds(co->x358, temp, co->x354);
     temp += value;
-    return fp->dmg.x1830_percent * co->x368 + temp;
+    return gk_fmadds(fp->dmg.x1830_percent, co->x368, temp);
 }
 
 void fn_800DA8E4(Fighter_GObj* gobj, Fighter_GObj* victim_gobj, s32 arg2)
@@ -55,9 +56,9 @@ void fn_800DA8E4(Fighter_GObj* gobj, Fighter_GObj* victim_gobj, s32 arg2)
     v = cd2 * (cd->x364 - ((f32) (Player_80033BB8(fp->player_idx) + 1)));
     {
         f32 s3 = (cd->x35C - (f32) Player_GetHandicap(fp->player_idx));
-        s3 = cd->x358 * s3 + cd->x354;
+        s3 = gk_fmadds(cd->x358, s3, cd->x354);
         s3 = s3 + v;
-        ftCommon_InitGrab(fp, 0, (fp->dmg.x1830_percent * cd->x368) + s3);
+        ftCommon_InitGrab(fp, 0, gk_fmadds(fp->dmg.x1830_percent, cd->x368, s3));
     }
     fp->mv.ca.specials.grav = 0.0f;
     fp->mv._[0xC] = 0;
@@ -366,8 +367,8 @@ void ftCo_800DB464(Fighter_GObj* gobj)
     Vec3 pos;
     lb_8000B1CC(fp->parts[ftParts_GetBoneIndex(fp, FtPart_XRotN)].joint, NULL,
                 &pos);
-    pos.x = (fp->facing_dir * (fp->x1A70.z * fp->x34_scale.y)) + pos.x;
-    pos.y += fp->x1A70.y * fp->x34_scale.y;
+    pos.x = gk_fmadds(fp->facing_dir, (fp->x1A70.z * fp->x34_scale.y), pos.x);
+    pos.y = gk_fmadds(fp->x1A70.y, fp->x34_scale.y, pos.y);
     pos.z = 0.0f;
     fp->cur_pos = pos;
 }

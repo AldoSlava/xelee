@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ft_0D31.h"
 
 #include "fighter.h"
@@ -466,8 +467,7 @@ void ftCo_DeadUpStar_Anim(Fighter_GObj* gobj)
         switch (fp->mv.co.unk_deadup.x44) {
         case 0:
             fp->self_vel.y =
-                (p_ftCommonData->x514 * Stage_GetCamBoundsTopOffset() -
-                 fp->cur_pos.y) /
+                (gk_fmsubs(p_ftCommonData->x514, Stage_GetCamBoundsTopOffset(), fp->cur_pos.y)) /
                 (f32) p_ftCommonData->x508;
             fp->self_vel.z =
                 p_ftCommonData->x510 / (f32) p_ftCommonData->x508;

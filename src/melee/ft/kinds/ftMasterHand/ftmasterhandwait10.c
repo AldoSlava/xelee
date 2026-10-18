@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftmasterhandwait10.h"
 
 #include <Runtime/platform.h>
@@ -331,10 +332,10 @@ void ftMh_Wait1_0_Anim(HSD_GObj* gobj)
                     break;
                 case ftMh_MS_FingerBeamLoop: // Lasers
                     rand = HSD_Randf();
-                    vec.x = da->xCC_pos.x * rand * 2 + da->xC4_pos.x -
+                    vec.x = gk_fmadds(da->xCC_pos.x * rand, 2, da->xC4_pos.x) -
                             da->xCC_pos.x;
                     rand = HSD_Randf();
-                    vec.y = da->xCC_pos.y * rand * 2 + da->xC4_pos.y -
+                    vec.y = gk_fmadds(da->xCC_pos.y * rand, 2, da->xC4_pos.y) -
                             da->xCC_pos.y;
                     vec.z = 0;
                     ftMh_MS_389_80150DC4(gobj, &ftMh_MS_359_80152BCC, &vec);
@@ -433,9 +434,9 @@ void ftMh_MS_341_80150894(HSD_GObj* gobj)
     } else if ((buttons & HSD_PAD_B) && (buttons & HSD_PAD_DPADUP)) {
         // Lasers
         float rand = HSD_Randf();
-        pos.x = da->xCC_pos.x * rand * 2 + da->xC4_pos.x - da->xCC_pos.x;
+        pos.x = gk_fmadds(da->xCC_pos.x * rand, 2, da->xC4_pos.x) - da->xCC_pos.x;
         rand = HSD_Randf();
-        pos.y = da->xCC_pos.y * rand * 2 + da->xC4_pos.y - da->xCC_pos.y;
+        pos.y = gk_fmadds(da->xCC_pos.y * rand, 2, da->xC4_pos.y) - da->xCC_pos.y;
         pos.z = 0;
         ftMh_MS_389_80150DC4(gobj, &ftMh_MS_359_80152BCC, &pos);
     } else if ((buttons & HSD_PAD_B) && (buttons & HSD_PAD_DPADRIGHT)) {

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "quatlib.h"
 
 #include <math.h>
@@ -81,10 +82,10 @@ s32 HSD_QuatLib_8037EC4C(Quaternion* p, Quaternion* q, Quaternion* out)
     f32 z;
     f32 w;
 
-    x = q->w * p->x + p->w * q->x + (p->y * q->z - q->y * p->z);
-    y = q->w * p->y + p->w * q->y + (q->x * p->z - p->x * q->z);
-    z = q->w * p->z + p->w * q->z + (p->x * q->y - q->x * p->y);
-    w = p->w * q->w - (p->z * q->z + (p->x * q->x + p->y * q->y));
+    x = gk_fmadds(q->w, p->x, p->w * q->x) + (gk_fmsubs(p->y, q->z, q->y * p->z));
+    y = gk_fmadds(q->w, p->y, p->w * q->y) + (gk_fmsubs(q->x, p->z, p->x * q->z));
+    z = gk_fmadds(q->w, p->z, p->w * q->z) + (gk_fmsubs(p->x, q->y, q->x * p->y));
+    w = gk_fmsubs(p->w, q->w, (gk_fmadds(p->z, q->z, (gk_fmadds(p->x, q->x, p->y * q->y)))));
 
     out->x = x;
     out->y = y;
@@ -137,10 +138,10 @@ s32 EulerToQuat(Vec3* euler, Quaternion* q)
 
     ss = sy * sz;
     cc = cy * cz;
-    q->w = cx * cc + sx * ss;
-    q->x = sx * cc - cx * ss;
-    q->y = cz * (cx * sy) + sz * (sx * cy);
-    q->z = sz * (cx * cy) - cz * (sx * sy);
+    q->w = gk_fmadds(cx, cc, sx * ss);
+    q->x = gk_fmsubs(sx, cc, cx * ss);
+    q->y = gk_fmadds(cz, (cx * sy), sz * (sx * cy));
+    q->z = gk_fmsubs(sz, (cx * cy), cz * (sx * sy));
 
     return 0;
 }

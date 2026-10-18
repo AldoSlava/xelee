@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mnstagesw.h"
 
 #include "inlines.h"
@@ -110,7 +111,7 @@ static void mnStageSw_802359C8(MnStageSwData* data)
     for (i = 0; i < 15; i++) {
         text = HSD_SisLib_803A5ACC(
             0, mn_804D6BB5, 1.0f + HSD_JObjGetTranslationX(data->x2C),
-            -((delta_y * (f32) i) + start_y), 17.5f, 160.0f, 300.0f);
+            -(gk_fmadds(delta_y, (f32) i, start_y)), 17.5f, 160.0f, 300.0f);
         data->x40[i] = text;
         text->font_size.x = 0.0521f;
         text->font_size.y = 0.0521f;
@@ -127,7 +128,7 @@ static void mnStageSw_802359C8(MnStageSwData* data)
     for (i = 15; i < NUM_STAGES; i++) {
         text = HSD_SisLib_803A5ACC(
             0, mn_804D6BB5, 1.0f + HSD_JObjGetTranslationX(data->x34),
-            -((delta_y * (f32) (i - 15)) + start_y), 17.5f, 160.0f, 300.0f);
+            -(gk_fmadds(delta_y, (f32) (i - 15), start_y)), 17.5f, 160.0f, 300.0f);
         data->x40[i] = text;
         text->font_size.x = 0.0521f;
         text->font_size.y = 0.0521f;
@@ -423,13 +424,11 @@ static void mnStageSw_80236178(MnStageSwData* data, u8 idx)
     if (idx < 15) {
         ref_jobj = data->x2C;
         HSD_JObjSetTranslateX(jobj, HSD_JObjGetTranslationX(ref_jobj));
-        HSD_JObjSetTranslateY(jobj, delta * (f32) idx +
-                                        HSD_JObjGetTranslationY(data->x2C));
+        HSD_JObjSetTranslateY(jobj, gk_fmadds(delta, (f32) idx, HSD_JObjGetTranslationY(data->x2C)));
     } else {
         ref_jobj = data->x34;
         HSD_JObjSetTranslateX(jobj, HSD_JObjGetTranslationX(ref_jobj));
-        HSD_JObjSetTranslateY(jobj, delta * (f32) (idx - 15) +
-                                        HSD_JObjGetTranslationY(data->x2C));
+        HSD_JObjSetTranslateY(jobj, gk_fmadds(delta, (f32) (idx - 15), HSD_JObjGetTranslationY(data->x2C)));
     }
 }
 static HSD_JObj* mnStageSw_802364A0_noinline(MnStageSwData* data, u8 idx);
@@ -494,15 +493,13 @@ static void mnStageSw_80236548(HSD_GObj* gobj, u8 arg1, u8 arg2)
             (void) x;
             HSD_JObjSetTranslateX(cursor_jobj, x);
             HSD_JObjSetTranslateY(cursor_jobj,
-                                  delta_y * (f32) sel +
-                                      HSD_JObjGetTranslationY(data->x2C));
+                                  gk_fmadds(delta_y, (f32) sel, HSD_JObjGetTranslationY(data->x2C)));
         } else {
             x = HSD_JObjGetTranslationX(data->x34);
             (void) x;
             HSD_JObjSetTranslateX(cursor_jobj, x);
             HSD_JObjSetTranslateY(cursor_jobj,
-                                  delta_y * (f32) (sel - 15) +
-                                      HSD_JObjGetTranslationY(data->x2C));
+                                  gk_fmadds(delta_y, (f32) (sel - 15), HSD_JObjGetTranslationY(data->x2C)));
         }
     }
     if (arg2 != 0) {

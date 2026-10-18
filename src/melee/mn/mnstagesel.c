@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mnstagesel.h"
 
 #include <placeholder.h>
@@ -644,14 +645,14 @@ void fn_8025A310(HSD_GObj* gobj)
         return;
     }
     HSD_JObjGetTranslation(jobj, &sp1C);
-    sp1C.x = 0.03f * mnStageSel_804D6CAC + sp1C.x;
+    sp1C.x = gk_fmadds(0.03f, mnStageSel_804D6CAC, sp1C.x);
     if (-27.0F > sp1C.x) {
         sp1C.x = -27.0F;
     }
     if (27.0F < sp1C.x) {
         sp1C.x = 27.0F;
     }
-    sp1C.y = 0.03f * mnStageSel_804D6CAD + sp1C.y;
+    sp1C.y = gk_fmadds(0.03f, mnStageSel_804D6CAD, sp1C.y);
     if (-19.0F > sp1C.y) {
         sp1C.y = -19.0F;
     }

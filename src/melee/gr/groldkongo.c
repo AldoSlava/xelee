@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "groldkongo.h"
 
 #include <Runtime/platform.h>
@@ -475,9 +476,7 @@ void stageGObj2_GObjProc(Ground_GObj* arg0)
 
             grAnime_801C8138(arg0, gp->map_id, 0);
             HSD_JObjSetTranslateY(
-                jobj, (yakumono_param->rrange_bird_random_offset_y *
-                       ((2.0f * (0, HSD_Randf())) - 1.0f)) +
-                          70.0f);
+                jobj, gk_fmadds(yakumono_param->rrange_bird_random_offset_y, (gk_fmsubs(2.0f, (0, HSD_Randf()), 1.0f)), 70.0f));
             HSD_JObjSetTranslateZ(jobj, -200.0f);
             Camera_800307D0(&left, &center, &right);
             if (HSD_Randi(2) != 0) {

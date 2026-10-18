@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "spline.h"
 
 #include <math.h> // IWYU pragma: keep
@@ -22,9 +23,7 @@ f32 splGetHelmite(f32 fterm, f32 time, f32 p0, f32 p1, f32 d0, f32 d1)
     _2t3_T3 = 2.0f * t3_T2 * fterm;
     _3t2_T2 = 3.0f * _1_T2 * t2;
 
-    return (d1 * (t3_T2 - t2_T)) + ((d0 * (time + ((t3_T2 - t2_T) - t2_T))) +
-                                    ((p0 * (1.0f + (_2t3_T3 - _3t2_T2))) +
-                                     (p1 * (-_2t3_T3 + _3t2_T2))));
+    return gk_fmadds(d1, (t3_T2 - t2_T), (gk_fmadds(d0, (time + ((t3_T2 - t2_T) - t2_T)), (gk_fmadds(p0, (1.0f + (_2t3_T3 - _3t2_T2)), (p1 * (-_2t3_T3 + _3t2_T2)))))));
 }
 
 static inline void splGetCardinalPoint(Vec3* p, Vec3* cp, f32 tension, f32 u)
@@ -158,8 +157,7 @@ static f32 splArcLengthPolynomial(const f32 coeffs[5], f32 t)
     f32 t2 = t * t;
     f32 t3 = t2 * t;
     f32 t4 = t3 * t;
-    f32 result = (coeffs[0] * t4) + (coeffs[1] * t3) + (coeffs[2] * t2) +
-                 (coeffs[3] * t) + coeffs[4];
+    f32 result = gk_fmadds(coeffs[3], t, gk_fmadds(coeffs[2], t2, gk_fmadds(coeffs[0], t4, (coeffs[1] * t3)))) + coeffs[4];
 
     if ((result < 0.0F) && (result > -0.001F)) {
         result = 0.0F;
@@ -184,9 +182,9 @@ static inline f32 spl_IterateSimpsonsMiddle(const f32 coeffs[5], const f32 dx,
     s32 i;
     for (i = 2; i <= 8; ++i) {
         if (!(i & 1)) {
-            var_f24 += 4.0F * splArcLengthPolynomial(coeffs, t);
+            var_f24 = gk_fmadds(4.0F, splArcLengthPolynomial(coeffs, t), var_f24);
         } else {
-            var_f24 += 2.0F * splArcLengthPolynomial(coeffs, t);
+            var_f24 = gk_fmadds(2.0F, splArcLengthPolynomial(coeffs, t), var_f24);
         }
         t += dx;
     }

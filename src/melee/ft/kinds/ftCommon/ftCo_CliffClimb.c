@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_CliffClimb.h"
 
 #include <Runtime/platform.h>
@@ -103,7 +104,7 @@ void ftCo_CliffClimb_Phys(Fighter_GObj* gobj)
             } else {
                 mpLib_80053DA4_Floor(fp->mv.co.cliff.ledge_id, &vec);
             }
-            fp->cur_pos.x = fp->x68C_transNPos.z * fp->facing_dir + vec.x;
+            fp->cur_pos.x = gk_fmadds(fp->x68C_transNPos.z, fp->facing_dir, vec.x);
             fp->cur_pos.y = vec.y + fp->x68C_transNPos.y;
             if (fp->ground_or_air == GA_Air && fp->x68C_transNPos.z >= 0 &&
                 fp->x68C_transNPos.y >= 0)

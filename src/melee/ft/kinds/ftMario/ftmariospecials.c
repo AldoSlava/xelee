@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftmariospecials.h"
 
 #include <Runtime/platform.h>
@@ -196,7 +197,7 @@ void ftMr_SpecialS_Phys(HSD_GObj* gobj)
             lb_8000B1CC(fp->parts[ftParts_GetBoneIndex(fp, FtPart_HipN)].joint,
                         NULL, &coords);
 
-            coords.x += 3 * fp->facing_dir;
+            coords.x = gk_fmadds(3, fp->facing_dir, coords.x);
             lb_800119DC(&coords, 120, 0.9, 0.02, M_PI_3);
         }
     }
@@ -234,7 +235,7 @@ void ftMr_SpecialAirS_Phys(HSD_GObj* gobj)
             }
             lb_8000B1CC(fp->parts[ftParts_GetBoneIndex(fp, FtPart_HipN)].joint,
                         NULL, &coords);
-            coords.x += 3 * fp->facing_dir;
+            coords.x = gk_fmadds(3, fp->facing_dir, coords.x);
             lb_800119DC(&coords, 120, 3, 0.1, M_PI_3);
         }
         ftCommon_Fall(fp, sa->specials.grav, sa->specials.terminal_vel);

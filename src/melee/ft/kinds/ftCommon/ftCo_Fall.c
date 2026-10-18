@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Fall.h"
 
 #include <melee/ft/forward.h>
@@ -182,7 +183,7 @@ void ftCo_Fall_Anim_Inner(Fighter_GObj* gobj, f32* mv_x4,
         var_f0 = 0.0F;
     }
 
-    *mv_x4 += p_ftCommonData->x448 * (var_f0 - *mv_x4);
+    *mv_x4 = gk_fmadds(p_ftCommonData->x448, (var_f0 - *mv_x4), *mv_x4);
     if (*mv_x4 && smid != fp->mv.co.fall.smid) {
         ftAnim_8006EDD0(fp, smid, fp->cur_anim_frame, 1.0F);
         HSD_JObjAnimAll(fp->x8AC_animSkeleton);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftseakspecials.h"
 
 #include <melee/ft/forward.h>
@@ -98,7 +99,7 @@ void ftSk_SpecialS_80110610(HSD_GObj* gobj, s32 arg1, float arg2)
     ftSk_SpecialS_80110490(fp);
 
     {
-        float f = 0.0556F * fp->mv.sk.specials.x18 + 4;
+        float f = gk_fmadds(0.0556F, fp->mv.sk.specials.x18, 4);
 
         if (fp->mv.sk.specials.x14) {
             HSD_JObj* bone = fp->x8AC_animSkeleton;

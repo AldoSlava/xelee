@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itmsbomb.h"
 
 #include <melee/it/forward.h>
@@ -130,7 +131,7 @@ void it_80290238(Item_GObj* gobj)
     ip->xDCE_flag.b3 = 1;
     if (it_802763B8(gobj) != 1) {
         if (it_802763E0(gobj) == 2) {
-            ip->pos.y += ip->scl * (attrs->x8.top - attrs->x8.bottom);
+            ip->pos.y = gk_fmadds(ip->scl, (attrs->x8.top - attrs->x8.bottom), ip->pos.y);
         } else {
             int x = it_80276308(gobj);
             if (x == 8) {

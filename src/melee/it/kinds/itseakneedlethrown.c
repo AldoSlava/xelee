@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itseakneedlethrown.h"
 
 #include <melee/it/forward.h>
@@ -137,14 +138,14 @@ void it_802AFF08(Item_GObj* gobj, Fighter_GObj* owner)
         angle_factor = 1.5707964f;
     }
     ip->xDD4_itemVar.seakneedlethrown.xDF0 =
-        (ip->facing_dir * angle_factor) + 1.5707964f;
+        gk_fmadds(ip->facing_dir, angle_factor, 1.5707964f);
     ip->x40_vel.x = -attr->x8 * cosf(ip->xDD4_itemVar.seakneedlethrown.xDF0);
     ip->x40_vel.y = attr->x8 * sinf(ip->xDD4_itemVar.seakneedlethrown.xDF0);
     ip->x40_vel.z = 0.0f;
     ip->xDD4_itemVar.seakneedlethrown.xDE4.x =
-        ip->pos.x - 3.0f * ip->x40_vel.x;
+        gk_fnmsubs(3.0f, ip->x40_vel.x, ip->pos.x);
     ip->xDD4_itemVar.seakneedlethrown.xDE4.y =
-        ip->pos.y - 3.0f * ip->x40_vel.y;
+        gk_fnmsubs(3.0f, ip->x40_vel.y, ip->pos.y);
     ip->xDD4_itemVar.seakneedlethrown.xDE4.z = 0.0f;
     HSD_JObjSetRotationX(
         child,

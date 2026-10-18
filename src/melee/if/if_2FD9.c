@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "if_2FD9.h"
 
 #include "forward.h"
@@ -105,7 +106,7 @@ static inline void setDiffuse(HSD_MObj* mobj, GXColor* color)
 
 static inline f32 getOffsetY(float* v, u8 j, u8 k)
 {
-    return 2.6f * j + v[k != 0 ? k - 1 : 0];
+    return gk_fmadds(2.6f, j, v[k != 0 ? k - 1 : 0]);
 }
 
 void fn_802FDA78(HSD_GObj* gobj)

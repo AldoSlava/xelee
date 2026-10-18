@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itleadead.h"
 
 #include <Runtime/platform.h>
@@ -969,7 +970,7 @@ s32 it_802EA6F4(Item_GObj* gobj)
 
 static inline f32 neg_dot(Vec3* a, Vec3* b)
 {
-    return -(a->x * b->x) - (a->y * b->y) - (a->z * b->z);
+    return gk_fnmsubs(a->z, b->z, gk_fnmsubs(a->y, b->y, -(a->x * b->x)));
 }
 
 bool it_802EA804(Item_GObj* gobj, f32 range)

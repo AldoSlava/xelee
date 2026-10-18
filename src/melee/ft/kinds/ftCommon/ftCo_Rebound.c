@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Rebound.h"
 
 #include <Runtime/platform.h>
@@ -25,7 +26,7 @@ void ftCo_80099D9C(Fighter_GObj* gobj)
             (fp->co_attrs.clank_animation_length + 0.1f) / fp_x191C;
         fp->mv.co.rebound.x0 =
             -fp->dmg.facing_dir *
-            (fp_x191C * p_ftCommonData->x3D8 + p_ftCommonData->x3DC);
+            (gk_fmadds(fp_x191C, p_ftCommonData->x3D8, p_ftCommonData->x3DC));
     }
     ftCommon_800804A0(fp, fp->mv.co.rebound.x0);
 }

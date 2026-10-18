@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftpikachuspecialhi.h"
 
 #include <Runtime/platform.h>
@@ -209,9 +210,9 @@ void ftPk_SpecialHiStart1_Anim(HSD_GObj* gobj)
                 fp->parts[ftParts_GetBoneIndex(fp, FtPart_XRotN)].joint, 0,
                 &vec2);
             tempf = HSD_Randf();
-            vec2.x += 6 * tempf - 3;
+            vec2.x += gk_fmsubs(6, tempf, 3);
             tempf = HSD_Randf();
-            vec2.y += 6 * tempf - 3;
+            vec2.y += gk_fmsubs(6, tempf, 3);
             efSync_Spawn(1012, gobj, &vec2);
             fp->x2219_b0 = true;
             Fighter_SetEffectHitlagCallbacks(fp);
@@ -248,9 +249,9 @@ void ftPk_SpecialAirHiStart1_Anim(HSD_GObj* gobj)
                 fp->parts[ftParts_GetBoneIndex(fp, FtPart_XRotN)].joint, 0,
                 &vec2);
             tempf = HSD_Randf();
-            vec2.x += (10 * tempf) - 5;
+            vec2.x += gk_fmsubs(10, tempf, 5);
             tempf = HSD_Randf();
-            vec2.y += (10 * tempf) - 5;
+            vec2.y += gk_fmsubs(10, tempf, 5);
             efSync_Spawn(1012, gobj, &vec2);
             fp->x2219_b0 = true;
             Fighter_SetEffectHitlagCallbacks(fp);
@@ -273,7 +274,7 @@ void ftPk_SpecialHi_8012642C(HSD_GObj* gobj)
 
     float half_pi = (float) M_PI_2;
     float angle = atan2f(fp->self_vel.x, fp->self_vel.y);
-    float tempf = (fp->facing_dir * angle) + (pika_attr->x78 - half_pi);
+    float tempf = gk_fmadds(fp->facing_dir, angle, (pika_attr->x78 - half_pi));
 
     ftPartSetRotX(fp, ftParts_GetBoneIndex(fp, FtPart_XRotN), tempf);
     scl.x = pika_attr->x7C_scale.x;
@@ -341,7 +342,7 @@ void ftPk_SpecialHiStart1_Coll(HSD_GObj* gobj)
         if (collData->env_flags & Collide_FloorMask) {
             float angle =
                 atan2f(collData->floor.normal.x, collData->floor.normal.y);
-            float angle2 = (fighter2->facing_dir * angle) + pika_attr->x68;
+            float angle2 = gk_fmadds(fighter2->facing_dir, angle, pika_attr->x68);
             ftPartSetRotX(fighter2,
                           ftParts_GetBoneIndex(fighter2, FtPart_XRotN),
                           angle2);
@@ -444,9 +445,8 @@ void ftPk_SpecialHi_ChangeMotion_Unk03(HSD_GObj* gobj)
     collData = &fp->coll_data;
     pika_attr = fp->dat_attrs;
     if (fp->coll_data.env_flags & Collide_FloorMask) {
-        float angle = (fp->facing_dir * atan2f(collData->floor.normal.x,
-                                               collData->floor.normal.y)) +
-                      pika_attr->x68;
+        float angle = gk_fmadds(fp->facing_dir, atan2f(collData->floor.normal.x,
+                                               collData->floor.normal.y), pika_attr->x68);
         ftPartSetRotX(fp, ftParts_GetBoneIndex(fp, FtPart_XRotN), angle);
     }
 

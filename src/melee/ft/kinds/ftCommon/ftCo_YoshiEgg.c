@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_YoshiEgg.h"
 
 #include <Runtime/platform.h>
@@ -203,8 +204,7 @@ void ftCo_800BC3AC(Fighter_GObj* gobj)
 void ftCo_800BC3D0(Fighter_GObj* gobj)
 {
     Fighter* fp = GET_FIGHTER(gobj);
-    fp->grab_timer = -(fp->dmg.x1838_percentTemp * ftYs_SpecialN_8012CDB4() -
-                       fp->grab_timer);
+    fp->grab_timer = -(gk_fmsubs(fp->dmg.x1838_percentTemp, ftYs_SpecialN_8012CDB4(), fp->grab_timer));
     if (fp->dmg.x18CC == 3 && ftCo_800C0C88(fp->dmg.x18D0)) {
         fp->grab_timer = 0;
     }

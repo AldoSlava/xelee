@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mpcoll.h"
 
 #include <Runtime/platform.h>
@@ -548,13 +549,13 @@ void mpColl_LoadECB_Fixed(CollData* coll)
         update_min_max_2(&left_x, &right_x, rot_bot_x);
         update_min_max_2(&bottom_y, &top_y, rot_bot_y);
 
-        rot_right_x = (orig_right_x * cos) - (midpoint_x * sin);
-        rot_right_y = (orig_right_x * sin) + (midpoint_x * cos);
+        rot_right_x = gk_fmsubs(orig_right_x, cos, (midpoint_x * sin));
+        rot_right_y = gk_fmadds(orig_right_x, sin, (midpoint_x * cos));
         update_min_max_2(&left_x, &right_x, rot_right_x);
         update_min_max_2(&bottom_y, &top_y, rot_right_y);
 
-        rot_left_x = (orig_left_x * cos) - (midpoint_x * sin);
-        rot_left_y = (orig_left_x * sin) + (midpoint_x * cos);
+        rot_left_x = gk_fmsubs(orig_left_x, cos, (midpoint_x * sin));
+        rot_left_y = gk_fmadds(orig_left_x, sin, (midpoint_x * cos));
         update_min_max_2(&left_x, &right_x, rot_left_x);
         update_min_max_2(&bottom_y, &top_y, rot_left_y);
     }
@@ -656,8 +657,8 @@ void mpColl_LoadECB(CollData* coll)
 
 static inline void Vec2_Interpolate(float time, Vec2* dest, Vec2* src)
 {
-    dest->x += time * (src->x - dest->x);
-    dest->y += time * (src->y - dest->y);
+    dest->x = gk_fmadds(time, (src->x - dest->x), dest->x);
+    dest->y = gk_fmadds(time, (src->y - dest->y), dest->y);
 }
 
 void mpCollInterpolateECB(CollData* coll, float time)
@@ -1854,7 +1855,7 @@ bool mpColl_800454A4_RightWall(CollData* coll)
                     mpLineGetKind(line_id) & CollLine_RightWall)
                 {
                     mpLineGetNormal(line_id, &nrm);
-                    x = (pos.y - top.y) / nrm.x * -nrm.y + top.x - pos.x +
+                    x = gk_fmadds((pos.y - top.y) / nrm.x, -nrm.y, top.x) - pos.x +
                         0.5F;
                     if (mpColl_804D6490_max_x < coll->cur_pos.x + x) {
                         u32 temp = mpLineGetFlags(line_id);
@@ -1884,9 +1885,9 @@ bool mpColl_800454A4_RightWall(CollData* coll)
             mpLineGetV1Pos(j, &pos);
 
             if (bot <= pos.y && pos.y <= mid) {
-                x = f27 * (pos.y - bot) + coll->ecb.bottom.x;
+                x = gk_fmadds(f27, (pos.y - bot), coll->ecb.bottom.x);
             } else if (mid <= pos.y && pos.y <= top) {
-                x = f26 * (pos.y - top) + coll->ecb.top.x;
+                x = gk_fmadds(f26, (pos.y - top), coll->ecb.top.x);
             } else if (pos.y < bot) {
                 break;
             } else {
@@ -1911,9 +1912,9 @@ bool mpColl_800454A4_RightWall(CollData* coll)
             mpLineGetV0Pos(wall_id, &pos);
 
             if (bot <= pos.y && pos.y <= mid) {
-                x = f27 * (pos.y - bot) + coll->ecb.bottom.x;
+                x = gk_fmadds(f27, (pos.y - bot), coll->ecb.bottom.x);
             } else if (mid <= pos.y && pos.y <= top) {
-                x = f26 * (pos.y - top) + coll->ecb.top.x;
+                x = gk_fmadds(f26, (pos.y - top), coll->ecb.top.x);
             } else if (pos.y > top) {
                 break;
             } else {
@@ -2173,7 +2174,7 @@ bool mpColl_80046224_LeftWall(CollData* coll)
                     Vec3 nrm;
                     PAD_STACK(0x44);
                     mpLineGetNormal(line_id2, &nrm);
-                    x = (pos.y - vec.y) / -nrm.x * nrm.y + vec.x - pos.x -
+                    x = gk_fmadds((pos.y - vec.y) / -nrm.x, nrm.y, vec.x) - pos.x -
                         0.5F;
                     if (mpColl_804D6490_max_x > coll->cur_pos.x + x) {
                         u32 temp = mpLineGetFlags(line_id2);
@@ -2205,9 +2206,9 @@ bool mpColl_80046224_LeftWall(CollData* coll)
                 mpLineGetV0Pos(line_id2, &pos);
 
                 if (f28 <= pos.y && pos.y <= f29) {
-                    x = f27 * (pos.y - f28) + coll->ecb.bottom.x;
+                    x = gk_fmadds(f27, (pos.y - f28), coll->ecb.bottom.x);
                 } else if (f29 <= pos.y && pos.y <= f30) {
-                    x = f26 * (pos.y - f30) + coll->ecb.top.x;
+                    x = gk_fmadds(f26, (pos.y - f30), coll->ecb.top.x);
                 } else if (pos.y < f28) {
                     break;
                 } else {
@@ -2233,9 +2234,9 @@ bool mpColl_80046224_LeftWall(CollData* coll)
             mpLineGetV1Pos(wall_id, &pos);
 
             if (f28 <= pos.y && pos.y <= f29) {
-                x = f27 * (pos.y - f28) + coll->ecb.bottom.x;
+                x = gk_fmadds(f27, (pos.y - f28), coll->ecb.bottom.x);
             } else if (f29 <= pos.y && pos.y <= f30) {
-                x = f26 * (pos.y - f30) + coll->ecb.top.x;
+                x = gk_fmadds(f26, (pos.y - f30), coll->ecb.top.x);
             } else if (pos.y > f30) {
                 break;
             } else {
@@ -3185,9 +3186,9 @@ bool mpColl_800491C8_RightWall(CollData* coll)
             mpLineGetV1Pos(j, &pos);
 
             if (bot <= pos.y && pos.y <= mid) {
-                x = bot_y_to_x * (pos.y - bot) + coll->ecb.bottom.x;
+                x = gk_fmadds(bot_y_to_x, (pos.y - bot), coll->ecb.bottom.x);
             } else if (mid <= pos.y && pos.y <= top) {
-                x = top_y_to_x * (pos.y - top) + coll->ecb.top.x;
+                x = gk_fmadds(top_y_to_x, (pos.y - top), coll->ecb.top.x);
             } else if (pos.y < bot) {
                 break;
             } else {
@@ -3212,9 +3213,9 @@ bool mpColl_800491C8_RightWall(CollData* coll)
             mpLineGetV0Pos(wall_id, &pos);
 
             if (bot <= pos.y && pos.y <= mid) {
-                x = bot_y_to_x * (pos.y - bot) + coll->ecb.bottom.x;
+                x = gk_fmadds(bot_y_to_x, (pos.y - bot), coll->ecb.bottom.x);
             } else if (mid <= pos.y && pos.y <= top) {
-                x = top_y_to_x * (pos.y - top) + coll->ecb.top.x;
+                x = gk_fmadds(top_y_to_x, (pos.y - top), coll->ecb.top.x);
             } else if (pos.y > top) {
                 break;
             } else {
@@ -3481,9 +3482,9 @@ bool mpColl_80049EAC_LeftWall(CollData* coll)
             mpLineGetV0Pos(j, &pos);
 
             if (bot <= pos.y && pos.y <= mid) {
-                x = bot_y_to_x * (pos.y - bot) + coll->ecb.bottom.x;
+                x = gk_fmadds(bot_y_to_x, (pos.y - bot), coll->ecb.bottom.x);
             } else if (mid <= pos.y && pos.y <= top) {
-                x = top_y_to_x * (pos.y - top) + coll->ecb.top.x;
+                x = gk_fmadds(top_y_to_x, (pos.y - top), coll->ecb.top.x);
             } else if (pos.y < bot) {
                 break;
             } else {
@@ -3508,9 +3509,9 @@ bool mpColl_80049EAC_LeftWall(CollData* coll)
             mpLineGetV1Pos(wall_id, &pos);
 
             if (bot <= pos.y && pos.y <= mid) {
-                x = bot_y_to_x * (pos.y - bot) + coll->ecb.bottom.x;
+                x = gk_fmadds(bot_y_to_x, (pos.y - bot), coll->ecb.bottom.x);
             } else if (mid <= pos.y && pos.y <= top) {
-                x = top_y_to_x * (pos.y - top) + coll->ecb.top.x;
+                x = gk_fmadds(top_y_to_x, (pos.y - top), coll->ecb.top.x);
             } else if (pos.y > top) {
                 break;
             } else {
@@ -3731,8 +3732,7 @@ bool mpColl_8004A908_Floor(CollData* coll, int line_id)
         coll->floor.normal = normal;
         return true;
     }
-    prev_bottom_y = 0.5F * (coll->prev_ecb.top.y + coll->prev_ecb.bottom.y) +
-                    coll->prev_pos.y;
+    prev_bottom_y = gk_fmadds(0.5F, (coll->prev_ecb.top.y + coll->prev_ecb.bottom.y), coll->prev_pos.y);
     if (coll->x38 != mpColl_804D64AC) {
         hit_floor = mpCheckFloorRemap(
             prev_bottom_x, prev_bottom_y, bottom_x, bottom_y, 0.0F, NULL,

@@ -133,8 +133,8 @@ void ft_80085154(Fighter_GObj* gobj)
     f32 lstick_y = sinf(fp->lstick_angle);
     f32 temp_f0 = fp->x6A4_transNOffset.y;
     f32 temp_f3 = fp->x6A4_transNOffset.z * fp->facing_dir;
-    fp->self_vel.x = (temp_f3 * lstick_x) - (temp_f0 * lstick_y);
-    fp->self_vel.y = (temp_f3 * lstick_y) + (temp_f0 * lstick_x);
+    fp->self_vel.x = gk_fmsubs(temp_f3, lstick_x, (temp_f0 * lstick_y));
+    fp->self_vel.y = gk_fmadds(temp_f3, lstick_y, (temp_f0 * lstick_x));
 }
 
 void ft_800851C0(Fighter_GObj* gobj)

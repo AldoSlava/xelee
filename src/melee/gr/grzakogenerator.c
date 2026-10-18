@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grzakogenerator.h"
 
 #include <sysdolphin/baselib/forward.h>
@@ -67,9 +68,9 @@ static inline void
 grZakoGenerator_801CA43C_inline(f32 t, grZakoGenerator_Spawn* spawns,
                                 f32 height, Vec3* pos)
 {
-    pos->x = t * (spawns->pos1.x - spawns->pos0.x) + spawns->pos0.x;
+    pos->x = gk_fmadds(t, (spawns->pos1.x - spawns->pos0.x), spawns->pos0.x);
     pos->y = height,
-    pos->z = t * (spawns->pos1.z - spawns->pos0.z) + spawns->pos0.z;
+    pos->z = gk_fmadds(t, (spawns->pos1.z - spawns->pos0.z), spawns->pos0.z);
 }
 
 s32 grZakoGenerator_801CA43C(grZakoGenerator_Config* config, HSD_JObj* jobj,

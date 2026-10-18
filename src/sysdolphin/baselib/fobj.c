@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "fobj.h"
 
 #include <string.h>
@@ -368,7 +369,7 @@ void FObjUpdateAnim(HSD_FObj* fobj, void* obj, HSD_ObjUpdateFunc obj_update)
                 fobj->p0 = fobj->p1;
             }
         }
-        fobjdata.fv = fobj->d0 * fobj->time + fobj->p0;
+        fobjdata.fv = gk_fmadds(fobj->d0, fobj->time, fobj->p0);
         break;
     case HSD_A_OP_SPL0:
     case HSD_A_OP_SPL:

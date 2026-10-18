@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftpeachspecials.h"
 
 #include <Runtime/platform.h>
@@ -121,8 +122,8 @@ void ftPe_SpecialSStart_Anim(HSD_GObj* gobj)
         enterEndSmash(gobj);
     } else {
         ftCommon_8007D5D4(fp);
-        fp->cur_pos.x += -4 * fp->facing_dir * fp->x34_scale.y;
-        fp->cur_pos.y += 3.5f * fp->x34_scale.y;
+        fp->cur_pos.x = gk_fmadds(-4 * fp->facing_dir, fp->x34_scale.y, fp->cur_pos.x);
+        fp->cur_pos.y = gk_fmadds(3.5f, fp->x34_scale.y, fp->cur_pos.y);
         enterAirJump(gobj);
     }
 }

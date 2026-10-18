@@ -3,6 +3,7 @@
  * @copydoc melee/mp/mplib.h
  */
 
+#include <pc/gekko_fp.h>
 #include "mplib.h"
 
 #include <Runtime/platform.h>
@@ -1090,18 +1091,18 @@ static void mpRemap2d(float* x_out, float* y_out, float ax0, float ay0,
     dy = ay1 - ay0;
     f30 = px - ax0;
     f29 = py - ay0;
-    dist2 = (dy * dy) + (dx * dx);
+    dist2 = gk_fmadd(dy, dy, (dx * dx));
     if (ABS(dist2) > 0.0001) {
         // how far along line a is point p
-        double t = (dy * f29 + dx * f30) / dist2;
+        double t = (gk_fmadd(dy, f29, dx * f30)) / dist2;
         if (t > 1.0) {
             t = 1.0;
         } else if (t < 0.0) {
             t = 0.0;
         }
 
-        *x_out = px + (1.0 - t) * (bx0 - ax0) + t * (bx1 - ax1);
-        *y_out = py + (1.0 - t) * (by0 - ay0) + t * (by1 - ay1);
+        *x_out = gk_fmadd(t, (bx1 - ax1), gk_fmadd((1.0 - t), (bx0 - ax0), px));
+        *y_out = gk_fmadd(t, (by1 - ay1), gk_fmadd((1.0 - t), (by0 - ay0), py));
     } else {
         *x_out = px + (bx0 - ax0) + (bx1 - ax0);
         *y_out = py + (by0 - ay0) + (by1 - ay0);
@@ -1443,7 +1444,7 @@ bool mpLineIntersection(float a0x, float a0y, float a1x, float a1y, float b0x,
         double d0x = b0x - a0x;
         double aw = a1x - a0x;
         double d0y = b0y - a0y;
-        double hs_b0_a = (aw * d0y) - (ah * d0x);
+        double hs_b0_a = gk_fmsub(aw, d0y, (ah * d0x));
         double d1y;
         double d1x;
         double det;
@@ -1461,7 +1462,7 @@ bool mpLineIntersection(float a0x, float a0y, float a1x, float a1y, float b0x,
         d1x = b1x - a1x;
         d1y = b1y - a1y;
 
-        hs_b1_a = (aw * d1y) - (ah * d1x);
+        hs_b1_a = gk_fmsub(aw, d1y, (ah * d1x));
         if (hs_b1_a > 0.0) {
             if (hs_b1_a > 0.1) {
                 return false;
@@ -1474,7 +1475,7 @@ bool mpLineIntersection(float a0x, float a0y, float a1x, float a1y, float b0x,
             return false;
         }
 
-        det = (d0x * d1y) - (d0y * d1x);
+        det = gk_fmsub(d0x, d1y, (d0y * d1x));
         if (det < hs_b0_a) {
             if (det < hs_b1_a) {
                 return false;
@@ -1490,15 +1491,15 @@ bool mpLineIntersection(float a0x, float a0y, float a1x, float a1y, float b0x,
         if (!((bw == 0.0 && bh == 0.0) || (b1_below_a && b2_above_a) ||
               (hs_b0_a >= 0.0 && b2_above_a)))
         {
-            double area = (bw * ah) - (bh * aw);
+            double area = gk_fmsub(bw, ah, (bh * aw));
 
             if (ABS(area) > 0.0001F) {
                 double t =
-                    ((bw * d0y) - (bh * d0x)) / area; // barycentric weight
+                    (gk_fmsub(bw, d0y, (bh * d0x))) / area; // barycentric weight
                 if (t > 0.0) {
                     if (t < 1.0) {
-                        *int_x = (aw * t) + a0x;
-                        *int_y = (ah * t) + a0y;
+                        *int_x = gk_fmadd(aw, t, a0x);
+                        *int_y = gk_fmadd(ah, t, a0y);
                     } else {
                         *int_x = a1x;
                         *int_y = a1y;
@@ -1552,7 +1553,7 @@ bool mpLineIntersectionH(float* int_x, float* int_y, float a0x, float a0y,
     if (ABS(dby) < 0.0001) {
         return false;
     }
-    new_x = dbx / dby * (a0y - b0y) + b0x;
+    new_x = gk_fmadd(dbx / dby, (a0y - b0y), b0x);
     dx = new_x - min_ax;
     if (dx < 0.0) {
         if (dx < -0.1) {
@@ -1863,7 +1864,7 @@ bool mpCheckFloorRemap(float ax, float ay, float bx, float by, float y_offset,
                         dy2 = SQ(int_y - old_y);
                         dist2 = dx2 + dy2;
 
-                        if (dx * (int_x - old_x) + dy * (int_y - old_y) < 0.0F)
+                        if (gk_fmadds(dx, (int_x - old_x), dy * (int_y - old_y)) < 0.0F)
                         {
                             dist2 = -dist2;
                         }
@@ -1898,7 +1899,7 @@ bool mpCheckFloorRemap(float ax, float ay, float bx, float by, float y_offset,
                     dy2 = SQ(int_y - old_y);
                     dist2 = dx2 + dy2;
 
-                    if (dx * (int_x - old_x) + dy * (int_y - old_y) < 0.0F) {
+                    if (gk_fmadds(dx, (int_x - old_x), dy * (int_y - old_y)) < 0.0F) {
                         dist2 = -dist2;
                     }
 
@@ -2161,7 +2162,7 @@ bool mpCheckCeilingRemap(float ax, float ay, float bx, float by, Vec3* vec_out,
                         dx2 = SQ(sp58 - f29);
                         dy2 = SQ(sp54 - f28);
                         dist2 = dx2 + dy2;
-                        if ((x_f23 * (sp58 - f29)) + (y_f22 * (sp54 - f28)) <
+                        if (gk_fmadds(x_f23, (sp58 - f29), (y_f22 * (sp54 - f28))) <
                             0.0F)
                         {
                             dist2 = -dist2;
@@ -2201,7 +2202,7 @@ bool mpCheckCeilingRemap(float ax, float ay, float bx, float by, Vec3* vec_out,
                         dx2 = SQ(sp58 - f29);
                         dy2 = SQ(sp54 - f28);
                         dist2 = dx2 + dy2;
-                        if ((x_f23 * (sp58 - f29)) + (y_f22 * (sp54 - f28)) <
+                        if (gk_fmadds(x_f23, (sp58 - f29), (y_f22 * (sp54 - f28))) <
                             0.0F)
                         {
                             dist2 = -dist2;
@@ -2288,7 +2289,7 @@ bool mpLineIntersectionV(float* int_x, float* int_y, float a0x, float a0y,
     if (ABS(dbx) < 0.0001) {
         return false;
     }
-    new_y = (dby / dbx * (a0x - b0x)) + b0y;
+    new_y = gk_fmadd(dby / dbx, (a0x - b0x), b0y);
     dy = new_y - min_ay;
     if (dy < 0.0) {
         if (dy < -0.1) {
@@ -2527,7 +2528,7 @@ bool mpCheckLeftWallRemap(float ax, float ay, float bx, float by,
                         dx2 = SQ(int_x - old_x);
                         dy2 = SQ(int_y - old_y);
                         dist2 = dx2 + dy2;
-                        if ((dx * (int_x - old_x)) + (dy * (int_y - old_y)) <
+                        if (gk_fmadds(dx, (int_x - old_x), (dy * (int_y - old_y))) <
                             0.0F)
                         {
                             dist2 = -dist2;
@@ -2567,7 +2568,7 @@ bool mpCheckLeftWallRemap(float ax, float ay, float bx, float by,
                         dx2 = SQ(int_x - old_x);
                         dy2 = SQ(int_y - old_y);
                         dist2 = dx2 + dy2;
-                        if ((dx * (int_x - old_x)) + (dy * (int_y - old_y)) <
+                        if (gk_fmadds(dx, (int_x - old_x), (dy * (int_y - old_y))) <
                             0.0F)
                         {
                             dist2 = -dist2;
@@ -2839,7 +2840,7 @@ bool mpCheckRightWallRemap(float ax, float ay, float bx, float by,
                         dx2 = SQ(int_x - old_x);
                         dy2 = SQ(int_y - old_y);
                         dist2 = dx2 + dy2;
-                        if ((dx * (int_x - old_x)) + (dy * (int_y - old_y)) <
+                        if (gk_fmadds(dx, (int_x - old_x), (dy * (int_y - old_y))) <
                             0.0F)
                         {
                             dist2 = -dist2;
@@ -2879,7 +2880,7 @@ bool mpCheckRightWallRemap(float ax, float ay, float bx, float by,
                         dx2 = SQ(int_x - old_x);
                         dy2 = SQ(int_y - old_y);
                         dist2 = dx2 + dy2;
-                        if ((dx * (int_x - old_x)) + (dy * (int_y - old_y)) <
+                        if (gk_fmadds(dx, (int_x - old_x), (dy * (int_y - old_y))) <
                             0.0F)
                         {
                             dist2 = -dist2;
@@ -3272,7 +3273,7 @@ int mpLib_8005199C_Floor(Vec3* vec, int joint_id_skip, int joint_id_only)
                         if (ABS(x1 - x0) > 0.0001) {
                             float dx = x1 - x0;
                             float dy = y1 - y0;
-                            if (y >= dy / dx * (x - x0) + y0) {
+                            if (y >= gk_fmadds(dy / dx, (x - x0), y0)) {
                                 line_id = line - groundCollLine;
                                 goto end;
                             }
@@ -5209,9 +5210,9 @@ static inline float sqrtf_store(float x, volatile float* y)
 {
     if (x > 0.0F) {
         double guess = __frsqrte((double) x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
         *y = (float) (x * guess);
         return *y;
     }
@@ -5363,9 +5364,9 @@ bool mpLib_80056C54(int line_id, Vec3* pos, int* line_id_out, Vec3* vec_out,
                 *vec_out = sp58;
             } else {
                 float temp_f2_5 = var_f25 / dist_f28;
-                vec_out->x = (temp_f2_5 * (sp4C.x - sp58.x)) + sp58.x;
-                vec_out->y = (temp_f2_5 * (sp4C.y - sp58.y)) + sp58.y;
-                vec_out->z = (temp_f2_5 * (sp4C.z - sp58.z)) + sp58.z;
+                vec_out->x = gk_fmadds(temp_f2_5, (sp4C.x - sp58.x), sp58.x);
+                vec_out->y = gk_fmadds(temp_f2_5, (sp4C.y - sp58.y), sp58.y);
+                vec_out->z = gk_fmadds(temp_f2_5, (sp4C.z - sp58.z), sp58.z);
             }
         } else {
             *vec_out = sp4C;

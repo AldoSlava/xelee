@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itoldottosea.h"
 
 #include "inlines.h"
@@ -157,7 +158,7 @@ void it_802E27B4(Item_GObj* gobj)
 
     if (ip->xDD4_itemVar.oldottosea.x2C != 0) {
         pos = ip->pos;
-        pos.x += attr->x14 * ip->facing_dir;
+        pos.x = gk_fmadds(attr->x14, ip->facing_dir, pos.x);
         ip->xDD4_itemVar.oldottosea.x20 =
             it_8028EB88(gobj, &pos, ip->facing_dir, attr->x24);
         if (ip->xDD4_itemVar.oldottosea.x20 != NULL) {
@@ -405,7 +406,7 @@ void itOldottosea_UnkMotion7_Phys(Item_GObj* gobj)
             threshold = 0x19;
         }
         if (ip->xDD4_itemVar.oldottosea.x24 > threshold) {
-            ip->x40_vel.x += -ip->facing_dir * attr->xC;
+            ip->x40_vel.x = gk_fmadds(-ip->facing_dir, attr->xC, ip->x40_vel.x);
         }
     }
     ip->xDD4_itemVar.oldottosea.x24++;

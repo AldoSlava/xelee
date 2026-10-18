@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itcoll.h"
 
 #include <Runtime/platform.h>
@@ -659,23 +660,13 @@ f32 it_80270CD8(Item* ip, HitCapsule* hit)
     f32 f1;
 
     if (hit->x28 != 0) {
-        f1 = (0.01f * hit->x24 *
-              ((it_804D6D28->x80_float[11] *
-                (attr->x1C_damage_mul *
-                 ((it_804D6D28->x80_float[10] * it_804D6D28->x80_float[8]) +
-                  (it_804D6D28->x80_float[9] *
-                   (it_804D6D28->x80_float[10] * hit->x28))))) +
-               it_804D6D28->x80_float[12])) +
-             hit->x2C;
+        f1 = gk_fmadds(0.01f * hit->x24, (gk_fmadds(it_804D6D28->x80_float[11], (attr->x1C_damage_mul *
+                 (gk_fmadds(it_804D6D28->x80_float[10], it_804D6D28->x80_float[8], (it_804D6D28->x80_float[9] *
+                   (it_804D6D28->x80_float[10] * hit->x28))))), it_804D6D28->x80_float[12])), hit->x2C);
     } else {
-        f1 = ((0.01f * hit->x24) *
-              ((it_804D6D28->x80_float[11] *
-                (attr->x1C_damage_mul *
-                 ((it_804D6D28->x80_float[8] * (ip->xC9C + (f32) ip->xCA0)) +
-                  (it_804D6D28->x80_float[9] *
-                   (hit->damage * (ip->xC9C + (f32) ip->xCA0)))))) +
-               it_804D6D28->x80_float[12])) +
-             hit->x2C;
+        f1 = gk_fmadds((0.01f * hit->x24), (gk_fmadds(it_804D6D28->x80_float[11], (attr->x1C_damage_mul *
+                 (gk_fmadds(it_804D6D28->x80_float[8], (ip->xC9C + (f32) ip->xCA0), (it_804D6D28->x80_float[9] *
+                   (hit->damage * (ip->xC9C + (f32) ip->xCA0)))))), it_804D6D28->x80_float[12])), hit->x2C);
     }
     if (f1 >= it_804D6D28->x80_float[7]) {
         f1 = it_804D6D28->x80_float[7];
@@ -734,27 +725,15 @@ void it_80270E30(Item_GObj* arg_item_gobj)
                 (void) attr;
                 if (hit->x28 != 0) {
                     knockback =
-                        (0.01f * hit->x24 *
-                         ((it_804D6D28->x80_float[11] *
-                           (attr->x1C_damage_mul *
-                            ((it_804D6D28->x80_float[10] *
-                              it_804D6D28->x80_float[8]) +
-                             (it_804D6D28->x80_float[9] *
-                              (it_804D6D28->x80_float[10] * hit->x28))))) +
-                          it_804D6D28->x80_float[12])) +
-                        hit->x2C;
+                        gk_fmadds(0.01f * hit->x24, (gk_fmadds(it_804D6D28->x80_float[11], (attr->x1C_damage_mul *
+                            (gk_fmadds(it_804D6D28->x80_float[10], it_804D6D28->x80_float[8], (it_804D6D28->x80_float[9] *
+                              (it_804D6D28->x80_float[10] * hit->x28))))), it_804D6D28->x80_float[12])), hit->x2C);
                 } else {
                     knockback =
-                        ((0.01f * hit->x24) *
-                         ((it_804D6D28->x80_float[11] *
-                           (attr->x1C_damage_mul *
-                            ((it_804D6D28->x80_float[8] *
-                              (arg_item->xC9C + (f32) arg_item->xCA0)) +
-                             (it_804D6D28->x80_float[9] *
+                        gk_fmadds((0.01f * hit->x24), (gk_fmadds(it_804D6D28->x80_float[11], (attr->x1C_damage_mul *
+                            (gk_fmadds(it_804D6D28->x80_float[8], (arg_item->xC9C + (f32) arg_item->xCA0), (it_804D6D28->x80_float[9] *
                               (hit->damage *
-                               (arg_item->xC9C + (f32) arg_item->xCA0)))))) +
-                          it_804D6D28->x80_float[12])) +
-                        hit->x2C;
+                               (arg_item->xC9C + (f32) arg_item->xCA0)))))), it_804D6D28->x80_float[12])), hit->x2C);
                 }
                 knockback_cap = it_804D6D28->x80_float[7];
                 if (knockback >= knockback_cap) {

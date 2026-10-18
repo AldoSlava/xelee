@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "efasync.h"
 
 #ifdef TARGET_PC
@@ -108,7 +109,7 @@ void* efAsync_Dispatch(s32 gfx_id, HSD_GObj* gobj, va_list vlist)
         }
         if (ret_obj != NULL) {
             ((EF_Effect*) ret_obj)->state_flags |= EF_STATE_ASYNC;
-            f32_1 = (0.04f * (*va_arg(vlist, f32*))) + 0.3f;
+            f32_1 = gk_fmadds(0.04f, (*va_arg(vlist, f32*)), 0.3f);
             if (f32_1 < 0.3f) {
                 f32_1 = 0.3f;
             }
@@ -581,7 +582,7 @@ void* efAsync_Dispatch(s32 gfx_id, HSD_GObj* gobj, va_list vlist)
             }
             node->update = efLib_Cb_Fall_FromParamY;
             node->lifetime = 0x28;
-            node->params.y = (0.4f * HSD_Randf()) + 2.8f;
+            node->params.y = gk_fmadds(0.4f, HSD_Randf(), 2.8f);
             f32_1 = (M_TAU * HSD_Randf());
             jobj_1 = GET_JOBJ(node->gobj);
             HSD_JObjSetRotationY(jobj_1, f32_1);

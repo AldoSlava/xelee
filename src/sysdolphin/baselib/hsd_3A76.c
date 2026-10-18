@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <m2c_macros.h>
 #include <printf.h> // IWYU pragma: keep
 #include <string.h>
@@ -378,14 +379,14 @@ loop_3:
         kern_enabled = 0;
         goto block_33;
     case 26:
-        *out_width += text->x80.x * (16.0F + text->x78.x);
+        *out_width = gk_fmadds(text->x80.x, (16.0F + text->x78.x), *out_width);
         if (*out_height < (32.0F * text->x80.y)) {
             *out_height = 32.0F * text->x80.y;
         }
         goto block_33;
     default:
         if (opcode >= 0x20U) {
-            *out_width += text->x80.x * (32.0F + text->x78.x);
+            *out_width = gk_fmadds(text->x80.x, (32.0F + text->x78.x), *out_width);
             if (kern_enabled != 0) {
                 glyph_code = sis_glyph(cursor);
                 if (glyph_code < 0x4000U) {
@@ -396,14 +397,14 @@ loop_3:
                                         ((glyph_code - 0x2000) & 0xFFFF));
                     kern_width = kern_data->left + kern_data->right - 2;
                     *out_width =
-                        -((text->x80.x * (f32) kern_width) - *out_width);
+                        -(gk_fmsubs(text->x80.x, (f32) kern_width, *out_width));
                 } else if (glyph_tex != NULL) {
                     kern_data_2 =
                         (TextKerning*) &glyph_tex
                             ->data[((glyph_code - 0x4000) * 2) & 0x1FFFE];
                     kern_width = kern_data_2->left + kern_data_2->right - 2;
                     *out_width =
-                        -((text->x80.x * (f32) kern_width) - *out_width);
+                        -(gk_fmsubs(text->x80.x, (f32) kern_width, *out_width));
                 }
             }
             if (*out_height < (32.0F * text->x80.y)) {
@@ -573,9 +574,9 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
             min_x = text->pos_x;
             min_y = text->pos_y;
             max_x =
-                (text->box_size_x * text->font_size.x) + text->pos_x;
+                gk_fmadds(text->box_size_x, text->font_size.x, text->pos_x);
             max_y =
-                (text->box_size_y * text->font_size.y) + text->pos_y;
+                gk_fmadds(text->box_size_y, text->font_size.y, text->pos_y);
             GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_A0);
             GXSetTevColor(GX_TEVREG0, *(&text->bg_color));
             GXBegin(GX_QUADS, GX_VTXFMT0, 4U);
@@ -597,10 +598,10 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
         }
         GXSetTevAlphaIn(GX_TEVSTAGE0, GX_CA_ZERO, GX_CA_TEXA, GX_CA_A0, GX_CA_ZERO);
         if (text->x4E != 0) {
-            min_x = (text->x14.z * text->font_size.x) + text->pos_x;
-            max_x = (text->font_size.x * (text->box_size_x - text->x14.w)) + text->pos_x;
-            min_y = (text->x14.x * text->font_size.y) + text->pos_y;
-            max_y = (text->font_size.y * (text->box_size_y - text->x14.y)) + text->pos_y;
+            min_x = gk_fmadds(text->x14.z, text->font_size.x, text->pos_x);
+            max_x = gk_fmadds(text->font_size.x, (text->box_size_x - text->x14.w), text->pos_x);
+            min_y = gk_fmadds(text->x14.x, text->font_size.y, text->pos_y);
+            max_y = gk_fmadds(text->font_size.y, (text->box_size_y - text->x14.y), text->pos_y);
         }
         if (text->alloc_data != NULL) {
             text->x78.x = text->x3C.x;
@@ -684,7 +685,7 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
                                 line_height_out = 32.0F * text->x80.y;
                             }
                             line_started = 0U;
-                            text->current_height = ((text->font_size.y * ((text->x80.y * text->x78.y) + line_height_out)) + text->current_height);
+                            text->current_height = (gk_fmadds(text->font_size.y, (gk_fmadds(text->x80.y, text->x78.y, line_height_out)), text->current_height));
                             if (skip_count != 0U) {
                                 skip_count -= 1;
                             } else {
@@ -728,10 +729,10 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
                             }
                             switch ((s32) text->alignment) {
                             case 1:
-                                text->current_width = (f32) -((0.5F * (line_width_out * text->x88)) - x_origin);
+                                text->current_width = (f32) -(gk_fmsubs(0.5F, (line_width_out * text->x88), x_origin));
                                 break;
                             case 2:
-                                text->current_width = (-((line_width_out * text->x88) - x_origin));
+                                text->current_width = (-(gk_fmsubs(line_width_out, text->x88, x_origin)));
                                 break;
                             default:
                                 text->current_width = x_origin;
@@ -817,8 +818,8 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
                                 measured_width = line_width_out;
                                 sisFitLineToBox(text, measured_width);
                             }
-                            text->current_width = (f32) (((f64) text->x88 * ((f64) text->x80.x *
-                                            (half_glyph + (f64) text->x78.x))) + (f64) text->current_width);
+                            text->current_width = (f32) (gk_fmadd((f64) text->x88, ((f64) text->x80.x *
+                                            (half_glyph + (f64) text->x78.x)), (f64) text->current_width));
                             if (skip_count != 0U) {
                                 skip_count -= 1;
                             } else {
@@ -847,13 +848,13 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
                                 } else {
                                     tex_offset = glyph_idx - 0x4000;
                                 }
-                                glyph_x = (text->current_width * text->font_size.x) + text->pos_x;
+                                glyph_x = gk_fmadds(text->current_width, text->font_size.x, text->pos_x);
                                 scale_x = text->font_size.x;
                                 if ( text->kerning != 0) {
                                     if (glyph_idx < 0x4000U) {
-                                        glyph_x = -((scale_x * (text->x80.x * (f32) (default_kerning[tex_offset & 0xFFFF].left - 1))) - glyph_x);
+                                        glyph_x = -(gk_fmsubs(scale_x, (text->x80.x * (f32) (default_kerning[tex_offset & 0xFFFF].left - 1)), glyph_x));
                                     } else {
-                                        glyph_x = -((scale_x * (text->x80.x * (f32) (textures->data[(tex_offset * 2) & 0x1FFFE] - 1))) - glyph_x);
+                                        glyph_x = -(gk_fmsubs(scale_x, (text->x80.x * (f32) (textures->data[(tex_offset * 2) & 0x1FFFE] - 1)), glyph_x));
                                     }
                                 }
                                 {
@@ -861,8 +862,8 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
                                     f32 glyph_size = 32.0F * text->x80.y;
                                     f32 uv_top = 0.0F;
                                     f32 glyph_w = HSD_SisLib_GlyphWidth(text, scale_x);
-                                    f32 quad_right = (text->x88 * glyph_w) + glyph_x;
-                                    f32 glyph_y = (scale_y * (line_height_out - glyph_size)) + (text->pos_y + text->current_height);
+                                    f32 quad_right = gk_fmadds(text->x88, glyph_w, glyph_x);
+                                    f32 glyph_y = gk_fmadds(scale_y, (line_height_out - glyph_size), (text->pos_y + text->current_height));
                                     f32 glyph_h = glyph_size * scale_y;
                                     f32 uv_bottom = 1.0F;
                                     f32 uv_left = 0.0F;
@@ -926,17 +927,17 @@ void HSD_SisLib_803A84BC(HSD_GObj* gobj, uintptr_t pass)
                                         GXEnd();
                                     }
                                 glyph_draw_done:
-                                    text->current_width = (f32) ((text->x88 * (text->x80.x * (32.0F + text->x78.x))) + text->current_width);
+                                    text->current_width = (f32) (gk_fmadds(text->x88, (text->x80.x * (32.0F + text->x78.x)), text->current_width));
                                     if ( text->kerning != 0) {
                                         if (glyph_idx < 0x4000U) {
                                             TextGlyphMetrics* kern_pair =
                                                 &default_kerning[tex_offset & 0xFFFF];
                                             tex_offset = (clear_idx = kern_pair->right - 2);
-                                            text->current_width = (-((text->x88 * (text->x80.x * (f32) (kern_pair->left + tex_offset))) - text->current_width));
+                                            text->current_width = (-(gk_fmsubs(text->x88, (text->x80.x * (f32) (kern_pair->left + tex_offset)), text->current_width)));
                                         } else {
                                             u8 *kern_pair = &textures->data[(tex_offset * 2) & 0x1FFFE];
                                             tex_offset = (clear_idx = kern_pair[1] - 2);
-                                            text->current_width = (-((text->x88 * (text->x80.x * (f32) (kern_pair[0] + tex_offset))) - text->current_width));
+                                            text->current_width = (-(gk_fmsubs(text->x88, (text->x80.x * (f32) (kern_pair[0] + tex_offset)), text->current_width)));
                                         }
                                     }
                                     if (skip_count != 0U) {

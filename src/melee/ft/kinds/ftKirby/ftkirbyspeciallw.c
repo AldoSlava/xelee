@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <melee/ft/forward.h>
 #include <sysdolphin/baselib/forward.h>
 
@@ -162,8 +163,7 @@ void ftKb_SpecialHi_800F3570(Fighter_GObj* gobj)
         pos = fp->cur_pos.x;
         normal_y_slide = fp->mv.kb.specialhi.x18.y * slide_speed;
         if (mpCheckAllRemap(NULL, 0, NULL, &sp1C, -1, -1, pos, top_y,
-                            (normal_y_slide * floor_normal_x_sign) +
-                                pos_x_alias,
+                            gk_fmadds(normal_y_slide, floor_normal_x_sign, pos_x_alias),
                             bottom_y) == 0)
         {
             sp1C = p->vec;

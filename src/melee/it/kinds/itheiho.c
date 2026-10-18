@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itheiho.h"
 
 #include "inlines.h"
@@ -158,7 +159,7 @@ void itHeiho_UnkMotion1_Phys(Item_GObj* gobj)
     PAD_STACK(8);
     ip->x40_vel.x = ip->facing_dir * attr[ip->xDD4_itemVar.heiho.x21 + 1].v;
     if (ip->xDD4_itemVar.heiho.x2C > 960) {
-        ip->x40_vel.y = -((-0.04f * ABS(ip->x40_vel.x)) - ip->x40_vel.y);
+        ip->x40_vel.y = -(gk_fmsubs(-0.04f, ABS(ip->x40_vel.x), ip->x40_vel.y));
     }
     it_802D9714(gobj);
     if (ip->xDD4_itemVar.heiho.x24 != 0) {
@@ -199,7 +200,7 @@ static void it_802D8EC8_inline(Item_GObj* gobj)
     Item* ip = gobj->user_data;
     DiscF32* attr = DP(DiscF32, ip->xC4_article_data->x4_specialAttributes);
     f32 rand = 2.0f * (HSD_Randf() - 0.5F);
-    ip->x40_vel.x += attr[5].v * rand;
+    ip->x40_vel.x = gk_fmadds(attr[5].v, rand, ip->x40_vel.x);
     ip->x40_vel.y = 2.0F;
     ip->x40_vel.z = 1.5f;
     if (ip->facing_dir == -1.0F) {
@@ -216,7 +217,7 @@ void itHeiho_UnkMotion2_Phys(Item_GObj* gobj)
     s32 rand;
     it_80272860(gobj, it_attr->x10_fall_speed, it_attr->x14_fall_speed_max);
     rand = HSD_Randi(3);
-    ip->xD3C_spinSpeed = 0.017453292F * ((8.0F * rand) + 1.0F);
+    ip->xD3C_spinSpeed = 0.017453292F * (gk_fmadds(8.0F, rand, 1.0F));
     it_80274A64(gobj);
 }
 
@@ -334,7 +335,7 @@ void itHeiho_UnkMotion4_Phys(Item_GObj* gobj)
     ip->x40_vel.x =
         1.5F * (ip->facing_dir * attr[ip->xDD4_itemVar.heiho.x21 + 1].v);
     if (ip->xDD4_itemVar.heiho.x2C > 960) {
-        ip->x40_vel.y = -((-0.04f * ABS(ip->x40_vel.x)) - ip->x40_vel.y);
+        ip->x40_vel.y = -(gk_fmsubs(-0.04f, ABS(ip->x40_vel.x), ip->x40_vel.y));
     }
     if (ip->xDD4_itemVar.heiho.x24 != 0) {
         HSD_JObjAddRotationY(HSD_GObjGetHSDObj(gobj), 0.15707964f);

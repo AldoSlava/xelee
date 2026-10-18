@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grhomerun.h"
 
 #include <Runtime/platform.h>
@@ -789,7 +790,7 @@ HSD_GObj* grHomeRun_8021E500(int arg0)
 
     offset = grHr_804D6AE4 * ((f32) arg0 * (160.0F * Ground_801C0498()));
     gp->u.homerun2.xD0 =
-        (160.0F * (grHr_804D6AE4 * Ground_801C0498())) + offset;
+        gk_fmadds(160.0F, (grHr_804D6AE4 * Ground_801C0498()), offset);
     HSD_JObjSetTranslateX(jobj, gp->u.homerun2.xD0);
 
     gp->u.homerun2.xC6 =
@@ -829,7 +830,7 @@ void grHomeRun_8021EA30(const f32* pos)
     f32 time;
 
     time = Ground_801C0498();
-    result = *pos - 70.0F * (grHr_804D6AE4 * time);
+    result = gk_fnmsubs(70.0F, (grHr_804D6AE4 * time), *pos);
 
     time = Ground_801C0498();
     new_var = 160.0F * time;

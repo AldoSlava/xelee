@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <melee/ft/forward.h>
 #include <sysdolphin/baselib/forward.h>
 
@@ -28,7 +29,7 @@ static void ftKb_NsSpecialNStart_Anim_inline(HSD_GObj* gobj, Vec3* flash_pos)
     if (fp->u.kb.ns_flash_gobj == NULL) {
         lb_8000B1CC(fp->parts[FtPart_WaistN].joint, NULL, flash_pos);
         flash_pos->z = 0;
-        flash_pos->y += fp->x34_scale.y * 3.0f;
+        flash_pos->y = gk_fmadds(fp->x34_scale.y, 3.0f, flash_pos->y);
         {
             HSD_GObj* flash_gobj = it_802AA8C0(
                 gobj, flash_pos, It_Kind_Kirby_NessPKFlush, fp->facing_dir);

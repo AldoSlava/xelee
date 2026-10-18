@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_CaptureCut.h"
 
 #include <Runtime/platform.h>
@@ -125,9 +126,8 @@ void ftCo_800DC920(Fighter_GObj* arg0, Fighter_GObj* gobj)
                 var_r30->parts[ftParts_GetBoneIndex(var_r30, FtPart_XRotN)]
                     .joint;
             lb_8000B1CC(temp_r28, NULL, &sp4C);
-            sp4C.x += var_r30->facing_dir *
-                      (var_r30->x1A70.z * var_r30->x34_scale.y);
-            sp4C.y += var_r30->x1A70.y * var_r30->x34_scale.y;
+            sp4C.x = gk_fmadds(var_r30->facing_dir, (var_r30->x1A70.z * var_r30->x34_scale.y), sp4C.x);
+            sp4C.y = gk_fmadds(var_r30->x1A70.y, var_r30->x34_scale.y, sp4C.y);
             sp4C.z = 0.0F;
             lb_8000C390(temp_r28);
             var_r30->x2226_b2 = false;

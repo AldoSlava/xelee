@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mnitemsw.h"
 
 #include <Runtime/platform.h>
@@ -396,14 +397,12 @@ static inline void mnItemSw_SetCursorPosition(MnItemSwData* data)
             HSD_JObjSetTranslateX(cjobj,
                                   HSD_JObjGetTranslationX(data->jobjs[4]));
             HSD_JObjSetTranslateY(cjobj,
-                                  y_spacing * (f32) cursor +
-                                      HSD_JObjGetTranslationY(data->jobjs[4]));
+                                  gk_fmadds(y_spacing, (f32) cursor, HSD_JObjGetTranslationY(data->jobjs[4])));
         } else {
             HSD_JObjSetTranslateX(cjobj,
                                   HSD_JObjGetTranslationX(data->jobjs[6]));
             HSD_JObjSetTranslateY(cjobj,
-                                  y_spacing * (f32) (cursor - 0x10) +
-                                      HSD_JObjGetTranslationY(data->jobjs[4]));
+                                  gk_fmadds(y_spacing, (f32) (cursor - 0x10), HSD_JObjGetTranslationY(data->jobjs[4])));
         }
     }
 
@@ -570,15 +569,13 @@ void mnItemSw_8023453C(HSD_GObj* gobj, u8 arg1, u8 arg2)
                 (void) x;
                 HSD_JObjSetTranslateX(cjobj, x);
                 HSD_JObjSetTranslateY(
-                    cjobj, y_spacing * (f32) cursor +
-                               HSD_JObjGetTranslationY(data->jobjs[4]));
+                    cjobj, gk_fmadds(y_spacing, (f32) cursor, HSD_JObjGetTranslationY(data->jobjs[4])));
             } else {
                 x = (column_x = HSD_JObjGetTranslationX(data->jobjs[6]));
                 (void) x;
                 HSD_JObjSetTranslateX(cjobj, x);
                 HSD_JObjSetTranslateY(
-                    cjobj, y_spacing * (f32) (s32) (cursor - 0x10) +
-                               HSD_JObjGetTranslationY(data->jobjs[4]));
+                    cjobj, gk_fmadds(y_spacing, (f32) (s32) (cursor - 0x10), HSD_JObjGetTranslationY(data->jobjs[4])));
             }
         }
     }

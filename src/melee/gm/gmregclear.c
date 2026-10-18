@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "gmregclear.h"
 
 #include <Runtime/platform.h>
@@ -279,7 +280,7 @@ s32 fn_8017F2A4(HSD_Text** arg0, f32 farg0, f32 farg1)
     (*arg0)->default_alignment = 2;
     x_end = 281.0f + farg0;
     for (i = 0; i < 7; i++) {
-        y = (0.6f * (32.0f * (f32) i)) + farg1;
+        y = gk_fmadds(0.6f, (32.0f * (f32) i), farg1);
         ptr[1] = HSD_SisLib_803A5ACC(3, 0, farg0, y, 0.0f, 2.0f, 2.0f);
         text = ptr[1];
         text->x34.x = 0.56f;

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "lbtrigf.h"
 
 #include <Runtime/platform.h>
@@ -44,13 +45,13 @@ float atan2f(float y, float x)
 
 float acosf(float x)
 {
-    float result = 1.0F - x * x;
+    float result = gk_fnmsubs(x, x, 1.0F);
     if (result > 0) {
         float guess;
         guess = __frsqrte(result);
-        guess = 0.5f * guess * (3.0f - guess * guess * result);
-        guess = 0.5f * guess * (3.0f - guess * guess * result);
-        guess = 0.5f * guess * (3.0f - guess * guess * result);
+        guess = 0.5f * guess * (gk_fnmsubs(guess * guess, result, 3.0f));
+        guess = 0.5f * guess * (gk_fnmsubs(guess * guess, result, 3.0f));
+        guess = 0.5f * guess * (gk_fnmsubs(guess * guess, result, 3.0f));
         result = guess;
     } else if (result) {
         result = NAN;
@@ -62,7 +63,7 @@ float acosf(float x)
 
 float asinf(float x)
 {
-    return atanf(x * lb_sqrtf(-(x * x - 1.0f)));
+    return atanf(x * lb_sqrtf(-(gk_fmsubs(x, x, 1.0f))));
 }
 
 static float lb_sqrtf(float x)
@@ -70,9 +71,9 @@ static float lb_sqrtf(float x)
     if (x > 0.0f) {
         float guess;
         guess = __frsqrte(x);
-        guess = 0.5f * guess * (3.0f - guess * guess * x);
-        guess = 0.5f * guess * (3.0f - guess * guess * x);
-        guess = 0.5f * guess * (3.0f - guess * guess * x);
+        guess = 0.5f * guess * (gk_fnmsubs(guess * guess, x, 3.0f));
+        guess = 0.5f * guess * (gk_fnmsubs(guess * guess, x, 3.0f));
+        guess = 0.5f * guess * (gk_fnmsubs(guess * guess, x, 3.0f));
         return guess;
     }
 

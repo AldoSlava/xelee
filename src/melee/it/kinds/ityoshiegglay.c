@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ityoshiegglay.h"
 
 #include <melee/it/forward.h>
@@ -172,7 +173,7 @@ bool it_27CF_Logic114_DmgReceived(Item_GObj* item_gobj)
     Item* item;
 
     item = GET_ITEM(item_gobj);
-    item->xD44_lifeTimer -= item->xCA0 * item->xDD4_itemVar.yoshiegglay.x0;
+    item->xD44_lifeTimer = gk_fnmsubs(item->xCA0, item->xDD4_itemVar.yoshiegglay.x0, item->xD44_lifeTimer);
     return false;
 }
 

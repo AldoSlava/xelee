@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itfreeze.h"
 
 #include <placeholder.h>
@@ -147,8 +148,7 @@ void it_8028EDBC(Item_GObj* gobj)
                 ip->xDD4_itemVar.freeze.x0 = attrs->x4_float * ip->facing_dir;
             } else {
                 ip->xDD4_itemVar.freeze.x0 =
-                    (ip->xDD4_itemVar.freeze.x4.x * attrs->xC) +
-                    ip->xDD4_itemVar.freeze.x0;
+                    gk_fmadds(ip->xDD4_itemVar.freeze.x4.x, attrs->xC, ip->xDD4_itemVar.freeze.x0);
             }
         } else {
             if (ABS(ip->xDD4_itemVar.freeze.x0) < attrs->x4_float) {

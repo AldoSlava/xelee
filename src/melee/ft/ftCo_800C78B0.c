@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_800C78B0.h"
 
 #include "fighter.h"
@@ -45,10 +46,9 @@ void ftCo_800C78B0(HSD_GObj* gobj, HSD_GObj* owner)
         f32 tmp1 = cd->x74C *
                    (cd->x750 - (f32) (Player_80033BB8(fp->player_idx) + 1));
         f32 tmp2 =
-            (cd->x744 * (cd->x748 - Player_GetHandicap(fp->player_idx)) +
-             cd->x740);
+            (gk_fmadds(cd->x744, (cd->x748 - Player_GetHandicap(fp->player_idx)), cd->x740));
         tmp2 += tmp1;
-        ftCommon_InitGrab(fp, 0, fp->dmg.x1830_percent * cd->x754 + tmp2);
+        ftCommon_InitGrab(fp, 0, gk_fmadds(fp->dmg.x1830_percent, cd->x754, tmp2));
     }
     fp->x1988 = 2;
     fp->invisible = true;

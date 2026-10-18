@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftpopospeciallw.h"
 
 #include <melee/ft/forward.h>
@@ -181,7 +182,7 @@ void fn_80122D2C(Fighter_GObj* gobj)
         if (fp->mv.pp.speciallw.x0 == 0) {
             ftIceClimberAttributes* da = fp->dat_attrs;
             lb_8000B1CC(fp->parts[FtPart_L3rdNa].joint, NULL, &pos);
-            pos.x += da->xBC * fp->facing_dir;
+            pos.x = gk_fmadds(da->xBC, fp->facing_dir, pos.x);
             pos.y += da->xC0;
             itClimbersBlizzard_Spawn(gobj, &pos, fp->facing_dir);
             fp->mv.pp.speciallw.x0 = da->xB8;

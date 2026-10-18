@@ -1,4 +1,5 @@
 #ifdef TARGET_PC
+#include <pc/gekko_fp.h>
 #include "pc/xr_scene.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -460,7 +461,7 @@ void grIzumi_801CC358(Ground_GObj* gobj)
             if (f < 0.0) {
                 float fff = HSD_Randf();
                 float ff = (yakumono_param->x1C - yakumono_param->x18);
-                ff = ff * fff + yakumono_param->x18;
+                ff = gk_fmadds(ff, fff, yakumono_param->x18);
                 gp->u.izumi3.xC4 = 2;
                 if (gp->u.izumi3.xD0 < gp->u.izumi3.xDC) {
                     if (HSD_Randf() < yakumono_param->x30) {
@@ -553,7 +554,7 @@ void grIzumi_801CC358(Ground_GObj* gobj)
             if (f < 0.01f) {
                 f = 0.01f;
             }
-            HSD_JObjSetScaleX(jobj2, 0.5f * f + 0.5f);
+            HSD_JObjSetScaleX(jobj2, gk_fmadds(0.5f, f, 0.5f));
             HSD_JObjSetScaleY(jobj2, f);
             HSD_JObjSetTranslateY(gp->u.izumi3.xCC, gp->u.izumi3.xD0);
         }

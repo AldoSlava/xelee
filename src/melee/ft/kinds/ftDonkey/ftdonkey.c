@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftdonkey.h"
 
 #include <Runtime/platform.h>
@@ -661,8 +662,7 @@ void ftDk_Init_8010DB3C(HSD_GObj* gobj)
         Vec3 vec_list[4];
         int i;
         for (i = 0; i < 4; i++) {
-            float temp_f5 = (donkey_attr->SpecialLw.x68 * i) -
-                            (donkey_attr->SpecialLw.x68 * 1.5f);
+            float temp_f5 = gk_fmsubs(donkey_attr->SpecialLw.x68, i, (donkey_attr->SpecialLw.x68 * 1.5f));
             float temp_f3 = donkey_attr->SpecialLw.x6C * fp->facing_dir;
             float temp_f6 = temp_f5 + temp_f3;
 

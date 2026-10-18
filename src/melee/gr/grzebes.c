@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grzebes.h"
 
 #include <Runtime/platform.h>
@@ -387,7 +388,7 @@ grZebes_UpdateCollisionColumns(f32 column_width, f32* column_x,
             x_offset = bubble->x08_x - left_x;
             left_vertex = (f32) ((f64) x_offset - 0.9) / column_width;
             right_offset = (f32) (0.9 + (f64) x_offset);
-            top_y = (f32) (1.8 * (f64) bubble->x18_size + (f64) bubble->x0C_y);
+            top_y = (f32) (gk_fmadd(1.8, (f64) bubble->x18_size, (f64) bubble->x0C_y));
             {
                 *vertex_idx = (s32) (0.5 + (f64) left_vertex);
                 if (5 < *vertex_idx) {
@@ -396,7 +397,7 @@ grZebes_UpdateCollisionColumns(f32 column_width, f32* column_x,
                     *vertex_idx = 0;
                 }
                 column_x[*vertex_idx] =
-                    (f32) *vertex_idx * column_width + left_x;
+                    gk_fmadds((f32) *vertex_idx, column_width, left_x);
                 if (top_y > column_heights[*vertex_idx]) {
                     column_heights[*vertex_idx] = top_y;
                 }
@@ -410,7 +411,7 @@ grZebes_UpdateCollisionColumns(f32 column_width, f32* column_x,
                     *vertex_idx = 0;
                 }
                 column_x[*vertex_idx] =
-                    (f32) *vertex_idx * column_width + left_x;
+                    gk_fmadds((f32) *vertex_idx, column_width, left_x);
                 if (top_y > column_heights[*vertex_idx]) {
                     column_heights[*vertex_idx] = top_y;
                 }
@@ -454,7 +455,7 @@ void grZebes_801D881C(HSD_GObj* gobj)
                 f32 rand = HSD_Randf();
                 f32 base = yakumono_param->x08;
                 f32 diff = yakumono_param->x0C - base;
-                *(s16*) &gp->u.zebes5.xF8 = diff * rand + base;
+                *(s16*) &gp->u.zebes5.xF8 = gk_fmadds(diff, rand, base);
             }
         }
     }
@@ -484,7 +485,7 @@ void grZebes_801D881C(HSD_GObj* gobj)
                 rand = HSD_Randf();
                 base = yakumono_param->x00;
                 diff = yakumono_param->x04 - base;
-                gp->u.zebes5.xC6 = (s16) (diff * rand + base);
+                gp->u.zebes5.xC6 = (s16) (gk_fmadds(diff, rand, base));
             }
             break;
         case 2:
@@ -518,7 +519,7 @@ void grZebes_801D881C(HSD_GObj* gobj)
                         grZebes_801DAE70(
                             spawn_phase, 4, grZe_BubbleSpawnX(spawn_phase),
                             grZe_BubbleSpawnY(spawn_phase),
-                            scale_range * rand + scale_min);
+                            gk_fmadds(scale_range, rand, scale_min));
                     }
                 }
                 if (spawn_phase <= mirror) {
@@ -526,7 +527,7 @@ void grZebes_801D881C(HSD_GObj* gobj)
                     grZebes_801DAE70(mirror, 4,
                                      grZe_BubbleSpawnX(mirror + 2),
                                      grZe_BubbleSpawnY(mirror + 2),
-                                     (f32) (0.5 * rand2 + 1.0));
+                                     (f32) (gk_fmadd(0.5, rand2, 1.0)));
                 }
             }
             if (grAnime_801C83D0(gobj, 0xE, 1) != 0) {
@@ -848,8 +849,7 @@ void grZebes_801D9798(HSD_GObj* gobj)
     }
 
     rand = HSD_Randf();
-    gp->u.zebes5.xD8 = yakumono_param->x94 * rand +
-                       (f32) yakumono_param->xA0_entries[j].x6_level;
+    gp->u.zebes5.xD8 = gk_fmadds(yakumono_param->x94, rand, (f32) yakumono_param->xA0_entries[j].x6_level);
     gp->u.zebes5.xD4 = gp->u.zebes5.xD8;
 
     jobj = Ground_801C3FA4(gobj, 0);
@@ -1138,14 +1138,14 @@ void grZebes_801DA0C4(f32 level)
 
         if (Ground_801C2090(&color)) {
             f32 r0 = table[idx - 1].r;
-            color.r = (u8) (t * (table[idx].r - r0) + r0);
+            color.r = (u8) (gk_fmadds(t, (table[idx].r - r0), r0));
             {
                 f32 g0 = table[idx - 1].g;
-                color.g = (u8) (t * (table[idx].g - g0) + g0);
+                color.g = (u8) (gk_fmadds(t, (table[idx].g - g0), g0));
             }
             {
                 f32 b0 = table[idx - 1].b;
-                color.b = (u8) (t * (table[idx].b - b0) + b0);
+                color.b = (u8) (gk_fmadds(t, (table[idx].b - b0), b0));
             }
             Ground_801C205C(&color);
         }
@@ -1187,9 +1187,9 @@ void grZebes_801DA254(Ground_GObj* gobj, f32 level)
 
         t = (level - yakumono_param->x90) /
             (yakumono_param->x8C - yakumono_param->x90);
-        result.r = (u8) (t * (f32) (c1.r - c2.r) + (f32) c2.r);
-        result.g = (u8) (t * (f32) (c1.g - c2.g) + (f32) c2.g);
-        result.b = (u8) (t * (f32) (c1.b - c2.b) + (f32) c2.b);
+        result.r = (u8) (gk_fmadds(t, (f32) (c1.r - c2.r), (f32) c2.r));
+        result.g = (u8) (gk_fmadds(t, (f32) (c1.g - c2.g), (f32) c2.g));
+        result.b = (u8) (gk_fmadds(t, (f32) (c1.b - c2.b), (f32) c2.b));
         result.a = 0xFF;
         grZebes_801DA254_inline2(lobj, &result);
     }
@@ -1246,7 +1246,7 @@ s32 grZebes_801DA528(HSD_GObj* arg0, void* arg1, s32 arg2, s32 arg3)
         case 2: {
             f1 = HSD_Randf();
             f0 = (yakumono_param->x54 - yakumono_param->x50);
-            st->x02_timer = (s16) (f0 * f1 + yakumono_param->x50);
+            st->x02_timer = (s16) (gk_fmadds(f0, f1, yakumono_param->x50));
             break;
         }
         case 3:
@@ -2197,15 +2197,14 @@ void grZebes_801DC408(Ground_GObj* gobj)
                 f32 y_min = grZe_8049F158[0].y;
                 f32 bubble_r = yakumono_param->x74;
                 f32 x_base = grZe_8049F158[0].x + bubble_r;
-                f32 x_range = -((2.0f * bubble_r) -
-                                (grZe_8049F140[1].x - grZe_8049F158[0].x));
+                f32 x_range = -(gk_fmsubs(2.0f, bubble_r, (grZe_8049F140[1].x - grZe_8049F158[0].x)));
                 f32 y_range = grZe_8049F140[1].y - y_min;
                 f32 rscale = HSD_Randf();
                 f32 ry = HSD_Randf();
 
-                grZebes_801DAE70(first_free, 1, x_range * HSD_Randf() + x_base,
-                                 y_range * ry + y_min,
-                                 (f32) (0.5 * (f64) rscale + 1.0));
+                grZebes_801DAE70(first_free, 1, gk_fmadds(x_range, HSD_Randf(), x_base),
+                                 gk_fmadds(y_range, ry, y_min),
+                                 (f32) (gk_fmadd(0.5, (f64) rscale, 1.0)));
                 grZe_8049F170[first_free].x18_size = 0.001;
                 Ground_801C53EC(0x61A83);
             }

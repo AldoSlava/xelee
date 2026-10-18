@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Thrown.h"
 
 #include <melee/ft/forward.h>
@@ -52,8 +53,8 @@ void ftCo_800DE508(Fighter_GObj* gobj)
 
     lb_8000B1CC(fp->parts[ftParts_GetBoneIndex(fp, FtPart_XRotN)].joint, NULL,
                 &pos);
-    pos.x = (fp->facing_dir * (fp->x1A70.z * fp->x34_scale.y)) + pos.x;
-    pos.y += fp->x1A70.y * fp->x34_scale.y;
+    pos.x = gk_fmadds(fp->facing_dir, (fp->x1A70.z * fp->x34_scale.y), pos.x);
+    pos.y = gk_fmadds(fp->x1A70.y, fp->x34_scale.y, pos.y);
     pos.z = 0.0f;
     fp->cur_pos = pos;
 }

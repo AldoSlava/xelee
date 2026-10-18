@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftseakspecialn.h"
 
 #include <melee/ft/forward.h>
@@ -44,7 +45,7 @@ void ftSk_SpecialN_80111FBC(HSD_GObj* gobj)
                 } else {
                     y_scale = da->xC;
                 }
-                pos.y += fp->x34_scale.y * y_scale;
+                pos.y = gk_fmadds(fp->x34_scale.y, y_scale, pos.y);
             }
             pos.z = 0;
             {
@@ -432,16 +433,16 @@ void shootNeedles(Fighter_GObj* gobj)
             int rand;
             if (fp->ground_or_air == GA_Ground) {
                 x_scale = da->x0 * fp->facing_dir;
-                pos.x += fp->x34_scale.y * x_scale;
+                pos.x = gk_fmadds(fp->x34_scale.y, x_scale, pos.x);
                 rand = HSD_Randi(9);
                 y_scale = da->x4 + needleYPosScale[rand];
-                pos.y += fp->x34_scale.y * y_scale;
+                pos.y = gk_fmadds(fp->x34_scale.y, y_scale, pos.y);
             } else {
                 x_scale = da->x8 * fp->facing_dir;
-                pos.x += fp->x34_scale.y * x_scale;
+                pos.x = gk_fmadds(fp->x34_scale.y, x_scale, pos.x);
                 rand = HSD_Randi(9);
-                y_scale = (2.0f * needleYPosScale[rand]) + da->xC;
-                pos.y += fp->x34_scale.y * y_scale;
+                y_scale = gk_fmadds(2.0f, needleYPosScale[rand], da->xC);
+                pos.y = gk_fmadds(fp->x34_scale.y, y_scale, pos.y);
             }
             pos.z = 0;
 

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itclimbersblizzard.h"
 
 #include <Runtime/platform.h>
@@ -82,7 +83,7 @@ void itClimbersBlizzard_802C2248(Item_GObj* gobj)
     attrs = GET_ATTRS(ip);
     rand = HSD_Randf();
     var_f2 = attrs->x10 - attrs->xC;
-    temp_f0 = (var_f2 * rand) + attrs->xC;
+    temp_f0 = gk_fmadds(var_f2, rand, attrs->xC);
     if (ip->facing_dir == 1.0f) {
         var_f2 = temp_f0;
     } else {

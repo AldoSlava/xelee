@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftfoxspecialhi.h"
 
 #include <Runtime/platform.h>
@@ -281,12 +282,9 @@ void ftFx_SpecialAirHi_Phys(HSD_GObj* gobj)
 
     if (fp->mv.fx.SpecialHi.unk >= da->x70_FOX_FIREFOX_DURATION_END) {
         fp->self_vel.x =
-            -((fp->facing_dir * (da->x78_FOX_FIREFOX_REVERSE_ACCEL *
-                                 cosf(fp->mv.fx.SpecialHi.rotateModel))) -
-              fp->self_vel.x);
-        fp->self_vel.y = -((da->x78_FOX_FIREFOX_REVERSE_ACCEL *
-                            sinf(fp->mv.fx.SpecialHi.rotateModel)) -
-                           fp->self_vel.y);
+            -(gk_fmsubs(fp->facing_dir, (da->x78_FOX_FIREFOX_REVERSE_ACCEL *
+                                 cosf(fp->mv.fx.SpecialHi.rotateModel)), fp->self_vel.x));
+        fp->self_vel.y = -(gk_fmsubs(da->x78_FOX_FIREFOX_REVERSE_ACCEL, sinf(fp->mv.fx.SpecialHi.rotateModel), fp->self_vel.y));
     }
 }
 

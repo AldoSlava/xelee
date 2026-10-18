@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grpura.h"
 
 #include <Runtime/platform.h>
@@ -469,9 +470,9 @@ void stageGObj1_GObjProc(Ground_GObj* arg0)
         t = (f32) cur / 3600.0f;
         gp->u.pura.xC8 = cur + 1;
         /* Channels reach 255, which is out of range for s8. */
-        sp18.r = (u8) (t * (f32) (spilC.r - sp18.r) + (f32) sp18.r);
-        sp18.g = (u8) (t * (f32) (spilC.g - sp18.g) + (f32) sp18.g);
-        sp18.b = (u8) (t * (f32) (spilC.b - sp18.b) + (f32) sp18.b);
+        sp18.r = (u8) (gk_fmadds(t, (f32) (spilC.r - sp18.r), (f32) sp18.r));
+        sp18.g = (u8) (gk_fmadds(t, (f32) (spilC.g - sp18.g), (f32) sp18.g));
+        sp18.b = (u8) (gk_fmadds(t, (f32) (spilC.b - sp18.b), (f32) sp18.b));
         Ground_801C205C(&sp18);
         Camera_SetBackgroundColor(sp18.r, sp18.g, sp18.b);
         return;

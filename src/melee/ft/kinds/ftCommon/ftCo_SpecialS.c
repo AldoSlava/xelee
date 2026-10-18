@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_SpecialS.h"
 
 #include <Runtime/platform.h>
@@ -42,8 +43,6 @@ static void doEnter(Fighter_GObj* gobj)
 {
     u8 _[8];
     Fighter* fp = gobj->user_data;
-    fp->gr_vel +=
-        -(fp->gr_vel * (1 - fp->co_attrs.specials_ground_speed_retention)) *
-        ft_GetGroundFrictionMultiplier(fp);
+    fp->gr_vel = gk_fmadds(-(fp->gr_vel * (1 - fp->co_attrs.specials_ground_speed_retention)), ft_GetGroundFrictionMultiplier(fp), fp->gr_vel);
     ftData_SpecialS[fp->kind](gobj);
 }

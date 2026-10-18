@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftkirbyspecialpurin.h"
 
 #include <melee/ft/forward.h>
@@ -202,8 +203,7 @@ static void ftKb_PrWallBounceEffect(Fighter_GObj* gobj, Fighter* fp, f32 dir,
     } else {
         pos->x -= ABS(fp2->coll_data.ecb.left.x);
     }
-    pos->y +=
-        0.5f * ABS(fp2->coll_data.ecb.top.y + fp2->coll_data.ecb.bottom.y);
+    pos->y = gk_fmadds(0.5f, ABS(fp2->coll_data.ecb.top.y + fp2->coll_data.ecb.bottom.y), pos->y);
     efSync_Spawn(0x406, gobj, pos, angle);
     Camera_RequestQuake(QuakeKind_Medium, pos);
     ftCommon_8007EBAC(fp2, 0xC, 0xA);
@@ -345,10 +345,8 @@ void ftKb_PrSpecialNLoop_Anim(Fighter_GObj* gobj)
         Fighter_ChangeMotionState(gobj, ftKb_MS_PrSpecialNFull, mf,
                                   fp->cur_anim_frame, 0, 0, NULL);
     }
-    fp->mv.pr.specialn.x14 +=
-        fp->mv.pr.specialn.x34.x *
-        (fp->mv.pr.specialn.x2C *
-         MTXDegToRad(da->specialn_pr_charge_spin_animation));
+    fp->mv.pr.specialn.x14 = gk_fmadds(fp->mv.pr.specialn.x34.x, (fp->mv.pr.specialn.x2C *
+         MTXDegToRad(da->specialn_pr_charge_spin_animation)), fp->mv.pr.specialn.x14);
     ftPr_NormalizeAndSetRollAngle(gobj);
     ftPartSetRotY(fp, FtPart_TopN, M_PI_2);
 }
@@ -364,10 +362,8 @@ void ftKb_PrSpecialNFull_Anim(Fighter_GObj* gobj)
         fp->mv.pr.specialn.x2C = da->specialn_pr_charge_time;
         fp->mv.pr.specialn.x30 = 1;
     }
-    fp->mv.pr.specialn.x14 +=
-        fp->mv.pr.specialn.x34.x *
-        (fp->mv.pr.specialn.x2C *
-         MTXDegToRad(da->specialn_pr_charge_spin_animation));
+    fp->mv.pr.specialn.x14 = gk_fmadds(fp->mv.pr.specialn.x34.x, (fp->mv.pr.specialn.x2C *
+         MTXDegToRad(da->specialn_pr_charge_spin_animation)), fp->mv.pr.specialn.x14);
     ftPr_NormalizeAndSetRollAngle(gobj);
     ftPartSetRotY(fp, FtPart_TopN, M_PI_2);
 }
@@ -511,10 +507,8 @@ void ftKb_PrSpecialAirNLoop_Anim(Fighter_GObj* gobj)
         Fighter_ChangeMotionState(gobj, ftKb_MS_PrSpecialAirNFull, mf,
                                   fp->cur_anim_frame, 0, 0, NULL);
     }
-    fp->mv.pr.specialn.x14 +=
-        fp->mv.pr.specialn.x34.x *
-        (fp->mv.pr.specialn.x2C *
-         MTXDegToRad(da->specialn_pr_charge_spin_animation));
+    fp->mv.pr.specialn.x14 = gk_fmadds(fp->mv.pr.specialn.x34.x, (fp->mv.pr.specialn.x2C *
+         MTXDegToRad(da->specialn_pr_charge_spin_animation)), fp->mv.pr.specialn.x14);
     ftPr_NormalizeAndSetRollAngle(gobj);
     ftPartSetRotY(fp, FtPart_TopN, M_PI_2);
 }
@@ -530,10 +524,8 @@ void ftKb_PrSpecialAirNFull_Anim(Fighter_GObj* gobj)
         fp->mv.pr.specialn.x2C = da->specialn_pr_charge_time;
         fp->mv.pr.specialn.x30 = 1;
     }
-    fp->mv.pr.specialn.x14 +=
-        fp->mv.pr.specialn.x34.x *
-        (fp->mv.pr.specialn.x2C *
-         MTXDegToRad(da->specialn_pr_charge_spin_animation));
+    fp->mv.pr.specialn.x14 = gk_fmadds(fp->mv.pr.specialn.x34.x, (fp->mv.pr.specialn.x2C *
+         MTXDegToRad(da->specialn_pr_charge_spin_animation)), fp->mv.pr.specialn.x14);
     ftPr_NormalizeAndSetRollAngle(gobj);
     ftPartSetRotY(fp, FtPart_TopN, M_PI_2);
 }
@@ -610,10 +602,8 @@ void ftKb_PrSpecialN_Anim(Fighter_GObj* gobj)
     PAD_STACK(4);
     ftKb_SpecialNPr_8010140C(gobj, true);
     ftKb_PrScaleAnimStep(gobj, &scale);
-    fp->mv.pr.specialn.x14 +=
-        da->specialn_pr_spin_anim_speed_after_collision *
-        (f32) (0.2 * da->specialn_pr_spinning_speed_turn *
-               -fp->mv.pr.specialn.x34.x);
+    fp->mv.pr.specialn.x14 = gk_fmadds(da->specialn_pr_spin_anim_speed_after_collision, (f32) (0.2 * da->specialn_pr_spinning_speed_turn *
+               -fp->mv.pr.specialn.x34.x), fp->mv.pr.specialn.x14);
     ftPr_NormalizeAndSetRollAngle(gobj);
     fp->mv.pr.specialn.x0 -= 1;
     if (fp->mv.pr.specialn.x0 <= 0) {
@@ -654,10 +644,8 @@ void ftKb_PrSpecialNHit_Anim(Fighter_GObj* gobj)
     Vec3 scale;
     PAD_STACK(4);
     ftKb_PrScaleAnimStep(gobj, &scale);
-    fp->mv.pr.specialn.x14 +=
-        da->specialn_pr_spin_anim_speed_after_collision *
-        (f32) (0.2 * da->specialn_pr_spinning_speed_turn *
-               -fp->mv.pr.specialn.x34.x);
+    fp->mv.pr.specialn.x14 = gk_fmadds(da->specialn_pr_spin_anim_speed_after_collision, (f32) (0.2 * da->specialn_pr_spinning_speed_turn *
+               -fp->mv.pr.specialn.x34.x), fp->mv.pr.specialn.x14);
     ftPr_NormalizeAndSetRollAngle(gobj);
     ftPartSetRotY(fp, FtPart_TopN, M_PI_2);
 }
@@ -872,15 +860,15 @@ void ftKb_PrSpecialNTurn_Phys(Fighter_GObj* gobj)
     f32 influence = da->specialn_pr_unk9 * (x1C * slope);
     if (fp->coll_data.floor.normal.x > 0.0f) {
         if (x1C > 0.0f) {
-            fp->gr_vel += scale * (x1C + influence);
+            fp->gr_vel = gk_fmadds(scale, (x1C + influence), fp->gr_vel);
         } else {
-            fp->gr_vel += scale * (x1C + influence);
+            fp->gr_vel = gk_fmadds(scale, (x1C + influence), fp->gr_vel);
         }
     } else {
         if (x1C > 0.0f) {
-            fp->gr_vel += scale * (x1C - influence);
+            fp->gr_vel = gk_fmadds(scale, (x1C - influence), fp->gr_vel);
         } else {
-            fp->gr_vel += scale * (x1C - influence);
+            fp->gr_vel = gk_fmadds(scale, (x1C - influence), fp->gr_vel);
         }
     }
     fp->x74_self_accel.y = 0;

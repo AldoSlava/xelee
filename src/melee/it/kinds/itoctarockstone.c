@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itoctarockstone.h"
 
 #include <melee/it/forward.h>
@@ -149,7 +150,7 @@ void it_802E89D0(Item_GObj* gobj, f32 horiz_speed, f32 min_vy, f32 max_vy)
         x *= 0.5f;
         ip->x40_vel.y = x / speed;
         ip->x40_vel.y =
-            HSD_Randf() * ((pos.y - ip->pos.y) / 10.0f) + ip->x40_vel.y;
+            gk_fmadds(HSD_Randf(), ((pos.y - ip->pos.y) / 10.0f), ip->x40_vel.y);
 
         if (ip->x40_vel.y > max_vy) {
             ip->x40_vel.y = max_vy;

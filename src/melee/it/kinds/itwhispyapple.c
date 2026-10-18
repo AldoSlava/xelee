@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itwhispyapple.h"
 
 #include <melee/it/forward.h>
@@ -151,7 +152,7 @@ void it_802EE374(Item_GObj* gobj)
     it_80275158(gobj, (f32) attrs->x8);
     ip->xDD4_itemVar.whispyapple.xDD4_heal = attrs->x4;
     rand = HSD_Randf();
-    ip->x40_vel.x = 2.0f * attrs->x18 * rand - attrs->x18;
+    ip->x40_vel.x = gk_fmsubs(2.0f * attrs->x18, rand, attrs->x18);
     ip->x40_vel.y = attrs->x14;
     ip->x40_vel.z = ABS(ip->pos.z / 20.0f);
 }

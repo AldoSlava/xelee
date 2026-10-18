@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itzgshell.h"
 
 #include "inlines.h"
@@ -139,8 +140,7 @@ void it_802DDD38(Item_GObj* gobj)
     case 6:
     case 7:
     case 8:
-        ip->x40_vel.x +=
-            -ip->xCCC_incDamageDirection * ((f32) ip->xCA0 * attrs->x14);
+        ip->x40_vel.x = gk_fmadds(-ip->xCCC_incDamageDirection, ((f32) ip->xCA0 * attrs->x14), ip->x40_vel.x);
         ip->xDD4_itemVar.zgshell.xE08_b1 = 1;
         break;
     }

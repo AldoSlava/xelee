@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftluigispecials.h"
 
 #include <Runtime/platform.h>
@@ -344,9 +345,7 @@ void ftLg_SpecialS_Anim(HSD_GObj* gobj)
         fp->x914[0].state == HitCapsule_Enabled)
     {
         ftColl_8007ABD0(&fp->x914[0],
-                        fp->mv.lg.SpecialS.chargeFrames *
-                                sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE +
-                            sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT,
+                        gk_fmadds(fp->mv.lg.SpecialS.chargeFrames, sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE, sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT),
                         gobj);
     }
 
@@ -368,9 +367,7 @@ void ftLg_SpecialAirS_Anim(HSD_GObj* gobj)
         fp->x914[0].state == HitCapsule_Enabled)
     {
         ftColl_8007ABD0(&fp->x914[0],
-                        fp->mv.lg.SpecialS.chargeFrames *
-                                sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE +
-                            sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT,
+                        gk_fmadds(fp->mv.lg.SpecialS.chargeFrames, sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE, sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT),
                         gobj);
     }
 
@@ -504,9 +501,7 @@ void ftLg_SpecialSMisfire_Anim(HSD_GObj* gobj)
         fp->x914[0].state == HitCapsule_Enabled)
     {
         ftColl_8007ABD0(&fp->x914[0],
-                        fp->mv.lg.SpecialS.chargeFrames *
-                                sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE +
-                            sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT,
+                        gk_fmadds(fp->mv.lg.SpecialS.chargeFrames, sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE, sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT),
                         gobj);
     }
 
@@ -528,9 +523,7 @@ void ftLg_SpecialAirSMisfire_Anim(HSD_GObj* gobj)
         fp->x914[0].state == HitCapsule_Enabled)
     {
         ftColl_8007ABD0(&fp->x914[0],
-                        fp->mv.lg.SpecialS.chargeFrames *
-                                sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE +
-                            sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT,
+                        gk_fmadds(fp->mv.lg.SpecialS.chargeFrames, sa->x14_LUIGI_GREENMISSILE_DAMAGE_SLOPE, sa->x10_LUIGI_GREENMISSILE_DAMAGE_TILT),
                         gobj);
     }
 
@@ -701,9 +694,7 @@ void ftLg_SpecialSFly_Enter(HSD_GObj* gobj)
     if (fp->mv.lg.SpecialS.isMisfire) {
         fp->self_vel.x = sa->x48_LUIGI_GREENMISSILE_MISFIRE_VEL_X;
     } else {
-        fp->self_vel.x = sa->x28_LUIGI_GREENMISSILE_MUL_X *
-                             fp->mv.lg.SpecialS.chargeFrames +
-                         sa->x24_LUIGI_GREENMISSILE_VEL_X;
+        fp->self_vel.x = gk_fmadds(sa->x28_LUIGI_GREENMISSILE_MUL_X, fp->mv.lg.SpecialS.chargeFrames, sa->x24_LUIGI_GREENMISSILE_VEL_X);
     }
 
     fp->self_vel.x *= fp->facing_dir;
@@ -713,9 +704,8 @@ void ftLg_SpecialSFly_Enter(HSD_GObj* gobj)
     } else {
         float vel_y = sa->x2C_LUIGI_GREENMISSILE_VEL_Y;
 
-        fp->self_vel.y = 0.5f * vel_y +
-                         vel_y * (0.5f * fp->mv.lg.SpecialS.chargeFrames /
-                                  sa->xC_LUIGI_GREENMISSILE_MAX_CHARGE_FRAMES);
+        fp->self_vel.y = gk_fmadds(0.5f, vel_y, vel_y * (0.5f * fp->mv.lg.SpecialS.chargeFrames /
+                                  sa->xC_LUIGI_GREENMISSILE_MAX_CHARGE_FRAMES));
     }
 
     Fighter_ChangeMotionState(gobj, ftLg_MS_SpecialAirS2, transition_flags3,

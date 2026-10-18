@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ithammerhead.h"
 
 #include <Runtime/platform.h>
@@ -61,7 +62,7 @@ void it_80299C48(Item_GObj* parent_gobj, Vec3* pos, Vec3* velocity,
         it_80299D7C(gobj);
         it->facing_dir = facing_dir;
         it->x40_vel.x = velocity->x * attrs->initial_velocity * it->facing_dir;
-        it->x40_vel.y = velocity->y * attrs->initial_velocity + 0.5f;
+        it->x40_vel.y = gk_fmadds(velocity->y, attrs->initial_velocity, 0.5f);
         db_80225DD8(gobj, parent_gobj);
     }
 }

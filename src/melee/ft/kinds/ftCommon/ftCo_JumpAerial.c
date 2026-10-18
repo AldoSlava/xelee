@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_JumpAerial.h"
 
 #include <melee/ft/forward.h>
@@ -313,8 +314,7 @@ void ftNs_JumpAerial_Phys_Cb(Fighter_GObj* gobj)
     ftCommon_CalcSelfAccel_DriftFrom(fp, fp->mv.co.jumpaerial.init_h_vel);
     fp->mv.co.jumpaerial.init_h_vel += fp->x74_self_accel.x;
     fp->x74_self_accel.x = 0.0F;
-    fp->self_vel.x = fp->x6A4_transNOffset.z * fp->facing_dir +
-                     fp->mv.co.jumpaerial.init_h_vel;
+    fp->self_vel.x = gk_fmadds(fp->x6A4_transNOffset.z, fp->facing_dir, fp->mv.co.jumpaerial.init_h_vel);
     ft_800851D0(gobj);
 }
 

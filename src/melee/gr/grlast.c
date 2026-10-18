@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grlast.h"
 #include <pc/pc.h>
 #include <sysdolphin/baselib/random.h>
@@ -455,9 +456,9 @@ static void grLast_8021AC30(Ground_GObj* gobj)
     gp->u.last.xC8 = 0;
     gp->u.last.xCC = 0;
     gp->u.last.xD0 = 0;
-    gp->u.last.xD4 = HSD_Randf() * grLast_804DBB80 + grLast_804DBB7C;
+    gp->u.last.xD4 = gk_fmadds(HSD_Randf(), grLast_804DBB80, grLast_804DBB7C);
     gp->u.last.xD4 *= HSD_Randi(2) ? +1.0F : -1.0F;
-    gp->u.last.xD8 = HSD_Randf() * grLast_804DBB80 + grLast_804DBB7C;
+    gp->u.last.xD8 = gk_fmadds(HSD_Randf(), grLast_804DBB80, grLast_804DBB7C);
     gp->u.last.xD8 *= HSD_Randi(2) ? +1.0F : -1.0F;
     gp->u.last.xDC = 0;
     gp->u.last.xE0 = 0;
@@ -512,12 +513,12 @@ static void grLast_8021ADD0(Ground_GObj* gobj)
         gp->u.last.xC4 = grLast_804DBB94;
         gp->u.last.xCC = -ABS(gp->u.last.xCC);
         randf = HSD_Randf();
-        gp->u.last.xD4 = grLast_804DBB80 * -randf - grLast_804DBB7C;
+        gp->u.last.xD4 = gk_fmsubs(grLast_804DBB80, -randf, grLast_804DBB7C);
     } else if (gp->u.last.xC4 < grLast_804DBB98) {
         float randf;
         gp->u.last.xC4 = grLast_804DBB98;
         gp->u.last.xCC = ABS(gp->u.last.xCC);
-        gp->u.last.xD4 = grLast_804DBB80 * HSD_Randf() + grLast_804DBB7C;
+        gp->u.last.xD4 = gk_fmadds(grLast_804DBB80, HSD_Randf(), grLast_804DBB7C);
     }
     HSD_JObjSetRotationX(jobj, gp->u.last.xC4 * gp->u.last.xDC);
     gp->u.last.xC8 += gp->u.last.xD0;
@@ -526,11 +527,11 @@ static void grLast_8021ADD0(Ground_GObj* gobj)
         gp->u.last.xC8 = grLast_804DBB9C;
         gp->u.last.xD0 = -ABS(gp->u.last.xD0);
         randf = HSD_Randf();
-        gp->u.last.xD8 = grLast_804DBB80 * -randf - grLast_804DBB7C;
+        gp->u.last.xD8 = gk_fmsubs(grLast_804DBB80, -randf, grLast_804DBB7C);
     } else if (gp->u.last.xC8 < grLast_804DBBA0) {
         gp->u.last.xC8 = grLast_804DBBA0;
         gp->u.last.xD0 = ABS(gp->u.last.xD0);
-        gp->u.last.xD8 = grLast_804DBB80 * HSD_Randf() + grLast_804DBB7C;
+        gp->u.last.xD8 = gk_fmadds(grLast_804DBB80, HSD_Randf(), grLast_804DBB7C);
     }
     HSD_JObjSetRotationY(jobj, gp->u.last.xC8 * gp->u.last.xDC);
     if (gp->u.last.xE0 != NULL && gp->u.last.xE0->appsrt != NULL) {

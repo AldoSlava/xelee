@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "gm_1832.h"
 
 #include "gm_1601.h"
@@ -727,10 +728,10 @@ double fn_801855BC(double x)
 {
     if (x > 0.0) {
         double guess = __frsqrte(x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
         return x * guess;
     } else if (x == 0) {
         return 0;

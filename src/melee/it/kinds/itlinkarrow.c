@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itlinkarrow.h"
 
 #include <math.h>
@@ -289,9 +290,9 @@ bool itLinkArrow_802A850C(Item_GObj* gobj, Vec3* arg1, Vec3* arg2, f32 arg3,
         ip->xDC8_word.flags.x14 = 0;
         it_8026B3A8(gobj);
         ip->xDD4_itemVar.linkarrow.xA8 =
-            (arg4 * ((attr->x8 - attr->x4) / arg5)) + attr->x4;
+            gk_fmadds(arg4, ((attr->x8 - attr->x4) / arg5), attr->x4);
         ip->xDD4_itemVar.linkarrow.xA4 =
-            (arg4 * ((attr->x10 - attr->xC) / arg5)) + attr->xC;
+            gk_fmadds(arg4, ((attr->x10 - attr->xC) / arg5), attr->xC);
         ip->facing_dir = ftLib_GetFacingDir(ip->xDD4_itemVar.linkarrow.xE0);
         HSD_JObjSetRotationY(jobj, M_PI_2 * ip->facing_dir);
         ip->pos = *arg1;
@@ -585,12 +586,8 @@ void itLinkarrow_UnkMotion2_Phys(HSD_GObj* gobj)
         (ftCo_80094098(item->xDD4_itemVar.linkarrow.xC4,
                        &item->xDD4_itemVar.linkarrow.xC8) *
          ftLib_GetModelScale(item->xDD4_itemVar.linkarrow.xC4));
-    item->pos.x = (item->xDD4_itemVar.linkarrow.xD4 *
-                   cosf(item->xDD4_itemVar.linkarrow.xD8)) +
-                  item->xDD4_itemVar.linkarrow.xC8;
-    item->pos.y = (item->xDD4_itemVar.linkarrow.xD4 *
-                   sinf(item->xDD4_itemVar.linkarrow.xD8)) +
-                  item->xDD4_itemVar.linkarrow.xCC;
+    item->pos.x = gk_fmadds(item->xDD4_itemVar.linkarrow.xD4, cosf(item->xDD4_itemVar.linkarrow.xD8), item->xDD4_itemVar.linkarrow.xC8);
+    item->pos.y = gk_fmadds(item->xDD4_itemVar.linkarrow.xD4, sinf(item->xDD4_itemVar.linkarrow.xD8), item->xDD4_itemVar.linkarrow.xCC);
     item->pos.z = 0.0f;
 }
 
@@ -818,12 +815,8 @@ bool itLinkArrow_Logic98_HitShield(Item_GObj* gobj)
                     atan2f(half_y - ip->xDD4_itemVar.linkarrow.xCC,
                            half_x - ip->xDD4_itemVar.linkarrow.xC8);
             }
-            ip->pos.x = ip->xDD4_itemVar.linkarrow.xD4 *
-                            cosf(ip->xDD4_itemVar.linkarrow.xD8) +
-                        ip->xDD4_itemVar.linkarrow.xC8;
-            ip->pos.y = ip->xDD4_itemVar.linkarrow.xD4 *
-                            sinf(ip->xDD4_itemVar.linkarrow.xD8) +
-                        ip->xDD4_itemVar.linkarrow.xCC;
+            ip->pos.x = gk_fmadds(ip->xDD4_itemVar.linkarrow.xD4, cosf(ip->xDD4_itemVar.linkarrow.xD8), ip->xDD4_itemVar.linkarrow.xC8);
+            ip->pos.y = gk_fmadds(ip->xDD4_itemVar.linkarrow.xD4, sinf(ip->xDD4_itemVar.linkarrow.xD8), ip->xDD4_itemVar.linkarrow.xCC);
             ip->pos.z = 0.0f;
             goto end;
         }

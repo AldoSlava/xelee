@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grbigblueroute.h"
 
 #include <Runtime/platform.h>
@@ -641,7 +642,7 @@ static inline void grBigBlueRoute_SpawnRoute(s32 route_idx, Ground* gp,
             f32 rand = HSD_Randf();
             re = GRBB_ROUTE_ENTRY_AT(gp->u.car.car_info, offset);
             (void) re;
-            re->x20 = 5.2359877f * rand - 2.6179938f;
+            re->x20 = gk_fmsubs(5.2359877f, rand, 2.6179938f);
         }
 
         if (!GRBB_ROUTE_ENTRY_AT(gp->u.car.car_info, offset)->flags.b1) {
@@ -823,7 +824,7 @@ void grBigBlueRoute_8020CD20(Ground_GObj* gobj)
                     RE_ENTRY->flags.b2_5 = 2;
                     RE_ENTRY->x14 = 0.0f;
                     RE_ENTRY->x1C = 0.0f;
-                    RE_ENTRY->x20 = 5.2359877f * HSD_Randf() - 2.6179938f;
+                    RE_ENTRY->x20 = gk_fmsubs(5.2359877f, HSD_Randf(), 2.6179938f);
                     RE_ENTRY->x24 = RE_ENTRY->x4;
                 }
                 break;
@@ -886,7 +887,7 @@ void grBigBlueRoute_8020CD20(Ground_GObj* gobj)
 
                 prog = ((t = RE_ENTRY->x4) - RE_ENTRY->x24) /
                        (1.0f - RE_ENTRY->x24);
-                frac = ((1.0f - prog) * (RE_ENTRY->xC - 0.5f)) + 0.5f;
+                frac = gk_fmadds((1.0f - prog), (RE_ENTRY->xC - 0.5f), 0.5f);
                 splGetSplinePoint(&c2_p0, gp->u.car.xD0, t);
                 splGetSplinePoint(&c2_p1, gp->u.car.xD4, t);
                 lbShadow_8000E9F0(&c2_road_tan, gp->u.car.xD0, t);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftwalkcommon.h"
 
 #include <sysdolphin/baselib/forward.h>
@@ -163,7 +164,7 @@ void ftWalkCommon_800DFEC8(HSD_GObj* gobj, void (*arg_cb)(HSD_GObj*, float))
         float_result = ftAnim_8006F484(gobj);
         init_animFrame = fp->cur_anim_frame;
         quotient = init_animFrame / float_result;
-        adjusted_animFrame = fp->cur_anim_frame - float_result * quotient;
+        adjusted_animFrame = gk_fnmsubs(float_result, quotient, fp->cur_anim_frame);
         final_animFrame = frame * (adjusted_animFrame / float_result);
         arg_cb(gobj, final_animFrame);
     }

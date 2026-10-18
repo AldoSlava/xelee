@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "toy.h"
 
 #include <Runtime/platform.h>
@@ -3227,13 +3228,13 @@ f32 _Toy_80309338(Vec3* arg0, Vec3* arg1)
     temp_f4 = var_r3->x - var_r4->x;
     temp_f2 = var_r3->z - var_r4->z;
     var_f1 = var_f1 * var_f1;
-    var_f1 = temp_f4 * temp_f4 + var_f1;
-    var_f1 = temp_f2 * temp_f2 + var_f1;
+    var_f1 = gk_fmadds(temp_f4, temp_f4, var_f1);
+    var_f1 = gk_fmadds(temp_f2, temp_f2, var_f1);
     if (var_f1 > 0.0f) {
         guess = __frsqrte((f64) var_f1);
-        guess = 0.5 * guess * (3.0 - guess * guess * var_f1);
-        guess = 0.5 * guess * (3.0 - guess * guess * var_f1);
-        guess = 0.5 * guess * (3.0 - guess * guess * var_f1);
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, var_f1, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, var_f1, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, var_f1, 3.0));
         sp10 = (f32) (var_f1 * guess);
         var_f1 = sp10;
     }
@@ -3335,7 +3336,7 @@ void _Toy_80309404(HSD_GObj* gobj)
         } else {
             sign = -1;
         }
-        state->x30 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x30 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
 
     tmp = state->x34;
@@ -3347,7 +3348,7 @@ void _Toy_80309404(HSD_GObj* gobj)
         } else {
             sign = -1;
         }
-        state->x34 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x34 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
 
     state->x40 = Toy_80305EB4();
@@ -3363,7 +3364,7 @@ void _Toy_80309404(HSD_GObj* gobj)
         } else {
             sign = -1;
         }
-        state->x40 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x40 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
 
     tmp = state->x44;
@@ -3375,7 +3376,7 @@ void _Toy_80309404(HSD_GObj* gobj)
         } else {
             sign = -1;
         }
-        state->x44 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x44 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
 
     {
@@ -3621,18 +3622,18 @@ void _Toy_80309404(HSD_GObj* gobj)
         if (!movement_update) {
             button = Toy_80305C44();
             if (button & HSD_PAD_Y) {
-                state->x20 = (f32) - ((0.025f * dist) - state->x20);
+                state->x20 = (f32) - (gk_fmsubs(0.025f, dist, state->x20));
                 zoom_update = 1.0f;
             } else {
                 button = Toy_80305C44();
                 if (button & HSD_PAD_X) {
-                    state->x20 = (f32) - ((-0.025f * dist) - state->x20);
+                    state->x20 = (f32) - (gk_fmsubs(-0.025f, dist, state->x20));
                     zoom_update = 1.0f;
                 } else {
                     tmp = state->x34;
                     if (tmp) {
                         state->x20 =
-                            (f32) - ((dist * (0.025f * tmp)) - state->x20);
+                            (f32) - (gk_fmsubs(dist, (0.025f * tmp), state->x20));
                         zoom_update = 1.0f;
                     }
                 }
@@ -3649,8 +3650,8 @@ void _Toy_80309404(HSD_GObj* gobj)
     }
 
     if (rotate_update) {
-        state->x1C = (f32) - ((3.0f * state->x40) - state->x1C);
-        state->x18 = (f32) - ((3.0f * state->x44) - state->x18);
+        state->x1C = (f32) - (gk_fmsubs(3.0f, state->x40, state->x1C));
+        state->x18 = (f32) - (gk_fmsubs(3.0f, state->x44, state->x18));
         if (state->x18 < -89.0f) {
             state->x18 = -89.0f;
         }
@@ -4687,7 +4688,7 @@ void _Toy_8030E110(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        state->x30 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x30 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
     tmp = state->x34;
     if ((tmp > -0.2f) && (tmp < 0.2f)) {
@@ -4698,7 +4699,7 @@ void _Toy_8030E110(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        state->x34 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x34 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
 
     state->x40 = Toy_80305EB4();
@@ -4714,7 +4715,7 @@ void _Toy_8030E110(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        state->x40 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x40 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
     tmp = state->x44;
     if ((tmp > -0.2f) && (tmp < 0.2f)) {
@@ -4725,7 +4726,7 @@ void _Toy_8030E110(HSD_GObj* arg0)
         } else {
             sign = -1;
         }
-        state->x44 = (f32) (-((0.2f * (f32) sign) - tmp) / 0.8f);
+        state->x44 = (f32) (-(gk_fmsubs(0.2f, (f32) sign, tmp)) / 0.8f);
     }
 
     {
@@ -4867,7 +4868,7 @@ void _Toy_8030E110(HSD_GObj* arg0)
             if (!moved_x) {
                 f32 sy = state->x34;
                 if (sy) {
-                    state->x20 -= state->x20 * (0.025f * sy);
+                    state->x20 = gk_fnmsubs(state->x20, (0.025f * sy), state->x20);
                     moved_y = 1.0f;
                 }
                 if (state->x20 < 5.0f) {
@@ -4886,8 +4887,8 @@ void _Toy_8030E110(HSD_GObj* arg0)
                 _Toy_sbss_804D6E54 ^= 1;
             }
 
-            state->x1C = (f32) - ((3.0f * state->x40) - state->x1C);
-            state->x18 = (f32) - ((3.0f * state->x44) - state->x18);
+            state->x1C = (f32) - (gk_fmsubs(3.0f, state->x40, state->x1C));
+            state->x18 = (f32) - (gk_fmsubs(3.0f, state->x44, state->x18));
             if (state->x18 < -89.0f) {
                 state->x18 = -89.0f;
             }

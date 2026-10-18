@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <math.h>
 
 #include "db.h"
@@ -468,7 +469,7 @@ static void fn_80227CAC(HSD_GObj* camera, f32 cstick_y)
         HSD_CObjGetEyeVector(cobj, &forward);
         {
             float dist = HSD_CObjGetEyeDistance(cobj);
-            VECScale(&forward, &forward, dist * (1.0F - 0.05F * cstick_y));
+            VECScale(&forward, &forward, dist * (gk_fnmsubs(0.05F, cstick_y, 1.0F)));
         }
         VECSubtract(&cm_80453004.free_int_pos, &forward,
                     &cm_80453004.free_eye_pos);
@@ -489,7 +490,7 @@ void fn_80227D38(HSD_GObj* camera, Vec3* arg1, f32 arg2)
             cobj = GET_COBJ(camera);
             HSD_CObjGetEyeVector(cobj, &sp28);
             dist = HSD_CObjGetEyeDistance(cobj);
-            PSVECScale(&sp28, &sp28, dist * -(0.05F * arg2 - 1.0F));
+            PSVECScale(&sp28, &sp28, dist * -(gk_fmsubs(0.05F, arg2, 1.0F)));
             PSVECSubtract(&cm_80453004.follow_int_offset, &sp28,
                           &cm_80453004.follow_eye_offset);
         }
@@ -504,7 +505,7 @@ void fn_80227D38(HSD_GObj* camera, Vec3* arg1, f32 arg2)
             cobj = GET_COBJ(camera);
             HSD_CObjGetEyeVector(cobj, &sp1C);
             dist = HSD_CObjGetEyeDistance(cobj);
-            PSVECScale(&sp1C, &sp1C, dist * -(0.05F * arg2 - 1.0F));
+            PSVECScale(&sp1C, &sp1C, dist * -(gk_fmsubs(0.05F, arg2, 1.0F)));
             PSVECSubtract(&cm_80453004.free_int_pos, &sp1C,
                           &cm_80453004.free_eye_pos);
         }

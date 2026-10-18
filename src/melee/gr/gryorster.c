@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "gryorster.h"
 
 #include <Runtime/platform.h>
@@ -374,7 +375,7 @@ void grYorster_8020266C(HSD_GObj* gobj)
             if (gp->u.yorster.elements[i].x0C >= 0x143) {
                 HSD_JObjGetTranslation(gp->u.yorster.elements[i].x18, &pos);
 
-                if (grLib_801C9EE8(&pos, 10.0f * Ground_801C0498() - 2.0f)) {
+                if (grLib_801C9EE8(&pos, gk_fmsubs(10.0f, Ground_801C0498(), 2.0f))) {
                     grAnime_801C7FF8(gobj, gp2->u.yorster.elements[i].x14, 7,
                                      2, 0.0f, 0.3f);
                     gp->u.yorster.elements[i].x0C = 0;

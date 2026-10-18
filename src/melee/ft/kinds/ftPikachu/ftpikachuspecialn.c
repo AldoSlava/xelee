@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftpikachuspecialn.h"
 
 #include <Runtime/platform.h>
@@ -57,11 +58,8 @@ void ftPk_SpecialN_Anim(Fighter_GObj* gobj)
 
         if (!fp->cmd_vars[ftPk_SpecialN_Cmd1]) {
             fp->cmd_vars[ftPk_SpecialN_Cmd1] = true;
-            pos.x = (fp->x34_scale.y *
-                     (pika_attr->specialn_spawn_offset.x * fp->facing_dir)) +
-                    fp->cur_pos.x;
-            pos.y = (pika_attr->specialn_spawn_offset.y * fp->x34_scale.y) +
-                    fp->cur_pos.y;
+            pos.x = gk_fmadds(fp->x34_scale.y, (pika_attr->specialn_spawn_offset.x * fp->facing_dir), fp->cur_pos.x);
+            pos.y = gk_fmadds(pika_attr->specialn_spawn_offset.y, fp->x34_scale.y, fp->cur_pos.y);
             pos.z = 0.0f;
             itPikachuThunderJolt_Spawn(gobj, &pos, fp->facing_dir,
                                        pika_attr->specialn_itkind);
@@ -97,12 +95,9 @@ void ftPk_SpecialAirN_Anim(HSD_GObj* gobj)
         if (!fp->cmd_vars[ftPk_SpecialN_Cmd1]) {
             fp->cmd_vars[ftPk_SpecialN_Cmd1] = 1;
             it_pos.x =
-                (fp->x34_scale.y *
-                 (pika_attr->specialairn_spawn_offset.x * fp->facing_dir)) +
-                fp->cur_pos.x;
+                gk_fmadds(fp->x34_scale.y, (pika_attr->specialairn_spawn_offset.x * fp->facing_dir), fp->cur_pos.x);
             it_pos.y =
-                (pika_attr->specialairn_spawn_offset.y * fp->x34_scale.y) +
-                fp->cur_pos.y;
+                gk_fmadds(pika_attr->specialairn_spawn_offset.y, fp->x34_scale.y, fp->cur_pos.y);
             it_pos.z = 0.0f;
             itPikachuThunderJolt_Spawn(gobj, &it_pos, fp->facing_dir,
                                        pika_attr->specialn_itkind);

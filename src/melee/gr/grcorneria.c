@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grcorneria.h"
 
 #include <placeholder.h>
@@ -711,11 +712,11 @@ void grCorneria_801DD9A8(Ground_GObj* gobj)
         grCorneria_801E1970(gobj);
         grCorneria_801E2228(gobj);
 
-        speed = -35.0f * Ground_801C0498() - gp->u.corneria.xD0;
+        speed = gk_fmsubs(-35.0f, Ground_801C0498(), gp->u.corneria.xD0);
         grZakoGenerator_801CA43C(gp->u.corneria.xC8, Ground_801C3FA4(gobj, 0),
                                  speed);
 
-        speed = -35.0f * Ground_801C0498() - gp->u.corneria.xD0;
+        speed = gk_fmsubs(-35.0f, Ground_801C0498(), gp->u.corneria.xD0);
         grZakoGenerator_801CA43C(gp->u.corneria.xCC, Ground_801C3FA4(gobj, 0),
                                  speed);
 
@@ -2247,7 +2248,7 @@ void grCorneria_801E1970(Ground_GObj* gobj)
     if (gp->u.corneria.x104 <= 0) {
         f32 randf = HSD_Randf();
         f32 a = yakumono_param->x4 - yakumono_param->x0;
-        gp->u.corneria.x104 = a * randf + yakumono_param->x0;
+        gp->u.corneria.x104 = gk_fmadds(a, randf, yakumono_param->x0);
         randf = HSD_Randf();
         gp->u.corneria.xF4 = yakumono_param->x8 * (2.0f * (randf - 0.5f));
         randf = HSD_Randf();
@@ -2398,8 +2399,8 @@ void grCorneria_801E2228(Ground_GObj* gobj)
         if (timer < 0x384) {
             f32 speed = gp->u.corneria.xFC;
             f32 t = speed / 0.005f;
-            if ((gp->u.corneria.xD0 - (50.0f * Ground_801C0498() - 250.0f)) >
-                (speed * t + -0.0025f * t * t))
+            if ((gp->u.corneria.xD0 - (gk_fmsubs(50.0f, Ground_801C0498(), 250.0f))) >
+                (gk_fmadds(speed, t, -0.0025f * t * t)))
             {
                 gp->u.corneria.xFC += 0.005f;
                 if (gp->u.corneria.xFC > 3.0f) {
@@ -2412,13 +2413,13 @@ void grCorneria_801E2228(Ground_GObj* gobj)
                 }
             }
             gp->u.corneria.xD0 -= gp->u.corneria.xFC;
-            if (gp->u.corneria.xD0 < 50.0f * Ground_801C0498() - 250.0f) {
-                gp->u.corneria.xD0 = 50.0f * Ground_801C0498() - 250.0f;
+            if (gp->u.corneria.xD0 < gk_fmsubs(50.0f, Ground_801C0498(), 250.0f)) {
+                gp->u.corneria.xD0 = gk_fmsubs(50.0f, Ground_801C0498(), 250.0f);
             }
         } else {
             f32 speed = gp->u.corneria.xFC;
             f32 t = speed / 0.005f;
-            if (-gp->u.corneria.xD0 > (speed * t + -0.0025f * t * t)) {
+            if (-gp->u.corneria.xD0 > (gk_fmadds(speed, t, -0.0025f * t * t))) {
                 t = 0.005f;
                 gp->u.corneria.xFC = speed + t;
                 if (gp->u.corneria.xFC > 3.0f) {
@@ -2785,9 +2786,8 @@ bool grCorneria_801E2EEC(Vec3* v, int arg1, HSD_JObj* jobj)
             (void) 107.0f;
             temp_f31 = 106.0f * Ground_801C0498();
             temp_f31_2 =
-                ((v->y - sp14.y) * ((107.0f * Ground_801C0498()) / temp_f31)) +
-                sp14.x;
-            if (v->x > -((107.0f * Ground_801C0498()) - temp_f31_2)) {
+                gk_fmadds((v->y - sp14.y), ((107.0f * Ground_801C0498()) / temp_f31), sp14.x);
+            if (v->x > -(gk_fmsubs(107.0f, Ground_801C0498(), temp_f31_2))) {
                 return false;
             }
         }
@@ -2807,7 +2807,7 @@ f32 grCorneria_801E2FCC(void)
     if (gobj != NULL) {
         gp = gobj->user_data;
         if (gp != NULL) {
-            return (Ground_801C0498() * -35.0f - gp->u.corneria.xD0) + 5.0f;
+            return (gk_fmsubs(Ground_801C0498(), -35.0f, gp->u.corneria.xD0)) + 5.0f;
         }
     }
     return -3.4028235e38f;

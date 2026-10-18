@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Attack100.h"
 #include <melee/ef/efsync.h>
 #include <melee/ft/fighter.h>
@@ -56,10 +57,10 @@ bool fn_800D9558(Fighter_GObj* gobj)
                             effPos.y = jobj->mtx[1][3];
                             effPos.z = jobj->mtx[2][3];
                             r = HSD_Randf();
-                            effPos.x = 4.0 * (r - 0.5f) + effPos.x;
-                            effPos.y = 4.0 * (HSD_Randf() - 0.5f) + effPos.y;
+                            effPos.x = gk_fmadd(4.0, (r - 0.5f), effPos.x);
+                            effPos.y = gk_fmadd(4.0, (HSD_Randf() - 0.5f), effPos.y);
                             r = HSD_Randf() - 0.5f;
-                            effPos.z = 4.0 * r + effPos.z;
+                            effPos.z = gk_fmadd(4.0, r, effPos.z);
                             efSync_Spawn(0x3F3, segGobj, &effPos);
                         }
                     }
@@ -72,9 +73,7 @@ bool fn_800D9558(Fighter_GObj* gobj)
                     my = joint->mtx[1][3];
                     if (mpCheckAllRemap(NULL, NULL, NULL, NULL, -1, -1,
                                         fp->coll_data.cur_pos.x, my,
-                                        2.0 * fp->facing_dir *
-                                                fp->x34_scale.y +
-                                            joint->mtx[0][3],
+                                        gk_fmadd(2.0 * fp->facing_dir, fp->x34_scale.y, joint->mtx[0][3]),
                                         my))
                     {
                         it_802B7B84(fp->u.ss.x223C);
@@ -146,10 +145,10 @@ bool fn_800D9930(Fighter_GObj* gobj)
                             effPos.y = jobj->mtx[1][3];
                             effPos.z = jobj->mtx[2][3];
                             r = HSD_Randf();
-                            effPos.x = 4.0 * (r - 0.5f) + effPos.x;
-                            effPos.y = 4.0 * (HSD_Randf() - 0.5f) + effPos.y;
+                            effPos.x = gk_fmadd(4.0, (r - 0.5f), effPos.x);
+                            effPos.y = gk_fmadd(4.0, (HSD_Randf() - 0.5f), effPos.y);
                             r = HSD_Randf() - 0.5f;
-                            effPos.z = 4.0 * r + effPos.z;
+                            effPos.z = gk_fmadd(4.0, r, effPos.z);
                             efSync_Spawn(0x3F3, segGobj, &effPos);
                         }
                     }

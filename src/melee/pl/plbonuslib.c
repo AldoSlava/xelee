@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "plbonuslib.h"
 
 #include <Runtime/platform.h>
@@ -756,7 +757,7 @@ void pl_8003ED0C(int arg0, int arg1, int r5, int arg3, float arg2)
     temp_r3 = Player_GetStaleMoveTableIndexPtr2(arg0);
     temp_r3->x0_staleMoveTable.xCA4++;
     temp_r4 = temp_r3->x0_staleMoveTable.xCA4;
-    temp_f30 = temp_r3->x0_staleMoveTable.xCA0 * (temp_r4 - 1) + arg2;
+    temp_f30 = gk_fmadds(temp_r3->x0_staleMoveTable.xCA0, (temp_r4 - 1), arg2);
 
     total = temp_r4;
     temp_r3->x0_staleMoveTable.xCA0 = pl_CalculateAverage(temp_f30, total);
@@ -1119,8 +1120,7 @@ void pl_8003FAA8(int slot, int index, Vec3* pos, Vec3* prevPos)
     if (pl_Verify_gm_8016AEDC() && index == 0) {
         temp_r31 = ftLib_GetPercent(Player_GetEntityAtIndex(slot, index));
         temp_f30 =
-            temp_r30->x0_staleMoveTable.xC9C * (gm_GetFrameCount() - 1) +
-            temp_r31;
+            gk_fmadds(temp_r30->x0_staleMoveTable.xC9C, (gm_GetFrameCount() - 1), temp_r31);
 
         temp_r30->x0_staleMoveTable.xC9C =
             pl_CalculateAverage(temp_f30, gm_GetFrameCount());

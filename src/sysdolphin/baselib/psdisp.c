@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "psdisp.h"
 
 #include <string.h>
@@ -154,15 +155,15 @@ static void calcTornadoLastPos(HSD_Particle* pp, f32* x, f32* y, f32* z)
     vx0 = pp->vel.x - gp->grav;
 
     radius = ABS(gp->radius);
-    radius += vz0 * tanf(ABS(gp->angle));
+    radius = gk_fmadds(vz0, tanf(ABS(gp->angle)), radius);
     radius *= pp->vel.y;
     px = radius * cosf(vx0);
     py = radius * sinf(vx0);
     pz = vz0;
 
-    *x = px * cosb + pz * sinb + gp->pos.x;
-    *y = -px * sina * sinb + py * cosa + pz * sina * cosb + gp->pos.y;
-    *z = -px * cosa * sinb - py * sina + pz * cosa * cosb + gp->pos.z;
+    *x = gk_fmadds(px, cosb, pz * sinb) + gp->pos.x;
+    *y = gk_fmadds(pz * sina, cosb, gk_fmadds(-px * sina, sinb, py * cosa)) + gp->pos.y;
+    *z = gk_fmadds(pz * cosa, cosb, gk_fmsubs(-px * cosa, sinb, py * sina)) + gp->pos.z;
 }
 
 static void getColorPrimEnv(HSD_Particle* pp, GXColor* primCol,

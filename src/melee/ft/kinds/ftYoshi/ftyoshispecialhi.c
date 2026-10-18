@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftyoshispecialhi.h"
 
 #include <melee/ft/forward.h>
@@ -74,8 +75,8 @@ void ftYs_SpecialS_8012DF8C(Fighter_GObj* gobj, Vec3* arg1)
         } else {
             angle = M_PI - da->specialhi_base_angle - mag;
         }
-        arg1->x = (fp->mv.ys.specialhi.x4 * da->x100 + da->xFC) * cosf(angle);
-        arg1->y = (fp->mv.ys.specialhi.x4 * da->x100 + da->xFC) * sinf(angle);
+        arg1->x = (gk_fmadds(fp->mv.ys.specialhi.x4, da->x100, da->xFC)) * cosf(angle);
+        arg1->y = (gk_fmadds(fp->mv.ys.specialhi.x4, da->x100, da->xFC)) * sinf(angle);
         arg1->z = 0.0f;
     }
 }
@@ -111,7 +112,7 @@ void fn_8012E110(Fighter_GObj* gobj)
         ftYs_SpecialS_8012DF8C_outline(gobj, &sp18);
         {
             float x4 = fp->mv.ys.specialhi.x4;
-            it_802B28C8(fp->u.ys.x2238, &sp18, &sp24, x4 * da->x110 + da->x10C,
+            it_802B28C8(fp->u.ys.x2238, &sp18, &sp24, gk_fmadds(x4, da->x110, da->x10C),
                         x4);
         }
         fp->u.ys.x2238 = NULL;

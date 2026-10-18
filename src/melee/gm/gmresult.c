@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "gmresult.h"
 
 #ifdef TARGET_PC
@@ -554,7 +555,7 @@ void fn_80174B4C(ResultsData* data, s32 slot)
 
     offset = pdata->scroll_offset;
     start_entry = (s32) (10.0F * offset) / 10;
-    pos.y += 1.75F * (offset - (f32) (start_entry - 1));
+    pos.y = gk_fmadds(1.75F, (offset - (f32) (start_entry - 1)), pos.y);
 
     /// Set flags
     pdata->x0_3 = 1;
@@ -681,19 +682,19 @@ GXColor fn_8017507C(s32 slot)
             }
         }
 
-        current_color = (0.9f * (f32) color.r) + 100.0f;
+        current_color = gk_fmadds(0.9f, (f32) color.r, 100.0f);
         if (current_color > 255.0f) {
             current_color = 255.0f;
         }
         color.r = current_color;
 
-        current_color = (0.9f * (f32) color.g) + 100.0f;
+        current_color = gk_fmadds(0.9f, (f32) color.g, 100.0f);
         if (current_color > 255.0f) {
             current_color = 255.0f;
         }
         color.g = (s8) current_color;
 
-        current_color = (0.9f * (f32) color.b) + 100.0f;
+        current_color = gk_fmadds(0.9f, (f32) color.b, 100.0f);
         if (current_color > 255.0f) {
             current_color = 255.0f;
         }

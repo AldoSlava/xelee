@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "item.h"
 
 #include <melee/lb/forward.h>
@@ -1652,8 +1653,7 @@ static bool Item_80269F14(HSD_GObj* gobj)
         {
             if (temp_item->x5D4_hitboxes[i].hit.state != HitCapsule_Disabled) {
                 temp_f30 =
-                    temp_item->x5D4_hitboxes[i].hit.damage * temp_item->xC6C +
-                    0.99f;
+                    gk_fmadds(temp_item->x5D4_hitboxes[i].hit.damage, temp_item->xC6C, 0.99f);
                 var_r27 = temp_f30;
                 if (var_r27 > it_804D6D28->xD8) {
                     var_r27 = it_804D6D28->xD8;

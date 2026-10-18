@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <placeholder.h>
 #include <setjmp.h>
 
@@ -377,10 +378,10 @@ void fn_803B61B4(s32* block)
         row5 = row[5];
         row0 = row[0];
         row4 = row[4];
-        odd0 = (f32) ((0.980785 * (f64) row7) - (0.19509 * (f64) row1));
-        odd1 = (f32) ((0.83147 * (f64) row5) - (0.55557 * (f64) row3));
-        odd2 = (f32) ((0.55557 * (f64) row5) + (0.83147 * (f64) row3));
-        odd3 = (f32) ((0.19509 * (f64) row7) + (0.980785 * (f64) row1));
+        odd0 = (f32) (gk_fmsub(0.980785, (f64) row7, (0.19509 * (f64) row1)));
+        odd1 = (f32) (gk_fmsub(0.83147, (f64) row5, (0.55557 * (f64) row3)));
+        odd2 = (f32) (gk_fmadd(0.55557, (f64) row5, (0.83147 * (f64) row3)));
+        odd3 = (f32) (gk_fmadd(0.19509, (f64) row7, (0.980785 * (f64) row1)));
         even_sum = (f32) (0.707107 * (f64) (row0 + row4));
         even_diff = (f32) (0.707107 * (f64) (row0 - row4));
         row2 = row[2];
@@ -389,9 +390,9 @@ void fn_803B61B4(s32* block)
         odd_pair_diff = -odd2 + odd3;
         odd_sum = odd2 + odd3;
         even_rotation_diff =
-            (f32) ((-0.92388 * (f64) row6) + (0.382683 * (f64) row2));
+            (f32) (gk_fmadd(-0.92388, (f64) row6, (0.382683 * (f64) row2)));
         even_rotation_sum =
-            (f32) ((0.382683 * (f64) row6) + (0.92388 * (f64) row2));
+            (f32) (gk_fmadd(0.382683, (f64) row6, (0.92388 * (f64) row2)));
         odd_rotation_diff =
             (f32) (0.707107 * (f64) (-odd_pair_sum + odd_pair_diff));
         even0 = even_sum + even_rotation_sum;
@@ -420,10 +421,10 @@ void fn_803B61B4(s32* block)
         col5 = column[40];
         col0 = column[0];
         col4 = column[32];
-        odd0 = (f32) ((0.980785 * (f64) col7) - (0.19509 * (f64) col1));
-        odd1 = (f32) ((0.83147 * (f64) col5) - (0.55557 * (f64) col3));
-        odd2 = (f32) ((0.55557 * (f64) col5) + (0.83147 * (f64) col3));
-        odd3 = (f32) ((0.19509 * (f64) col7) + (0.980785 * (f64) col1));
+        odd0 = (f32) (gk_fmsub(0.980785, (f64) col7, (0.19509 * (f64) col1)));
+        odd1 = (f32) (gk_fmsub(0.83147, (f64) col5, (0.55557 * (f64) col3)));
+        odd2 = (f32) (gk_fmadd(0.55557, (f64) col5, (0.83147 * (f64) col3)));
+        odd3 = (f32) (gk_fmadd(0.19509, (f64) col7, (0.980785 * (f64) col1)));
         even_sum = (f32) (0.707107 * (f64) (col0 + col4));
         even_diff = (f32) (0.707107 * (f64) (col0 - col4));
         col2 = column[16];
@@ -432,9 +433,9 @@ void fn_803B61B4(s32* block)
         odd_pair_diff = -odd2 + odd3;
         odd_sum = odd2 + odd3;
         even_rotation_diff =
-            (f32) ((-0.92388 * (f64) col6) + (0.382683 * (f64) col2));
+            (f32) (gk_fmadd(-0.92388, (f64) col6, (0.382683 * (f64) col2)));
         even_rotation_sum =
-            (f32) ((0.382683 * (f64) col6) + (0.92388 * (f64) col2));
+            (f32) (gk_fmadd(0.382683, (f64) col6, (0.92388 * (f64) col2)));
         {
             f32 odd_rotation_sum =
                 (f32) (0.707107 * (f64) (-odd_pair_sum + odd_pair_diff));
@@ -492,16 +493,15 @@ static inline void jpeg_store_rgb565(JpegOutput* out, s32 offset,
         u8 red, green, blue;
     } pixel;
 
-    red_value = (f32) ((f64) luminance + (1.402 * (f64) cr));
+    red_value = (f32) (gk_fmadd(1.402, (f64) cr, (f64) luminance));
     pixel.red = jpeg_clamp(red_value);
 
     green_value =
-        ((f32) luminance - (0.3441f * (f32) cb)) - (0.7139f * (f32) cr);
+        gk_fnmsubs(0.7139f, (f32) cr, (gk_fnmsubs(0.3441f, (f32) cb, (f32) luminance)));
     green = jpeg_clamp(green_value);
     pixel.green = green;
 
-    blue_value = (f32) ((f64) ((1.7718f * (f32) cb) + (f32) luminance) -
-                        (0.0012 * (f64) cr));
+    blue_value = (f32) (gk_fnmsub(0.0012, (f64) cr, (f64) (gk_fmadds(1.7718f, (f32) cb, (f32) luminance))));
     pixel.blue = jpeg_clamp(blue_value);
 
     out->pixels[offset] = ((pixel.red << 8) & 0xF800) |

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "mninfo.h"
 
 #include <placeholder.h>
@@ -195,7 +196,7 @@ s32 mnInfo_80251D58(mnInfo_GObj* arg0, s32 arg1, u32 arg2, u32 arg3)
     text = HSD_SisLib_803A6754(0, 1);
     *slot = text;
     text->pos_x = -7.5f;
-    text->pos_y = (3.45f * (f32) arg1) + -5.8f;
+    text->pos_y = gk_fmadds(3.45f, (f32) arg1, -5.8f);
     text->pos_z = 17.0f;
     text->text_color = mn_804D4B64;
     text->default_alignment = 2;
@@ -232,7 +233,7 @@ void mnInfo_80251F04(mnInfo_GObj* arg0, s32 arg1, u32 arg2)
     if (*slot != NULL) {
         HSD_SisLib_803A5CC4(data->right_column[arg1]);
     }
-    text = HSD_SisLib_803A5ACC(0, 0, -5.0f, (3.45f * (f32) arg1) + -5.9f,
+    text = HSD_SisLib_803A5ACC(0, 0, -5.0f, gk_fmadds(3.45f, (f32) arg1, -5.9f),
                                17.0f, 514.2857f, 142.85715f);
     *slot = text;
     text->font_size.x = 0.035f;

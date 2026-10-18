@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "types.h"
 #include <dolphin/gx/GXCull.h>
 #include <dolphin/gx/GXGeometry.h>
@@ -41,10 +42,10 @@ bool lb_80014638(struct lb_80014638_arg0_t* arg0,
         } else {
             z = (z - sp30.z) / (sp24.z - sp30.z);
         }
-        if (z * (sp24.x - sp30.x) + sp30.x > sp18.y) {
+        if (gk_fmadds(z, (sp24.x - sp30.x), sp30.x) > sp18.y) {
             return false;
         }
-        if (z * (sp24.y - sp30.y) + sp30.y < sp18.x) {
+        if (gk_fmadds(z, (sp24.y - sp30.y), sp30.y) < sp18.x) {
             return false;
         }
     }

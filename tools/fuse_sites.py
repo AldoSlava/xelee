@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""Find the a*b + c the GameCube fused, and write them as it computes them.
+
+mwcc compiled most a*b + c in Melee into one fused instruction (fmadds,
+fmsubs, fnmadds, fnmsubs; fmadd and the rest in double), rounded once; our
+build never contracts (-ffp-contract=off), so it rounds twice and comes out
+an ULP apart, which a Slippi peer in Dolphin does not (tools/slp_compare.py).
+This tool counts each function's fused instructions in the disc's DOL, finds
+the candidate expressions in the function's C (libclang, with the build's
+own compile command), and rewrites them with src/pc/gekko_fp.h's helpers --
+but only in a function whose candidates are exactly as many as the DOL's
+fused instructions, of each precision. The rest are listed for a person.
+
+    tools/fuse_sites.py --iso DISC.iso --symbols symbols.txt FILE.c ... [--apply]
+
+symbols.txt is the decomp's config/GALE01/symbols.txt (doldecomp/melee).
+Needs the libclang Python package (pip install libclang) and
+build/linux/compile_commands.json. Without --apply it only reports.
+
+The rewrite follows what the DOL shows mwcc doing:
+  a*b + c, c + a*b    fmadds(a, b, c)
+  a*b + c*d           fmadds(a, b, c*d)    the first product fused
+  a*b - c             fmsubs(a, b, c)      (a*b - c*d likewise)
+  c - a*b             fnmsubs(a, b, c)
+  -(a*b + c)          fnmadds(a, b, c)
+  x += a*b            x = fmadds(a, b, x)
+  x -= a*b            x = fnmsubs(a, b, x)
+in float (the s forms) or double, never across a change of precision.
+"""
+import argparse
+import collections
+import json
+import os
+import re
+import shlex
+import struct
+import sys
+
+import clang.cindex as ci
+
+# LIBCLANG=<path to libclang.so>: a system libclang instead of the
+# package's own (its builtin headers then come with it).
+if os.environ.get("LIBCLANG"):
+    ci.Config.set_library_file(os.environ["LIBCLANG"])
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+# ---- the DOL ---------------------------------------------------------------
+
+FUSED = {28: "msub", 29: "madd", 30: "nmsub", 31: "nmadd"}  # A-form xo
+
+
+def dol_reader(iso):
+    f = open(iso, "rb")
+    f.seek(0x420)
+    dol = struct.unpack(">I", f.read(4))[0]
+    f.seek(dol)
+    h = f.read(0x100)
+    offs = struct.unpack(">18I", h[0:0x48])
+    addrs = struct.unpack(">18I", h[0x48:0x90])
+    sizes = struct.unpack(">18I", h[0x90:0xD8])
+
+    def read(a, n):
+        for o, s, z in zip(offs, addrs, sizes):
+            if s <= a < s + z:
+                f.seek(dol + o + a - s)
+                return f.read(n)
+        return b""
+    return read
+
+
+def census(iso, symbols):
+    """name -> Counter of 'single'/'double' fused instructions."""
+    read = dol_reader(iso)
+    out = {}
+    for line in open(symbols):
+        m = re.match(r"(\S+) = \.text:0x([0-9A-F]+); // type:function size:0x([0-9A-F]+)", line)
+        if not m:
+            continue
+        name, addr, size = m.group(1), int(m.group(2), 16), int(m.group(3), 16)
+        code = read(addr, size)
+        c = collections.Counter()
+        for i in range(0, len(code) - 3, 4):
+            w = struct.unpack(">I", code[i:i + 4])[0]
+            op, xo = w >> 26, (w >> 1) & 31
+            if op == 59 and xo in FUSED:
+                c["single"] += 1
+            elif op == 63 and xo in FUSED:
+                c["double"] += 1
+        out.setdefault(name, collections.Counter()).update(c)
+    return out
+
+
+# ---- the C -------------------------------------------------------------------
+
+def compile_args(db, path):
+    for e in db:
+        if os.path.realpath(os.path.join(e["directory"], e["file"])) == os.path.realpath(path):
+            args = e.get("arguments") or shlex.split(e["command"])
+            out, skip = [], False
+            for a in args[1:]:
+                if skip:
+                    skip = False
+                    continue
+                if a in ("-o", "-c", "-MF", "-MT", "-MQ"):
+                    skip = a != "-c"
+                    continue
+                if a == path or a.endswith(os.path.basename(path)) or a.startswith("-M"):
+                    continue
+                if a.startswith(("-fexec-charset", "-finput-charset")):
+                    continue  # GCC's; clang has only UTF-8, and it changes no expression
+                out.append(a)
+            return out, e["directory"]
+    return None, None
+
+
+def strip(c):
+    """Through parentheses and casts that keep the type."""
+    while True:
+        kids = list(c.get_children())
+        if c.kind == ci.CursorKind.PAREN_EXPR and len(kids) == 1:
+            c = kids[0]
+        elif c.kind == ci.CursorKind.UNEXPOSED_EXPR and len(kids) == 1 and \
+                kids[0].type.get_canonical().spelling == c.type.get_canonical().spelling:
+            c = kids[0]
+        else:
+            return c
+
+
+def fp(c):
+    s = c.type.get_canonical().spelling
+    return "single" if s == "float" else "double" if s == "double" else None
+
+
+def op_of(c, src):
+    """A binary or compound operator's spelling: the text between its operands."""
+    kids = list(c.get_children())
+    if len(kids) != 2:
+        return None
+    a, b = kids
+    if a.extent.end.offset > b.extent.start.offset:
+        return None
+    return src[a.extent.end.offset:b.extent.start.offset].strip() or None
+
+
+class Site:
+    def __init__(self, node, kind, prec, a, c, b, assign=None):
+        self.node, self.kind, self.prec, self.a, self.c, self.b, self.assign = node, kind, prec, a, c, b, assign
+
+
+def is_mul(n, src, prec):
+    n = strip(n)
+    return n.kind == ci.CursorKind.BINARY_OPERATOR and op_of(n, src) == "*" and fp(n) == prec
+
+
+def find_sites(fn, src, path):
+    sites = []
+
+    def in_file(n):
+        return n.extent.start.file is not None and n.extent.start.file.name == path
+
+    def visit(n, parent):
+        if not in_file(n):
+            return
+        prec = fp(n)
+        k = n.kind
+        if prec and k == ci.CursorKind.BINARY_OPERATOR and op_of(n, src) in ("+", "-"):
+            l, r = list(n.get_children())
+            op = op_of(n, src)
+            # -(a*b + c): the negation is fused too
+            neg = parent is not None and parent.kind == ci.CursorKind.UNARY_OPERATOR and \
+                src[parent.extent.start.offset:n.extent.start.offset].strip().rstrip("(").strip() == "-"
+            if is_mul(l, src, prec):
+                m = list(strip(l).get_children())
+                kind = ("nmadd" if neg else "madd") if op == "+" else "msub"
+                sites.append(Site(parent if neg and op == "+" else n, kind, prec, m[0], m[1], r))
+            elif is_mul(r, src, prec):
+                m = list(strip(r).get_children())
+                sites.append(Site(n, "madd" if op == "+" else "nmsub", prec, m[0], m[1], l))
+        elif k == ci.CursorKind.CALL_EXPR and re.match(r"(gk|ppc)_fn?m(add|sub)s?$", n.spelling or ""):
+            # already written fused (by hand, or an earlier run): counted, kept
+            sites.append(Site(n, None, "single" if n.spelling.endswith("s") else "double", None, None, None))
+            return
+        elif prec and k == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR and op_of(n, src) in ("+=", "-="):
+            l, r = list(n.get_children())
+            lhs = src[l.extent.start.offset:l.extent.end.offset]
+            if is_mul(r, src, prec):
+                m = list(strip(r).get_children())
+                # x = f(..., x) evaluates x twice: only a plain lvalue
+                safe = "(" not in lhs and "++" not in lhs and "--" not in lhs
+                sites.append(Site(n, "madd" if op_of(n, src) == "+=" else "nmsub", prec, m[0], m[1], l,
+                                  assign=l if safe else False))
+        for ch in n.get_children():
+            visit(ch, n)
+
+    visit(fn, None)
+    return sites
+
+
+HELPER = {("single", k): "gk_f" + k + "s" for k in FUSED.values()}
+HELPER.update({("double", k): "gk_f" + k for k in FUSED.values()})
+
+
+def render(node, src, by_node):
+    """The node's source with every site inside it rewritten."""
+    s = by_node.get(node.hash)
+    if s is not None and s.kind is not None:
+        t = lambda c: render(c, src, by_node)
+        call = f"{HELPER[(s.prec, s.kind)]}({t(s.a)}, {t(s.c)}, {t(s.b)})"
+        return f"{t(s.assign)} = {call}" if s.assign is not None else call
+    start, end = node.extent.start.offset, node.extent.end.offset
+    out, pos = [], start
+    for ch in node.get_children():
+        cs, ce = ch.extent.start.offset, ch.extent.end.offset
+        if cs < pos or ce > end:
+            continue
+        out.append(src[pos:cs])
+        out.append(render(ch, src, by_node))
+        pos = ce
+    out.append(src[pos:end])
+    return "".join(out)
+
+
+def site_edits(sites, src):
+    """The edits rewriting each outermost site (inner ones are rendered inside it)."""
+    by_node = {s.node.hash: s for s in sites}
+    inner = set()
+    for s in sites:
+        for o in sites:
+            if o is not s and s.node.extent.start.offset <= o.node.extent.start.offset and \
+                    o.node.extent.end.offset <= s.node.extent.end.offset:
+                inner.add(o.node.hash)
+    return [((s.node.extent.start.offset, s.node.extent.end.offset), render(s.node, src, by_node))
+            for s in sites if s.kind is not None and s.node.hash not in inner]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("files", nargs="+")
+    ap.add_argument("--iso", required=True)
+    ap.add_argument("--symbols", required=True)
+    ap.add_argument("--db", default=os.path.join(ROOT, "build", "linux", "compile_commands.json"))
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--quiet", action="store_true", help="only the totals and the mismatches")
+    args = ap.parse_args()
+    dol = census(args.iso, args.symbols)
+    db = json.load(open(args.db))
+    totals = collections.Counter()
+    texts = {}
+    pending = collections.defaultdict(dict)  # file -> {(start, end): text}
+
+    def text(f):
+        if f not in texts:
+            texts[f] = open(f).read()
+        return texts[f]
+
+    for path in [os.path.realpath(p) for p in args.files]:
+        cargs, cwd = compile_args(db, path)
+        if cargs is None:
+            totals["files not built"] += 1
+            continue
+        os.chdir(cwd)
+        tu = ci.Index.create().parse(path, args=cargs)
+        errs = [d for d in tu.diagnostics if d.severity >= ci.Diagnostic.Error]
+        if errs:
+            print(f"{path}: {len(errs)} parse errors, first: {errs[0]}")
+            continue
+        # Every function this file sees defined. One the DOL has no symbol
+        # for (a static inline in a header, a static helper) mwcc inlined:
+        # its fused ops are in each caller's count, once per call.
+        defs = {}
+        for fn in tu.cursor.get_children():
+            if fn.kind == ci.CursorKind.FUNCTION_DECL and fn.is_definition() and fn.extent.start.file is not None:
+                defs[fn.get_usr()] = fn
+        own = {}
+
+        def own_sites(usr):
+            if usr not in own:
+                fn = defs[usr]
+                f = os.path.realpath(fn.extent.start.file.name)
+                own[usr] = (f, find_sites(fn, text(f), fn.extent.start.file.name))
+            return own[usr][1]
+
+        def inlined_calls(usr):
+            out = []
+
+            def walk(n):
+                if n.kind == ci.CursorKind.CALL_EXPR and n.referenced is not None:
+                    r = n.referenced.get_usr()
+                    if r in defs and r != usr and defs[r].spelling not in dol and \
+                            not re.match(r"(gk|ppc)_fn?m(add|sub)s?$", defs[r].spelling):
+                        out.append(r)
+                for ch in n.get_children():
+                    walk(ch)
+            walk(defs[usr])
+            return out
+
+        def total(usr, stack=()):
+            c = collections.Counter(s.prec for s in own_sites(usr))
+            used = [usr]
+            if usr in stack:
+                return c, used
+            for r in inlined_calls(usr):
+                cc, uu = total(r, stack + (usr,))
+                c.update(cc)
+                used += uu
+            return c, used
+
+        for usr, fn in defs.items():
+            if os.path.realpath(fn.extent.start.file.name) != path:
+                continue
+            want = dol.get(fn.spelling)
+            if want is None:
+                totals["not in DOL"] += 1
+                continue
+            have, used = total(usr)
+            if not want and not have:
+                continue
+            ok = have["single"] == want["single"] and have["double"] == want["double"] and \
+                all(s.assign is not False for u in used for s in own_sites(u))
+            totals["match" if ok else "mismatch"] += 1
+            if not args.quiet or not ok:
+                print(f"  {fn.spelling}: DOL {want['single']}+{want['double']}d, C {have['single']}+{have['double']}d"
+                      f"{' (with ' + str(len(set(used)) - 1) + ' inlined)' if len(set(used)) > 1 else ''}"
+                      f" {'ok' if ok else 'MISMATCH'}")
+            if ok:
+                for u in set(used):
+                    f = own[u][0]
+                    for span, txt in site_edits(own_sites(u), text(f)):
+                        if span not in pending[f]:
+                            pending[f][span] = txt
+                            totals["sites"] += 1
+    if args.apply:
+        for f, edits in pending.items():
+            if not edits:
+                continue
+            src = text(f)
+            for (a, b), txt in sorted(edits.items(), reverse=True):
+                src = src[:a] + txt + src[b:]
+            if "gekko_fp.h" not in src:
+                m = re.search(r"^#include .*$", src, re.M)
+                src = src[:m.start()] + "#include <pc/gekko_fp.h>\n" + src[m.start():]
+            open(f, "w").write(src)
+            print(f"{f}: {len(edits)} rewrites")
+    print(dict(totals))
+
+
+if __name__ == "__main__":
+    main()

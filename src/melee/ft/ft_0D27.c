@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ft_0D27.h"
 
 #include <Runtime/platform.h>
@@ -144,7 +145,7 @@ bool fn_800D2A3C(HSD_GObj* gobj)
         f32 scale = HSD_JObjGetScaleX(fp->x2184);
         f32 mid = fp->mv.co.walk.middle_anim_frame;
         f32 fast = fp->mv.co.walk.fast_anim_frame;
-        ftLib_SetScale(gobj, (fast - mid) * scale + mid);
+        ftLib_SetScale(gobj, gk_fmadds((fast - mid), scale, mid));
     }
     if (HSD_AObjGetFlags(fp->x2184->aobj) & 0x40000000) {
         return false;

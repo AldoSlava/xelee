@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itflipper.h"
 
 #include <math.h>
@@ -481,7 +482,7 @@ static inline void bounce(Item_GObj* gobj, Item* ip)
         itColl_BounceOffVictim(gobj);
     } else {
         ip->x40_vel.x = -1.0f * ip->x40_vel.x;
-        ip->x40_vel.y = -1.0f * ip->x40_vel.y + it_804D6D28->x60_float;
+        ip->x40_vel.y = gk_fmadds(-1.0f, ip->x40_vel.y, it_804D6D28->x60_float);
     }
 }
 
@@ -546,7 +547,7 @@ bool itFlipper_HitShield(Item_GObj* gobj)
             itColl_BounceOffVictim(gobj);
         } else {
             ip->x40_vel.x = -1.0f * ip->x40_vel.x;
-            ip->x40_vel.y = -1.0f * ip->x40_vel.y + it_804D6D28->x60_float;
+            ip->x40_vel.y = gk_fmadds(-1.0f, ip->x40_vel.y, it_804D6D28->x60_float);
         }
     } else {
         ip->xDD4_itemVar.flipper.xDDC_hitboxTimer = attrs->x14_hitboxInterval;

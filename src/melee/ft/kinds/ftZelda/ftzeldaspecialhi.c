@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftzeldaspecialhi.h"
 
 #include <Runtime/platform.h>
@@ -393,9 +394,9 @@ void ftZd_SpecialHi_8013A058(HSD_GObj* gobj)
         f64 guess = __frsqrte(var_f4);
         _half = .5F;
         _three = 3.0F;
-        guess = _half * guess * (_three - guess * guess * var_f4);
-        guess = _half * guess * (_three - guess * guess * var_f4);
-        guess = _half * guess * (_three - guess * guess * var_f4);
+        guess = _half * guess * (gk_fnmsub(guess * guess, var_f4, _three));
+        guess = _half * guess * (gk_fnmsub(guess * guess, var_f4, _three));
+        guess = _half * guess * (gk_fnmsub(guess * guess, var_f4, _three));
         y = (float) (var_f4 * guess);
         temp_f5 = y;
     }
@@ -425,7 +426,7 @@ void ftZd_SpecialHi_8013A058(HSD_GObj* gobj)
                 fp->mv.zd.specialhi.x4.y = inputVector.y;
 
                 // Update ground velocity
-                temp_f6 = ((attributes->x54 * var_f31) + attributes->x58) *
+                temp_f6 = (gk_fmadds(attributes->x54, var_f31, attributes->x58)) *
                           cosf(temp_f5);
                 fp->gr_vel = fp->facing_dir * temp_f6;
 
@@ -484,9 +485,9 @@ void ftZd_SpecialHi_8013A244(HSD_GObj* gobj)
         guess = __frsqrte(var_f4);
         _half = .5F;
         _three = 3.0F;
-        guess = _half * guess * (_three - guess * guess * var_f4);
-        guess = _half * guess * (_three - guess * guess * var_f4);
-        guess = _half * guess * (_three - guess * guess * var_f4);
+        guess = _half * guess * (gk_fnmsub(guess * guess, var_f4, _three));
+        guess = _half * guess * (gk_fnmsub(guess * guess, var_f4, _three));
+        guess = _half * guess * (gk_fnmsub(guess * guess, var_f4, _three));
         y = (var_f4 * guess);
         var_f5 = y;
     }
@@ -518,9 +519,9 @@ void ftZd_SpecialHi_8013A244(HSD_GObj* gobj)
 
     fp->self_vel.x =
         fp->facing_dir *
-        (((attributes->x54 * var_f31) + attributes->x58) * cosf(var_f30));
+        ((gk_fmadds(attributes->x54, var_f31, attributes->x58)) * cosf(var_f30));
     fp->self_vel.y =
-        ((attributes->x54 * var_f31) + attributes->x58) * sinf(var_f30);
+        (gk_fmadds(attributes->x54, var_f31, attributes->x58)) * sinf(var_f30);
 
     Fighter_ChangeMotionState(gobj, 353, Ft_MF_None, 35.0, 1.0, 0, NULL);
     ftAnim_8006EBA4(gobj);

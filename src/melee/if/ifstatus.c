@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ifstatus.h"
 
 #include "if_2F72.h"
@@ -94,7 +95,7 @@ void ifStatus_PercentOnDeathAnimationThink(IfDamageState* value, s32 arg1,
     if (value->flags.randomize_velocity) {
         for (i = 0; i < 4; i++) {
             value->velocity_x[i] = foo(0.6083f * HSD_Randf(), 0.3041f);
-            value->velocity_y[i] = 0.811f * HSD_Randf() + 1.2165f;
+            value->velocity_y[i] = gk_fmadds(0.811f, HSD_Randf(), 1.2165f);
         }
         value->flags.randomize_velocity = 0;
         return;
@@ -272,15 +273,12 @@ static inline void ifStatus_UpdateDamageDisplay(IfDamageState* state,
             factor = 1.0F - ((f32) clamped_damage / 100.0F);
             /* The interpolated value spans 80..255; `(s8)` of a float above
              * 127 is undefined, and the destination is u8 anyway. */
-            stamina_color->r = (u8) (factor * (f32) (ifStatus_804D57AC[0] -
-                                                     ifStatus_804D57A8[0]) +
-                                     (f32) ifStatus_804D57A8[0]);
-            stamina_color->g = (u8) (factor * (f32) (ifStatus_804D57AC[1] -
-                                                     ifStatus_804D57A8[1]) +
-                                     (f32) ifStatus_804D57A8[1]);
-            stamina_color->b = (u8) (factor * (f32) (ifStatus_804D57AC[2] -
-                                                     ifStatus_804D57A8[2]) +
-                                     (f32) ifStatus_804D57A8[2]);
+            stamina_color->r = (u8) (gk_fmadds(factor, (f32) (ifStatus_804D57AC[0] -
+                                                     ifStatus_804D57A8[0]), (f32) ifStatus_804D57A8[0]));
+            stamina_color->g = (u8) (gk_fmadds(factor, (f32) (ifStatus_804D57AC[1] -
+                                                     ifStatus_804D57A8[1]), (f32) ifStatus_804D57A8[1]));
+            stamina_color->b = (u8) (gk_fmadds(factor, (f32) (ifStatus_804D57AC[2] -
+                                                     ifStatus_804D57A8[2]), (f32) ifStatus_804D57A8[2]));
             stamina_color->a = 255;
             *color = *stamina_color;
         } else {
@@ -291,15 +289,12 @@ static inline void ifStatus_UpdateDamageDisplay(IfDamageState* state,
                 clamped_damage = 0;
             }
             factor = (f32) clamped_damage / 300.0F;
-            normal_color->r = (u8) (factor * (f32) (ifStatus_804D57AC[0] -
-                                                    ifStatus_804D57A8[0]) +
-                                    (f32) ifStatus_804D57A8[0]);
-            normal_color->g = (u8) (factor * (f32) (ifStatus_804D57AC[1] -
-                                                    ifStatus_804D57A8[1]) +
-                                    (f32) ifStatus_804D57A8[1]);
-            normal_color->b = (u8) (factor * (f32) (ifStatus_804D57AC[2] -
-                                                    ifStatus_804D57A8[2]) +
-                                    (f32) ifStatus_804D57A8[2]);
+            normal_color->r = (u8) (gk_fmadds(factor, (f32) (ifStatus_804D57AC[0] -
+                                                    ifStatus_804D57A8[0]), (f32) ifStatus_804D57A8[0]));
+            normal_color->g = (u8) (gk_fmadds(factor, (f32) (ifStatus_804D57AC[1] -
+                                                    ifStatus_804D57A8[1]), (f32) ifStatus_804D57A8[1]));
+            normal_color->b = (u8) (gk_fmadds(factor, (f32) (ifStatus_804D57AC[2] -
+                                                    ifStatus_804D57A8[2]), (f32) ifStatus_804D57A8[2]));
             normal_color->a = 255;
             *color = *normal_color;
         }

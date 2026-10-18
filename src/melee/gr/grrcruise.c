@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grrcruise.h"
 
 #include <Runtime/platform.h>
@@ -423,8 +424,8 @@ static inline void grRCruise_801FFADC_inline(HSD_GObj* gobj, Vec3* sp64)
     lb_8000B1CC(cam_jobj, NULL, &sp18);
     lb_8000B1CC(int_jobj, NULL, &sp24);
     lbVector_Diff(&sp24, &sp18, &diff);
-    sp64->x = -(diff.x * (sp18.z / diff.z) - sp18.x);
-    sp64->y = -(diff.y * (sp18.z / diff.z) - sp18.y);
+    sp64->x = -(gk_fmsubs(diff.x, (sp18.z / diff.z), sp18.x));
+    sp64->y = -(gk_fmsubs(diff.y, (sp18.z / diff.z), sp18.y));
     sp64->z = 0.0f;
     lbVector_Sub(sp64, &cam_offset2);
     sp64->y += 10.0f;
@@ -690,7 +691,7 @@ void grRCruise_8020071C(Ground_GObj* gobj)
     HSD_JObj* jobj = Ground_801C3FA4(gobj, 8);
     HSD_JObj* jobj5 = Ground_801C3FA4(Ground_GetMapGObj(5), 8);
     f32 abs_rot = ABS(gp->u.rcruise.x18);
-    f32 wrapped = abs_rot - (360.0f * (s32) (abs_rot / 360.0f));
+    f32 wrapped = gk_fnmsubs(360.0f, (s32) (abs_rot / 360.0f), abs_rot);
 
     switch (gp->u.rcruise.x2C) {
     case 0:
@@ -731,7 +732,7 @@ void grRCruise_8020071C(Ground_GObj* gobj)
             }
         } else {
             gp->u.rcruise.x38--;
-            gp->u.rcruise.x20 += 0.008f * -gp->u.rcruise.x1C;
+            gp->u.rcruise.x20 = gk_fmadds(0.008f, -gp->u.rcruise.x1C, gp->u.rcruise.x20);
             if ((gp->u.rcruise.x20 < 0.0f ? -gp->u.rcruise.x20
                                           : gp->u.rcruise.x20) <= 0.008f)
             {
@@ -930,9 +931,9 @@ void grRCruise_80201110(Ground_GObj* gobj)
         }
     }
     if (gp->u.rcruise.xC != 0) {
-        gp->u.rcruise.x4->unk_scale = 0.3 * HSD_Randf() + 0.2;
+        gp->u.rcruise.x4->unk_scale = gk_fmadd(0.3, HSD_Randf(), 0.2);
     } else {
-        gp->u.rcruise.x4->unk_scale = 0.2 * HSD_Randf() + 0.1;
+        gp->u.rcruise.x4->unk_scale = gk_fmadd(0.2, HSD_Randf(), 0.1);
     }
 }
 

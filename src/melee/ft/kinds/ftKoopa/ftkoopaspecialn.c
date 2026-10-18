@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftkoopaspecialn.h"
 
 #include <melee/ft/forward.h>
@@ -63,8 +64,8 @@ void ftKp_SpecialLw_80134ACC(Fighter_GObj* gobj)
     enum_t* dirs = ftKp_Init_803CF2A0;
     PAD_STACK(12);
     lb_8000B1CC(fp->parts[48].joint, NULL, &v);
-    v.x += fp->x34_scale.y * (da->x24 * fp->facing_dir);
-    v.y += da->x28 * fp->x34_scale.y;
+    v.x = gk_fmadds(fp->x34_scale.y, (da->x24 * fp->facing_dir), v.x);
+    v.y = gk_fmadds(da->x28, fp->x34_scale.y, v.y);
     itKoopaFlame_Spawn(gobj, &v, fp->facing_dir, fp->mv.kp.specialn.x4,
                        ftKp_SpecialN_80134ACC_inline(gobj, dirs),
                        fp->u.kp.x222C, fp->u.kp.x2230, It_Kind_Koopa_Flame);

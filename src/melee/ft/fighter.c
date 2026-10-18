@@ -251,7 +251,7 @@ void Fighter_UnkInitReset_80067C98(Fighter* fp)
     Player_LoadPlayerCoords(fp->player_idx, &player_coords);
     fp->facing_dir = Player_GetFacingDirection(fp->player_idx);
 
-    player_coords.x = fp->facing_dir * ftCommon_800804EC(fp) + player_coords.x;
+    player_coords.x = gk_fmadds(fp->facing_dir, ftCommon_800804EC(fp), player_coords.x);
     x = player_coords.x;
     fp->cur_pos.x = x;
     fp->prev_pos.x = x;
@@ -2884,12 +2884,8 @@ void Fighter_procCollResolve(Fighter_GObj* gobj)
 
         if (fp->x221A_b7) {
             fp->shield_health -=
-                (p_ftCommonData->x284 *
-                 ((fp->x19A0_shieldDamageTaken) *
-                  (1.0f - ((fp->lightshield_amount *
-                            (p_ftCommonData->x2E0 - p_ftCommonData->x2DC)) +
-                           p_ftCommonData->x2DC)))) +
-                p_ftCommonData->x288;
+                gk_fmadds(p_ftCommonData->x284, ((fp->x19A0_shieldDamageTaken) *
+                  (1.0f - (gk_fmadds(fp->lightshield_amount, (p_ftCommonData->x2E0 - p_ftCommonData->x2DC), p_ftCommonData->x2DC)))), p_ftCommonData->x288);
             if (fp->shield_health < 0.0f) {
                 bool3 = 1;
                 fp->shield_health = p_ftCommonData->x280_unkShieldHealth;
@@ -3066,7 +3062,7 @@ void Fighter_procCollResolve(Fighter_GObj* gobj)
 
         if (fp->dmg.x1928) {
             float eval =
-                (fp->dmg.x1928 * p_ftCommonData->x3E0) + p_ftCommonData->x3E4;
+                gk_fmadds(fp->dmg.x1928, p_ftCommonData->x3E0, p_ftCommonData->x3E4);
             fp->xF4_ground_attacker_shield_kb_vel =
                 (fp->dmg.x192c < 0.0f) ? eval : -eval;
             ftCommon_8007E2A4(gobj);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "gronett.h"
 
 #include <Runtime/platform.h>
@@ -347,7 +348,7 @@ void grOnett_801E3DA0(Ground_GObj* gobj)
             f32 rand = HSD_Randf();
             f32 lo = yakumono_param->x3C;
             f32 range = yakumono_param->x40 - lo;
-            gp->u.onett_building.timer = (s32) (range * rand + lo);
+            gp->u.onett_building.timer = (s32) (gk_fmadds(range, rand, lo));
             gp->u.onett_building.next_state = 6;
         }
         if (gp->u.onett_building.frame == 0x14) {
@@ -518,7 +519,7 @@ static inline void grOnett_WaitCar(Ground* gp, s8 saved_car)
         {
             f32 rand = HSD_Randf();
             gp->u.onettcar.car_speed =
-                yakumono_param->x58 * rand + yakumono_param->x54;
+                gk_fmadds(yakumono_param->x58, rand, yakumono_param->x54);
         }
         if (gp->u.onettcar.car_speed > 0.0f) {
             gp->u.onettcar.car_speed *= -1.0f;
@@ -700,8 +701,7 @@ void grOnett_801E43E0(Ground_GObj* gobj)
                 }
                 gp->u.onettcar.timer_b = yakumono_param->x48;
                 gp->u.onettcar.speed_b =
-                    yakumono_param->x58 * HSD_RandF_noinline() +
-                    yakumono_param->x54;
+                    gk_fmadds(yakumono_param->x58, HSD_RandF_noinline(), yakumono_param->x54);
                 gp->u.onettcar.state_b = 2;
                 return;
             }
@@ -819,9 +819,9 @@ void grOnett_801E5214(Ground_GObj* gobj)
         abs_ratio /= yakumono_param->max_displacement;
 
         if (error < 0.0) {
-            force = -(yakumono_param->spring_force * abs_ratio - force);
+            force = -(gk_fmsubs(yakumono_param->spring_force, abs_ratio, force));
         } else {
-            force = yakumono_param->spring_force * abs_ratio + force;
+            force = gk_fmadds(yakumono_param->spring_force, abs_ratio, force);
         }
 
         force -= spring;

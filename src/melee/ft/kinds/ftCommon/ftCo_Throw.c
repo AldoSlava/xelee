@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Throw.h"
 
 #include <Runtime/platform.h>
@@ -559,8 +560,8 @@ void ftCo_800DDDE4(Fighter_GObj* gobj, Fighter_GObj* gobj2, bool arg)
         fp4->x2226_b2 = 0;
         HSD_JObjSetTranslate(jobj2, &fp4->x2174);
         if (arg) {
-            vec.x += fp4->facing_dir * (fp4->x1A70.z * fp4->x34_scale.y);
-            vec.y += fp4->x1A70.y * fp4->x34_scale.y;
+            vec.x = gk_fmadds(fp4->facing_dir, (fp4->x1A70.z * fp4->x34_scale.y), vec.x);
+            vec.y = gk_fmadds(fp4->x1A70.y, fp4->x34_scale.y, vec.y);
             vec.z = 0.0f;
         }
         cd = &fp4->coll_data;

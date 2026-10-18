@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "grgreens.h"
 
 #include <Runtime/platform.h>
@@ -690,7 +691,7 @@ void grGreens_80213C10(Ground_GObj* gobj)
                 apple_pos.x = sign * (40.0f * rand);
                 rand = HSD_Randf();
                 diff = yakumono_param->x70 - yakumono_param->x6C;
-                apple_pos.y = (diff * rand) + yakumono_param->x6C;
+                apple_pos.y = gk_fmadds(diff, rand, yakumono_param->x6C);
                 apple_pos.z = -40.0f;
                 lbAudioAx_800237A8(0x68FB3, 0x7F, 0x40);
                 it_802EE200(gobj, &apple_pos, yakumono_param->x74,
@@ -1110,14 +1111,14 @@ void grGreens_802159B8(Ground* gp, int i, int j, HSD_GObj* gobj)
             it_80275414(item_gobj);
             gp->u.greens.x8_blocks[j][i].x1_2 = 1;
             HSD_JObjGetTranslation(item_gobj->hsd_obj, &vec);
-            vec.y += 5.0f * Ground_801C0498();
+            vec.y = gk_fmadds(5.0f, Ground_801C0498(), vec.y);
             efSync_Spawn(1039, item_gobj, &vec);
         } else {
             f = 0.0f;
             gp->u.greens.x8_blocks[j][i].x1_3 = 1;
             Camera_RequestQuake(QuakeKind_Small, NULL);
             HSD_JObjGetTranslation(item_gobj->hsd_obj, &vec);
-            vec.y += 5.0f * Ground_801C0498();
+            vec.y = gk_fmadds(5.0f, Ground_801C0498(), vec.y);
             efSync_Spawn(1032, item_gobj, &vec, &f);
             Ground_801C5414(430007, 186);
         }

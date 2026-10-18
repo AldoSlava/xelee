@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <Runtime/platform.h>
 
 #include "fighter.h"
@@ -78,8 +79,8 @@ static inline void comboCount_Push(Fighter* fp)
         var_f2 = p_ftCommonData->x4D4;
     }
     temp_f2 = fp->facing_dir * var_f2;
-    fp->cur_pos.x = -(pos->y * temp_f2 - fp->cur_pos.x);
-    fp->cur_pos.y = -(-pos->x * temp_f2 - fp->cur_pos.y);
+    fp->cur_pos.x = -(gk_fmsubs(pos->y, temp_f2, fp->cur_pos.x));
+    fp->cur_pos.y = -(gk_fmsubs(-pos->x, temp_f2, fp->cur_pos.y));
 }
 
 /// Combo count something + adjust FtPart_TopN

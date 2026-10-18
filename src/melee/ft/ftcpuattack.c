@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftcpuattack.h"
 
 #include <math.h>
@@ -2108,7 +2109,7 @@ void ftCo_800B9704(Fighter* fp)
 {
     struct CpuFighter* cpu = &fp->cpu;
     float rand = HSD_Randf();
-    cpu->x34 = (10 - cpu->level) * (rand * 15.0F + 15.0F) + 10.0F;
+    cpu->x34 = gk_fmadds((10 - cpu->level), (gk_fmadds(rand, 15.0F, 15.0F)), 10.0F);
     if (cpu->kind == 7) {
         cpu->x34 /= 2;
     }
@@ -2658,9 +2659,9 @@ bool ftCo_800BB104(Fighter* fp, Fighter* arg1, Vec3* arg2, f32 arg3)
             float dx = temp_r29->x4C.x - temp_r29->x58.x;
             float dy = temp_r29->x4C.y - temp_r29->x58.y;
             float dz = temp_r29->x4C.z - temp_r29->x58.z;
-            sp28.x = 3.0f * dx + temp_r29->x4C.x;
-            sp28.y = 3.0f * dy + temp_r29->x4C.y;
-            sp28.z = 3.0f * dz + temp_r29->x4C.z;
+            sp28.x = gk_fmadds(3.0f, dx, temp_r29->x4C.x);
+            sp28.y = gk_fmadds(3.0f, dy, temp_r29->x4C.y);
+            sp28.z = gk_fmadds(3.0f, dz, temp_r29->x4C.z);
             if (lbColl_80006094(&temp_r29->x4C, &sp28, arg2, arg2, &sp40,
                                 &sp34, temp_r29->scale, arg3) != 0)
             {
@@ -2678,9 +2679,9 @@ static inline void ftCo_CpuPredictHitboxPosition(HitCapsule* hit, int frames,
     f32 dy = hit->x4C.y - hit->x58.y;
     f32 dz = hit->x4C.z - hit->x58.z;
 
-    predicted->x = dx * frames + hit->x4C.x;
-    predicted->y = dy * frames + hit->x4C.y;
-    predicted->z = dz * frames + hit->x4C.z;
+    predicted->x = gk_fmadds(dx, frames, hit->x4C.x);
+    predicted->y = gk_fmadds(dy, frames, hit->x4C.y);
+    predicted->z = gk_fmadds(dz, frames, hit->x4C.z);
 }
 
 int ftCo_800BB220(Fighter* fp, Item* ip, Vec3* arg2, f32 arg3)
@@ -2729,9 +2730,9 @@ int ftCo_800BB220(Fighter* fp, Item* ip, Vec3* arg2, f32 arg3)
         }
     }
 
-    dst.x = fp->pos_delta.x * count + arg2->x;
-    dst.y = fp->pos_delta.y * count + arg2->y;
-    dst.z = fp->pos_delta.z * count + arg2->z;
+    dst.x = gk_fmadds(fp->pos_delta.x, count, arg2->x);
+    dst.y = gk_fmadds(fp->pos_delta.y, count, arg2->y);
+    dst.z = gk_fmadds(fp->pos_delta.z, count, arg2->z);
 
     if (fp->kind == Ft_Kind_Ness && temp_r31->level > 3) {
         if (count < 21) {

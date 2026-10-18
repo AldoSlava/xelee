@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_AirCatch.h"
 
 #include <Runtime/platform.h>
@@ -157,11 +158,9 @@ void ftCo_AirCatch_Anim(Fighter_GObj* gobj)
                         float var_f3;
 
                         if (fp->kind == Ft_Kind_Link) {
-                            var_f3 = 8.0 * fp->facing_dir * fp->x34_scale.y +
-                                     jobj->mtx[0][3];
+                            var_f3 = gk_fmadd(8.0 * fp->facing_dir, fp->x34_scale.y, jobj->mtx[0][3]);
                         } else {
-                            var_f3 = 8.0 * fp->facing_dir * fp->x34_scale.y +
-                                     jobj->mtx[0][3];
+                            var_f3 = gk_fmadd(8.0 * fp->facing_dir, fp->x34_scale.y, jobj->mtx[0][3]);
                         }
                         if (mpCheckAllRemap(
                                 0, 0, 0, 0, -1, -1, fp->coll_data.cur_pos.x,
@@ -225,8 +224,7 @@ void ftCo_AirCatch_Anim(Fighter_GObj* gobj)
                             if (mpCheckAllRemap(
                                     0, 0, 0, 0, -1, -1,
                                     fp->coll_data.cur_pos.x, jobj->mtx[1][3],
-                                    (2.0 * fp->facing_dir * fp->x34_scale.y) +
-                                        jobj->mtx[0][3],
+                                    gk_fmadd(2.0 * fp->facing_dir, fp->x34_scale.y, jobj->mtx[0][3]),
                                     jobj->mtx[1][3]))
                             {
                                 it_802B7B84(fp->u.ss.x223C);

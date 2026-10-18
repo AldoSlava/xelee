@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_09F7.h"
 
 #include <math.h>
@@ -101,12 +102,12 @@ block_9:
 block_11:
     spA8 = *arg5;
     rand_val = HSD_Randf();
-    spA8.x += 2.0f * arg6->x * (rand_val - 0.5f);
+    spA8.x = gk_fmadds(2.0f * arg6->x, (rand_val - 0.5f), spA8.x);
     rand_val = HSD_Randf();
-    spA8.y += 2.0f * arg6->y * (rand_val - 0.5f);
+    spA8.y = gk_fmadds(2.0f * arg6->y, (rand_val - 0.5f), spA8.y);
     rand_val = HSD_Randf();
     z_spread = 2.0f * arg6->z;
-    spA8.z += z_spread * (rand_val - 0.5f);
+    spA8.z = gk_fmadds(z_spread, (rand_val - 0.5f), spA8.z);
     efAsync_Spawn(gobj, &GET_FIGHTER(gobj)->x60C, 2, gfx_id,
                   fp->parts[part].joint, &spA8);
     return;
@@ -198,12 +199,12 @@ block_67:
 block_70:
     sp84 = *arg5;
     random_or_angle = HSD_Randf();
-    sp84.x += 2.0f * arg6->x * (random_or_angle - 0.5f);
+    sp84.x = gk_fmadds(2.0f * arg6->x, (random_or_angle - 0.5f), sp84.x);
     random_or_angle = HSD_Randf();
-    sp84.y += 2.0f * arg6->y * (random_or_angle - 0.5f);
+    sp84.y = gk_fmadds(2.0f * arg6->y, (random_or_angle - 0.5f), sp84.y);
     random_or_angle = HSD_Randf();
     z_range = 2.0f * arg6->z;
-    sp84.z += z_range * (random_or_angle - 0.5f);
+    sp84.z = gk_fmadds(z_range, (random_or_angle - 0.5f), sp84.z);
     switch (gfx_id) {
     case 0x3E8: {
         HSD_JObj* joint = fp->parts[part].joint;

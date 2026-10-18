@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <melee/ft/forward.h>
 #include <sysdolphin/baselib/forward.h>
 
@@ -224,7 +225,7 @@ void ftKb_SpecialN_800F5B5C(Fighter_GObj* gobj, Vec3* output)
     Fighter* fp = getFighterPlus(gobj);
     ftKb_DatAttrs* da = fp->dat_attrs;
     *output = fp->cur_pos;
-    output->x += da->specialn_x_offset_inhaled * fp->facing_dir;
+    output->x = gk_fmadds(da->specialn_x_offset_inhaled, fp->facing_dir, output->x);
     output->y += da->specialn_y_offset_inhaled;
 }
 

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftpickupitem.h"
 
 #include <Runtime/platform.h>
@@ -62,7 +63,7 @@ bool ftpickupitem_80094150(Fighter_GObj* gobj, Item_GObj* item_gobj)
                 float y_range = itGetGrabRangeY(item_gobj);
                 DiscVec4* offset1 = !b ? offset0 : &pickup->gr_heavy_offset;
                 float x1 = offset1->z;
-                float x0 = (fp->facing_dir * offset1->x) + fp->cur_pos.x;
+                float x0 = gk_fmadds(fp->facing_dir, offset1->x, fp->cur_pos.x);
                 float y0 = fp->cur_pos.y + offset1->y;
                 float y1 = offset1->w;
                 if (x0 - x1 - x_range < it_pos.x &&

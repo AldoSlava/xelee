@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_StopWall.h"
 
 #include <Runtime/platform.h>
@@ -49,8 +50,7 @@ void ftCo_8009EE30(Fighter_GObj* gobj)
         ftKb_SpecialN_800F1F1C(gobj, &vec);
         Fighter_ChangeMotionState(gobj, ftCo_MS_StopWall, Ft_MF_None, 0, 1, 0,
                                   NULL);
-        fp->cur_pos.x = -(fp->x68C_transNPos.z * -fp->facing_dir -
-                          (fp->cur_pos.x + vec.x));
+        fp->cur_pos.x = -(gk_fmsubs(fp->x68C_transNPos.z, -fp->facing_dir, (fp->cur_pos.x + vec.x)));
     }
     ft_800843FC(gobj);
     ftCommon_8007E2FC(gobj);

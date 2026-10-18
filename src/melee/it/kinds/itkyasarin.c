@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itkyasarin.h"
 
 #include <math.h>
@@ -363,7 +364,7 @@ bool itKyasarin_UnkMotion7_Anim(Item_GObj* gobj)
         itKyasarinAttributes* attr =
             DP(itKyasarinAttributes, ip->xC4_article_data->x4_specialAttributes);
         spawn_pos = ip->pos;
-        spawn_pos.x += attr->x38 * ip->facing_dir;
+        spawn_pos.x = gk_fmadds(attr->x38, ip->facing_dir, spawn_pos.x);
         spawn_pos.y += attr->x3C;
         spawn_pos.z = 0;
         it_802EFA44(gobj, &spawn_pos, ip->facing_dir);

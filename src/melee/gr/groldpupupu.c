@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "groldpupupu.h"
 
 #include <sysdolphin/baselib/forward.h>
@@ -391,18 +392,18 @@ void grOldPupupu_80210D10(Ground_GObj* gobj)
             if (cam_right < 200.0F) {
                 cam_right = 200.0F;
             }
-            x = -(((f32) count * step) - (50.0F + cam_right));
+            x = -(gk_fmsubs((f32) count, step, (50.0F + cam_right)));
         } else {
             step = 10.0F;
             if (cam_left > -200.0F) {
                 cam_left = -200.0F;
             }
-            x = -(((f32) count * step) - (cam_left - 50.0F));
+            x = -(gk_fmsubs((f32) count, step, (cam_left - 50.0F)));
         }
         {
             f32 rand = HSD_Randf();
             y = direction *
-                (((f32) yakumono_param->x4 * ((2.0F * rand) - 1.0F)) + 20.0F);
+                (gk_fmadds((f32) yakumono_param->x4, (gk_fmsubs(2.0F, rand, 1.0F)), 20.0F));
         }
         z = -150.0F * direction;
         for (i = 0; i < count; i++) {

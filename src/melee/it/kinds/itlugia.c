@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "itlugia.h"
 
 #include <math.h>
@@ -41,9 +42,9 @@ static inline float my_sqrtf(float x)
     volatile float y;
     if (x > 0) {
         double guess = __frsqrte((double) x);
-        guess = .5 * guess * (3.0 - guess * guess * x);
-        guess = .5 * guess * (3.0 - guess * guess * x);
-        guess = .5 * guess * (3.0 - guess * guess * x);
+        guess = .5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = .5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = .5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
         y = (float) (x * guess);
         return y;
     }
@@ -56,12 +57,12 @@ static inline float my_sqrtf_accurate(float x)
     if (x > 0.0f) {
         double guess = __frsqrte((double) x); // returns an approximation to
         guess =
-            0.5 * guess * (3.0 - guess * guess * x); // now have 12 sig bits
+            0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0)); // now have 12 sig bits
         guess =
-            0.5 * guess * (3.0 - guess * guess * x); // now have 24 sig bits
+            0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0)); // now have 24 sig bits
         guess =
-            0.5 * guess * (3.0 - guess * guess * x); // now have 32 sig bits
-        guess = 0.5 * guess * (3.0 - guess * guess * x); // extra iteration
+            0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0)); // now have 32 sig bits
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0)); // extra iteration
         y = (float) (x * guess);
         return y;
     }
@@ -228,7 +229,7 @@ void it_802D1830(Item_GObj* gobj)
     disc = ip->pos.y - ip->xDD4_itemVar.lugia.x64.y;
     x18 = attrs->x18;
     prod = 8.0f * x18;
-    sqrtval = my_sqrtf_accurate(-((prod * -disc) - (x18 * x18)));
+    sqrtval = my_sqrtf_accurate(-(gk_fmsubs(prod, -disc, (x18 * x18))));
     ip->xDD4_itemVar.lugia.xE50.x = -((-x18 + sqrtval) / 2);
 }
 

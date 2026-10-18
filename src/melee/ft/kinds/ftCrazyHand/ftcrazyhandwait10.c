@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftcrazyhandwait10.h"
 
 #include <Runtime/platform.h>
@@ -265,9 +266,9 @@ void ftCh_Wait1_0_Anim(HSD_GObj* gobj)
                     break;
                 case ftMh_MS_Poke1:
                     rand = HSD_Randf();
-                    vec.x = da->x90 * rand * 2 + da->x88_pos.x - da->x90;
+                    vec.x = gk_fmadds(da->x90 * rand, 2, da->x88_pos.x) - da->x90;
                     rand = HSD_Randf();
-                    vec.y = da->x94 * rand * 2 + da->x88_pos.y - da->x94;
+                    vec.y = gk_fmadds(da->x94 * rand, 2, da->x88_pos.y) - da->x94;
                     vec.z = 0;
                     ftCh_GrabUnk1_8015BA34(gobj, fn_801582D8, &vec);
                     break;
@@ -388,9 +389,9 @@ static void ftCh_Init_80156AD8(HSD_GObj* gobj)
         ftCh_GrabUnk1_8015BA34(gobj, fn_80158144, &pos);
     } else if (button_tmp & (HSD_PAD_B) && button_tmp & (HSD_PAD_DPADUP)) {
         float rand = HSD_Randf();
-        pos.x = da->x90 * rand * 2 + da->x88_pos.x - da->x90;
+        pos.x = gk_fmadds(da->x90 * rand, 2, da->x88_pos.x) - da->x90;
         rand = HSD_Randf();
-        pos.y = da->x94 * rand * 2 + da->x88_pos.y - da->x94;
+        pos.y = gk_fmadds(da->x94 * rand, 2, da->x88_pos.y) - da->x94;
         pos.z = 0;
         ftCh_GrabUnk1_8015BA34(gobj, fn_801582D8, &pos);
     } else if (button_tmp & (HSD_PAD_B) && button_tmp & (HSD_PAD_DPADRIGHT)) {
