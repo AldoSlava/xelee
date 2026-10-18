@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ft_084E.h"
 
 #include <math.h>
@@ -81,8 +82,8 @@ void ft_80085030(Fighter_GObj* gobj, float gr_friction, float facing_dir)
 {
     Fighter* fp = gobj->user_data;
     if (fp->x594_b0) {
-        fp->xE4_ground_accel_1 =
-            fp->x6A4_transNOffset.z * facing_dir - fp->gr_vel;
+        /* one fmsubs on the GameCube (0x8008505C, src/pc/gekko_fp.h) */
+        fp->xE4_ground_accel_1 = gk_fmsubs(fp->x6A4_transNOffset.z, facing_dir, fp->gr_vel);
     } else {
         ftCommon_CalcGroundAccel_Deaccel(fp, gr_friction);
     }

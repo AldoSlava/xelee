@@ -2410,6 +2410,7 @@ extern "C" bool pc_is_custom_textures_enabled(void) {
     return prefs.custom_textures;
 }
 extern "C" bool pc_net_rules(bool* unlock_all, bool* frozen_stadium);
+extern "C" bool pc_slp_play_frozen_stadium(bool* frozen); /* src/pc/slp.h */
 extern "C" bool pc_is_unlock_all_enabled(void) {
     bool unlock_all, frozen;
     return pc_net_rules(&unlock_all, &frozen) ? unlock_all : prefs.unlock_all;
@@ -2418,6 +2419,9 @@ extern "C" bool pc_is_frozen_stadium_enabled(void) {
     bool unlock_all, frozen;
     if (pc_net_rules(&unlock_all, &frozen)) {
         return frozen;
+    }
+    if (pc_slp_play_frozen_stadium(&frozen)) {
+        return frozen; /* a Slippi replay played back: its own (src/pc/slp_play.c) */
     }
     /* MELEE_FROZEN_STADIUM=0|1 overrides the preference, so a test can reach
      * the transformations whatever the machine's launcher says. The host's

@@ -21,6 +21,7 @@
  * (-ffp-contract=off), as the rest of the simulation does. */
 #include "pc_libm.h"
 #include "pc_trig.h"
+#include "pc/gekko_fp.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -31,15 +32,9 @@
 #undef tanf
 #undef atanf
 
-static inline float madds(float a, float c, float b) { /* fmadds: a*c + b */
-    return (float)((double)a * (double)c + (double)b);
-}
-static inline float nmsubs(float a, float c, float b) { /* fnmsubs: -(a*c - b) */
-    return (float)-((double)a * (double)c - (double)b);
-}
-static inline float nmadds(float a, float c, float b) { /* fnmadds: -(a*c + b) */
-    return (float)-((double)a * (double)c + (double)b);
-}
+#define madds gk_fmadds
+#define nmsubs gk_fnmsubs
+#define nmadds gk_fnmadds
 
 static inline uint32_t bits(float f) {
     uint32_t u;

@@ -315,6 +315,7 @@ static void HSD_PadScale(HSD_PadStatus* mp)
 void HSD_PadPcNormalize(HSD_PadStatus* mp)
 {
     HSD_PadClamp(mp);
+    HSD_PadADConvert(mp);
     HSD_PadScale(mp);
 }
 #endif

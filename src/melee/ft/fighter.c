@@ -1,6 +1,7 @@
 #include "fighter.h"
 #include "ftucf.h"
 #include <pc/pc.h>
+#include <pc/gekko_fp.h>
 
 #include <math.h>
 #include <placeholder.h>
@@ -2251,17 +2252,18 @@ void Fighter_procUpdate(Fighter_GObj* gobj)
                 } else {
                     float kb_angle = atan2f(kb_vel_y, kb_vel_x);
 
-                    if (sqrtf(kb_vel_x * kb_vel_x + kb_vel_y * kb_vel_y) <
+                    /* Fused as the DOL has them (0x8006B938, 0x8006B9C8,
+                     * 0x8006B9E4): x*x onto y*y, and each decay one
+                     * fnmsubs (src/pc/gekko_fp.h). */
+                    if (sqrtf(gk_fmadds(kb_vel_x, kb_vel_x, kb_vel_y * kb_vel_y)) <
                         p_ftCommonData->x204_knockbackFrameDecay)
                     {
                         p_kb_vel->x = p_kb_vel->y = 0;
                     } else {
-                        p_kb_vel->x -=
-                            p_ftCommonData->x204_knockbackFrameDecay *
-                            cosf(kb_angle);
-                        p_kb_vel->y -=
-                            p_ftCommonData->x204_knockbackFrameDecay *
-                            sinf(kb_angle);
+                        p_kb_vel->x = gk_fnmsubs(p_ftCommonData->x204_knockbackFrameDecay,
+                                                 cosf(kb_angle), p_kb_vel->x);
+                        p_kb_vel->y = gk_fnmsubs(p_ftCommonData->x204_knockbackFrameDecay,
+                                                 sinf(kb_angle), p_kb_vel->y);
                     }
                 }
 
@@ -2297,7 +2299,8 @@ void Fighter_procUpdate(Fighter_GObj* gobj)
                 float kb_y = pAtkShieldKB->y;
                 float atkShieldKBAngle = atan2f(kb_y, kb_x);
 
-                if (sqrtf(kb_x * kb_x + kb_y * kb_y) <
+                /* Fused as above (0x8006BAA8, 0x8006BB34, 0x8006BB50). */
+                if (sqrtf(gk_fmadds(kb_x, kb_x, kb_y * kb_y)) <
                     p_ftCommonData->x3E8_shieldKnockbackFrameDecay)
                 {
                     /// @bug IN THE MELEE CODE THAT CAUSES THE INVISIBLE
@@ -2310,12 +2313,10 @@ void Fighter_procUpdate(Fighter_GObj* gobj)
                     // p_stc_ftcommon->x3e8_shield_kb_frameDecay)/atkShieldKB_len
                     // float atkShieldKBAngle = atan2_80022C30(pAtkShieldKB->y,
                     // pAtkShieldKB->x);
-                    pAtkShieldKB->x -=
-                        p_ftCommonData->x3E8_shieldKnockbackFrameDecay *
-                        cosf(atkShieldKBAngle);
-                    pAtkShieldKB->y -=
-                        p_ftCommonData->x3E8_shieldKnockbackFrameDecay *
-                        sinf(atkShieldKBAngle);
+                    pAtkShieldKB->x = gk_fnmsubs(p_ftCommonData->x3E8_shieldKnockbackFrameDecay,
+                                                 cosf(atkShieldKBAngle), pAtkShieldKB->x);
+                    pAtkShieldKB->y = gk_fnmsubs(p_ftCommonData->x3E8_shieldKnockbackFrameDecay,
+                                                 sinf(atkShieldKBAngle), pAtkShieldKB->y);
                 }
                 fp->xF4_ground_attacker_shield_kb_vel = 0;
             } else {
@@ -2369,10 +2370,9 @@ void Fighter_procUpdate(Fighter_GObj* gobj)
             float C1 = 1.0f;
             float C2 = C1 - (float) fp->dmg.x194C / (float) fp->dmg.x1948;
 
-            selfVel.x =
-                C2 * (fp->self_vel.x - fp->xA4_unk_vel.x) + fp->xA4_unk_vel.x;
-            selfVel.y =
-                C2 * (fp->self_vel.y - fp->xA4_unk_vel.y) + fp->xA4_unk_vel.y;
+            /* Fused (0x8006BC7C, 0x8006BC90). */
+            selfVel.x = gk_fmadds(C2, fp->self_vel.x - fp->xA4_unk_vel.x, fp->xA4_unk_vel.x);
+            selfVel.y = gk_fmadds(C2, fp->self_vel.y - fp->xA4_unk_vel.y, fp->xA4_unk_vel.y);
 
             fp->dmg.x194C--;
             if (fp->dmg.x194C == 0) {

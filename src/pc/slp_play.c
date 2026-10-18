@@ -7,7 +7,11 @@
 #include <dolphin/pad.h>
 #include <sysdolphin/baselib/controller.h>
 #include <sysdolphin/baselib/random.h>
+#include <melee/ft/fighter.h>
+#include <melee/ft/types.h>
 #include <melee/mn/types.h>
+
+#include <math.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +26,7 @@ extern bool pc_exit_requested;
 typedef struct PlayFrame {
     PADStatus pad[4];
     float c[4][2];  /* the C-stick as the game normalized it */
+    uint32_t cdir[4]; /* and the direction bits it set (HSD_PadADConvert) */
     float lr[4][2]; /* the triggers likewise (nml_analogL, nml_analogR) */
     bool have[4];
 } PlayFrame;
@@ -30,6 +35,7 @@ static struct {
     int state; /* 0 not looked at, 1 playing, -1 off */
     uint8_t info[SLP_INFO_BLOCK_SIZE];
     uint32_t seed; /* the game start's: Slippi's rngOffset (SyncRNG) */
+    bool frozen_ps; /* the game start's frozen Pokemon Stadium */
     bool raw_c;    /* the replay has the raw C-stick (3.17 on) */
     int32_t last;  /* the replay's last frame */
     int32_t count; /* frames held, from SLP_FIRST_FRAME */
@@ -43,11 +49,14 @@ static struct {
 
 /* Event fields, as offsets from the command byte (SPEC.md). */
 #define START_SEED 0x13D
+#define START_FROZEN_PS 0x1A2
 #define PRE_FRAME 0x1
 #define PRE_PORT 0x5
 #define PRE_FOLLOWER 0x6
 #define PRE_C_X 0x21
 #define PRE_C_Y 0x25
+#define PRE_BUTTONS 0x2D
+#define C_DIRS 0x00F00000u /* the C-stick's direction bits in the processed buttons */
 #define PRE_PHYS_BUTTONS 0x31
 #define PRE_PHYS_L 0x33
 #define PRE_PHYS_R 0x37
@@ -68,13 +77,16 @@ static float bef(const uint8_t* p) {
 
 /* The C-stick and triggers come back as the game normalized them, so the
  * raw values that normalize so are found by running the pad library's own
- * clamp and scale over every raw value (HSD_PadPcNormalize), once it has its
- * settings. Several raws normalize alike (inside the deadzone, past the
- * rim): the smallest stands for them all, as any of them gives the game the
- * same input. A table keyed by the two floats' bits. */
+ * clamp, direction bits and scale over every raw value
+ * (HSD_PadPcNormalize), once it has its settings. Several raws normalize
+ * alike (inside the deadzone, past the rim): of those that also set the
+ * direction bits the replay's buttons show, the smallest stands for them
+ * all, as any of them gives the game the same input. A table keyed by the
+ * two floats' bits and the direction bits. */
 #define C_SLOTS (1u << 17)
 static struct {
     uint64_t key; /* x bits << 32 | y bits, plus one: 0 is empty */
+    uint32_t dir;
     int8_t x, y;
 } s_c[C_SLOTS];
 static float s_lr[256]; /* nml_analogL for each raw trigger value */
@@ -99,15 +111,28 @@ static void build_tables(void) {
             mp.subStickX = (s8)x;
             mp.subStickY = (s8)y;
             HSD_PadPcNormalize(&mp);
-            const uint64_t k = c_key(mp.nml_subStickX, mp.nml_subStickY);
-            for (uint32_t h = c_hash(k);; h++) {
+            /* The replay holds the fighter's C-stick, which Fighter_procInput
+             * has put through its deadzones after the pad library set the
+             * direction bits: a raw (-28, 20) reads (-0.35, 0) with the
+             * stick's left bit set. */
+            float nx = mp.nml_subStickX, ny = mp.nml_subStickY;
+            if (fabsf(nx) <= p_ftCommonData->horizontal_stick_deadzone) {
+                nx = 0.0f;
+            }
+            if (fabsf(ny) <= p_ftCommonData->vertical_stick_deadzone) {
+                ny = 0.0f;
+            }
+            const uint64_t k = c_key(nx, ny);
+            const uint32_t dir = mp.button & C_DIRS;
+            for (uint32_t h = c_hash(k ^ dir);; h++) {
                 const uint32_t i = h & (C_SLOTS - 1);
-                if (s_c[i].key == 0 || s_c[i].key == k) {
+                if (s_c[i].key == 0 || (s_c[i].key == k && s_c[i].dir == dir)) {
                     if (s_c[i].key == 0 || abs(x) + abs(y) < abs(s_c[i].x) + abs(s_c[i].y)) {
                         s_c[i].x = (int8_t)x;
                         s_c[i].y = (int8_t)y;
                     }
                     s_c[i].key = k;
+                    s_c[i].dir = dir;
                     break;
                 }
             }
@@ -122,14 +147,14 @@ static void build_tables(void) {
     }
 }
 
-static bool c_raw(float x, float y, s8* rx, s8* ry) {
+static bool c_raw(float x, float y, uint32_t dir, s8* rx, s8* ry) {
     const uint64_t k = c_key(x, y);
-    for (uint32_t h = c_hash(k);; h++) {
+    for (uint32_t h = c_hash(k ^ dir);; h++) {
         const uint32_t i = h & (C_SLOTS - 1);
         if (s_c[i].key == 0) {
             return false;
         }
-        if (s_c[i].key == k) {
+        if (s_c[i].key == k && s_c[i].dir == dir) {
             *rx = s_c[i].x;
             *ry = s_c[i].y;
             return true;
@@ -187,6 +212,7 @@ static bool load(const char* path) {
         if (cmd == SLP_CMD_GAME_START && len >= START_SEED + 4) {
             memcpy(P.info, e + 5, SLP_INFO_BLOCK_SIZE);
             P.seed = be32(e + START_SEED);
+            P.frozen_ps = len > START_FROZEN_PS && e[START_FROZEN_PS] != 0;
             have_start = true;
             pc_log_line("slp play: %s, Slippi %u.%u.%u, stage %u, rngOffset %08x", path, e[1], e[2], e[3],
                 (unsigned)((e[5 + 0xE] << 8) | e[5 + 0xF]), P.seed);
@@ -218,6 +244,7 @@ static bool load(const char* path) {
                 }
                 fr->c[port][0] = bef(e + PRE_C_X);
                 fr->c[port][1] = bef(e + PRE_C_Y);
+                fr->cdir[port] = be32(e + PRE_BUTTONS) & C_DIRS;
                 fr->lr[port][0] = bef(e + PRE_PHYS_L);
                 fr->lr[port][1] = bef(e + PRE_PHYS_R);
                 fr->have[port] = true;
@@ -241,6 +268,12 @@ static bool load(const char* path) {
 /* Once the pad library has its settings: every frame's normalized C-stick
  * and triggers back to raw values. */
 static void convert(void) {
+    const PadLibData* lib = &HSD_PadLibData;
+    pc_log_line("slp play: pad library: clamp type %d shift %d min %d max %d, adc type %d threshold %d angle %.4f, "
+                "stick scale %d, triggers clamp %d..%d shift %d scale %d",
+        lib->clamp_stickType, lib->clamp_stickShift, lib->clamp_stickMin, lib->clamp_stickMax, lib->adc_type,
+        lib->adc_th, lib->adc_angle, lib->scale_stick, lib->clamp_analogLRMin, lib->clamp_analogLRMax,
+        lib->clamp_analogLRShift, lib->scale_analogLR);
     build_tables();
     for (int32_t i = 0; i < P.count; i++) {
         PlayFrame* fr = &P.frames[i];
@@ -249,10 +282,12 @@ static void convert(void) {
                 continue;
             }
             PADStatus* pad = &fr->pad[port];
-            if (!P.raw_c && !c_raw(fr->c[port][0], fr->c[port][1], &pad->substickX, &pad->substickY)) {
+            if (!P.raw_c &&
+                !c_raw(fr->c[port][0], fr->c[port][1], fr->cdir[port], &pad->substickX, &pad->substickY))
+            {
                 if (P.c_misses++ < 5) {
-                    pc_log_line("slp play: frame %d port %d: no raw C-stick gives %.4f,%.4f", SLP_FIRST_FRAME + i,
-                        port, fr->c[port][0], fr->c[port][1]);
+                    pc_log_line("slp play: frame %d port %d: no raw C-stick gives %.4f,%.4f with directions %06x",
+                        SLP_FIRST_FRAME + i, port, fr->c[port][0], fr->c[port][1], fr->cdir[port]);
                 }
             }
             if (!lr_raw(fr->lr[port][0], &pad->triggerLeft) || !lr_raw(fr->lr[port][1], &pad->triggerRight)) {
@@ -288,6 +323,14 @@ bool pc_slp_play_active(void) {
 
 uint32_t pc_slp_play_rng_offset(void) {
     return P.seed;
+}
+
+bool pc_slp_play_frozen_stadium(bool* frozen) {
+    if (!pc_slp_play_active()) {
+        return false;
+    }
+    *frozen = P.frozen_ps;
+    return true;
 }
 
 #define BIT(v, n) (((v) >> (n)) & 1)

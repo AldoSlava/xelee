@@ -54,6 +54,8 @@ struct PADStatus;
 bool pc_slp_play_active(void);
 /* The replay's rngOffset (the seed its game start carries). */
 uint32_t pc_slp_play_rng_offset(void);
+/* Whether the replay's Pokemon Stadium is frozen (false: not playing one). */
+bool pc_slp_play_frozen_stadium(bool* frozen);
 /* gmvsmode.c fillDebugVs: the debug match becomes the replay's. */
 void pc_slp_play_setup(struct StartMeleeData* start);
 /* The VS scene has set up (pc_slp_match_start): fight frames count from

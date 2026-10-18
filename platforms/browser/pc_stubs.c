@@ -123,6 +123,10 @@ bool pc_slp_play_active(void) {
 uint32_t pc_slp_play_rng_offset(void) {
     return 0;
 }
+bool pc_slp_play_frozen_stadium(bool* frozen) {
+    (void)frozen;
+    return false;
+}
 void pc_slp_play_setup(struct StartMeleeData* start) {
     (void)start;
 }

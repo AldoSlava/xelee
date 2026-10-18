@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftcoll.h"
 
 #include <Runtime/platform.h>
@@ -2057,6 +2058,23 @@ static inline s32 ftColl_GetDamageCount(Fighter* fp, ftCommonData* ftd)
 /// Shared knockback formula shell. @p inner is the per-branch scaling term.
 /// @remarks Must stay one nested expression; step assignments change the
 /// float register webs.
+#ifdef TARGET_PC
+/* With the GameCube's two fused steps (0x80079B50, 0x80079B54; and the
+ * same in ftColl_80079EA8): growth onto the base, and 0.01 * x24 onto x2C
+ * (src/pc/gekko_fp.h). Each inner term fuses its first product too
+ * (KNOCKBACK_INNER). Rounded twice instead, a hit's knockback came out an
+ * ULP off Dolphin's. */
+#define KNOCKBACK(defense, attack, arg3, one, ftd, hit, w, inner)                                        \
+    ((defense) *                                                                                         \
+     ((attack) *                                                                                         \
+      ((arg3) *                                                                                          \
+       gk_fmadds(0.01F * (hit)->x24,                                                                     \
+                 gk_fmadds((ftd)->x11C, ((ftd)->xF8 - (((w) * (ftd)->xF8) / ((one) + (w)))) * (inner), \
+                           (ftd)->x120),                                                                 \
+                 (float) (hit)->x2C))))
+/* a*b + c*d with the first product fused (0x80079B48, 0x80079C34). */
+#define KNOCKBACK_INNER(a, b, cd) gk_fmadds((a), (b), (cd))
+#else
 #define KNOCKBACK(defense, attack, arg3, one, ftd, hit, w, inner)             \
     ((defense) *                                                              \
      ((attack) *                                                              \
@@ -2066,6 +2084,8 @@ static inline s32 ftColl_GetDamageCount(Fighter* fp, ftCommonData* ftd)
                         (inner)) +                                            \
                    (ftd)->x120)) +                                            \
                  (hit)->x2C))))
+#define KNOCKBACK_INNER(a, b, cd) ((a) * (b) + (cd))
+#endif
 
 float ftColl_80079AB0(Fighter* fp, HitCapsule* hit, u32 unk_count, float arg3,
                       float attack, float defense, float weight)
@@ -2083,7 +2103,7 @@ float ftColl_80079AB0(Fighter* fp, HitCapsule* hit, u32 unk_count, float arg3,
         x118 = ftd->x118;
 
         result = KNOCKBACK(defense, attack, arg3, 1.0F, ftd, hit, w,
-                           x118 * ftd->x110 + ftd->x114 * (x118 * hit->x28));
+                           KNOCKBACK_INNER(x118, ftd->x110, ftd->x114 * (x118 * hit->x28)));
     } else {
         s32 count;
 
@@ -2091,8 +2111,8 @@ float ftColl_80079AB0(Fighter* fp, HitCapsule* hit, u32 unk_count, float arg3,
 
         result = KNOCKBACK(
             defense, attack, arg3, 1.0F, ftd, hit, w,
-            ftd->x110 * (count + fp->dmg.x1838_percentTemp) +
-                ftd->x114 * (unk_count * (count + fp->dmg.x1838_percentTemp)));
+            KNOCKBACK_INNER(ftd->x110, count + fp->dmg.x1838_percentTemp,
+                            ftd->x114 * (unk_count * (count + fp->dmg.x1838_percentTemp))));
     }
 
     if (result >= ftd->x108) {
@@ -2127,7 +2147,7 @@ float ftColl_80079EA8(Fighter* fp, HitCapsule* hit, u32 unk_count)
         x118 = ftd->x118;
 
         result = KNOCKBACK(one, one, one, one, ftd, hit, w,
-                           x118 * ftd->x110 + ftd->x114 * (x118 * hit->x28));
+                           KNOCKBACK_INNER(x118, ftd->x110, ftd->x114 * (x118 * hit->x28)));
     } else {
         s32 count;
 
@@ -2138,9 +2158,8 @@ float ftColl_80079EA8(Fighter* fp, HitCapsule* hit, u32 unk_count)
 
             result = KNOCKBACK(
                 one, one, one, one, ftd, hit, w,
-                ftd->x110 * (count + fp->dmg.x1838_percentTemp) +
-                    ftd->x114 *
-                        (unk_count * (count + fp->dmg.x1838_percentTemp)));
+                KNOCKBACK_INNER(ftd->x110, count + fp->dmg.x1838_percentTemp,
+                                ftd->x114 * (unk_count * (count + fp->dmg.x1838_percentTemp))));
         }
     }
 
