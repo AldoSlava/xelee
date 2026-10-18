@@ -103,7 +103,9 @@ float ftYs_SpecialN_GetExtAttr34(void)
     return ext_attr->x34;
 }
 
-bool ftYs_SpecialN_GetExtAttr38(void)
+/* The intangibility, in frames, of a fighter breaking out of the egg:
+ * an int, which the decomp's bool (C99's on PC) cut to 1 frame. */
+int ftYs_SpecialN_GetExtAttr38(void)
 {
     ftYoshiAttributes* ext_attr =
         DP(ftYoshiAttributes, gFtDataList[Ft_Kind_Yoshi]->ext_attr);

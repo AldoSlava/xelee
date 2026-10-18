@@ -34,6 +34,9 @@ void pc_slp_tick_end(uint64_t proc_mask);
  * Fighter_Spaghetti_8006AD10, where Slippi's SendGamePreFrame hooks): the
  * pre-frame event's state and inputs are taken here. */
 void pc_slp_pre_frame(struct HSD_GObj* gobj);
+/* An aerial is landing (ftCo_LandingAir.c, where Slippi stamps the
+ * post-frame's L-cancel status): whether it was in the window. */
+void pc_slp_l_cancel(struct HSD_GObj* gobj, bool in_window);
 /* Slippi's SyncRNG has just seeded this tick (gmvs.c slippiSyncRng): in an
  * online match the frame-start event carries this seed, which Slippi reads
  * after SyncRNG has run, not the one the tick began with. */

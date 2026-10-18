@@ -338,7 +338,12 @@ void pc_slp_match_start(const struct StartMeleeData* data) {
 
 /* ---- per tick ----------------------------------------------------------- */
 
+/* Each fighter's L-cancel stamp this tick (pc_slp_l_cancel): 1 in the
+ * window, 2 not, 0 no aerial landed. */
+static uint8_t s_l_cancel[SLP_MAX_FIGHTERS];
+
 void pc_slp_tick_begin(void) {
+    memset(s_l_cancel, 0, sizeof s_l_cancel);
     s_begin.on = s_rec && slp_scene();
     if (!s_begin.on) {
         return;
@@ -371,8 +376,13 @@ void pc_slp_tick_begin(void) {
     }
 }
 
-static bool landing_air(uint16_t action) {
-    return action >= ftCo_MS_LandingAirN && action <= ftCo_MS_LandingAirLw;
+void pc_slp_l_cancel(struct HSD_GObj* gobj, bool in_window) {
+    for (int i = 0; i < SLP_MAX_FIGHTERS; i++) {
+        if (fighter_gobj(i / 2, i & 1) == gobj) {
+            s_l_cancel[i] = in_window ? 1 : 2;
+            return;
+        }
+    }
 }
 
 /* SendGamePreFrame.asm, at its hook: the fighter's state entering its
@@ -483,11 +493,11 @@ static void capture_fighter(Staged* s, int i, HSD_GObj* g) {
     po->ground_id = (uint16_t)fp->coll_data.floor.index;                 /* fp+83C */
     po->jumps = (uint8_t)(fp->co_attrs.max_jumps - fp->x1968_jumpsUsed); /* fp+168 - fp+1968 */
     /* Slippi stamps 1/2 in ftCo_LandingAir_EnterWithLag's L-cancel compare
-     * (x67F against the window) and clears it every frame: the frame a
-     * fighter enters an aerial's lagged landing. */
-    if (landing_air((uint16_t)fp->motion_id) && !landing_air(pre->action)) {
-        po->l_cancel = fp->x67F < p_ftCommonData->xE4 ? 1 : 2;
-    }
+     * (x67F against the window) and clears it every frame. Stamped there
+     * (pc_slp_l_cancel), not read off the state the tick ends in: a fighter
+     * hit on the frame it lands ends it in a damage state. */
+    po->l_cancel = s_l_cancel[i];
+    s_l_cancel[i] = 0;
     /* Move-induced collision state wins over the game-induced one. */
     po->hurtbox = (uint8_t)(fp->x1988 != 0 ? fp->x1988 : fp->x198C); /* fp+1988, +198C */
     po->self_air_x = fp->self_vel.x;                                 /* fp+80 */

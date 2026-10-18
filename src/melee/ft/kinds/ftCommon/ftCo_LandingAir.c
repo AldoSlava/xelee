@@ -10,6 +10,9 @@
 #include <melee/ft/ftanim.h>
 #include <melee/ft/ftcommon.h>
 #include <melee/ft/types.h>
+#ifdef TARGET_PC
+#include <pc/slp.h>
+#endif
 
 void ftCo_LandingAir_EnterWithLag(Fighter_GObj* gobj)
 {
@@ -40,6 +43,11 @@ void ftCo_LandingAir_EnterWithLag(Fighter_GObj* gobj)
             lag = fp->co_attrs.landingairlw_lag;
             break;
         }
+#ifdef TARGET_PC
+        if (msid != ftCo_MS_None) {
+            pc_slp_l_cancel(gobj, fp->x67F < p_ftCommonData->xE4);
+        }
+#endif
         if (msid != ftCo_MS_None && fp->x67F < p_ftCommonData->xE4) {
             float div_lag = lag / p_ftCommonData->xE8;
             int int_lag = div_lag;
