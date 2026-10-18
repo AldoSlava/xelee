@@ -647,9 +647,9 @@ float env_float(const char* name, float def) {
 
 // The room's colour grade (T5) is off unless asked for, and has no launcher
 // setting: how dark a room should go depends on how lit it is, which it
-// doesn't know yet. AURORA_XR_GRADE=1 turns it on, as does the grade panel
-// (AURORA_XR_GRADE_PANEL=1), which is for tuning it.
-bool grade_wanted() { return env_flag("AURORA_XR_GRADE", env_flag("AURORA_XR_GRADE_PANEL", false)); }
+// doesn't know yet. Only AURORA_XR_GRADE=1 turns it on (the dev tools'
+// Tint page tunes it, with it on).
+bool grade_wanted() { return env_flag("AURORA_XR_GRADE", false); }
 
 // How often the GPU timing and dynamic resolution lines are logged:
 // AURORA_XR_LOG_PERIOD seconds, 10 by default (1 lines them up with what
@@ -5903,7 +5903,6 @@ void build_placing_layers(PlacingLayers& out, int mode) {
 // slider. Reset puts the channel back. Each change is logged as a
 // MELEE_STAGE_MIX value for the whole stage, which the game reads at launch.
 //
-// AURORA_XR_GRADE_PANEL=1, its first name, is both: the panel and the grade.
 // AURORA_XR_DEV_TOOLS_POS "dx,dy,dz,width" (0.3,-0.15,-0.55,0.36): where it
 // floats against the head, in meters.
 
@@ -6092,7 +6091,13 @@ struct DevMix {
 std::atomic<bool> g_devMixListening{false}; // the panel shows its Stage page
 
 bool dev_tools_wanted() {
-  static const bool on = env_flag("AURORA_XR_DEV_TOOLS", env_flag("AURORA_XR_GRADE_PANEL", false));
+  static const bool on = [] {
+    // The panel's first name, which also turned the grade on: no longer read.
+    if (std::getenv("AURORA_XR_GRADE_PANEL") != nullptr)
+      Log.warn("AURORA_XR_GRADE_PANEL is no longer read: AURORA_XR_DEV_TOOLS=1 opens the dev tools panel, "
+               "AURORA_XR_GRADE=1 turns the room grade on");
+    return env_flag("AURORA_XR_DEV_TOOLS", false);
+  }();
   return on;
 }
 
@@ -6633,8 +6638,6 @@ void update_dev_panel(bool show, bool tintUsable) {
     XrVector3f offset{0.3f, -0.15f, -0.55f};
     P.width = 0.36f;
     if (const char* v = std::getenv("AURORA_XR_DEV_TOOLS_POS"))
-      std::sscanf(v, "%f,%f,%f,%f", &offset.x, &offset.y, &offset.z, &P.width);
-    else if (const char* v = std::getenv("AURORA_XR_GRADE_PANEL_POS"))
       std::sscanf(v, "%f,%f,%f,%f", &offset.x, &offset.y, &offset.z, &P.width);
     P.pose.position = B.head + rot_y(offset, std::atan2(-fwd.x, -fwd.z));
     P.pose.orientation = facing(P.pose.position, B.head);

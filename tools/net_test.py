@@ -1290,6 +1290,11 @@ def parse_args(argv=None):
     ap.add_argument("--disc", default=os.path.join(here, "..", "..", "melee.ciso"))
     ap.add_argument("--port", type=int, default=42050, help="A's UDP port; B uses +1")
     ap.add_argument("--work", default="/tmp/net_test")
+    ap.add_argument("--env-a", action="append", default=[], metavar="VAR=VALUE",
+                    help="an extra environment variable for A alone (repeatable), e.g. AURORA_XR=1 "
+                         "to run one side in XR")
+    ap.add_argument("--env-b", action="append", default=[], metavar="VAR=VALUE",
+                    help="the same for B alone")
     return ap.parse_args(argv)
 
 
@@ -1350,6 +1355,12 @@ def run(args):
         # A frozen Stadium (the launcher default on many machines) never
         # transforms, which is the load this option exists to reach.
         sim_a["MELEE_FROZEN_STADIUM"] = sim["MELEE_FROZEN_STADIUM"] = "0"
+    for side, extra in ((sim_a, args.env_a), (sim, args.env_b)):
+        for kv in extra:
+            var, sep, val = kv.partition("=")
+            if not sep or not var:
+                raise SystemExit(f"--env-a/--env-b want VAR=VALUE, not {kv!r}")
+            side[var] = val
     shutil.rmtree(args.work, ignore_errors=True)
     os.makedirs(args.work)
     mm_server = None
