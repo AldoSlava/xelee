@@ -307,6 +307,16 @@ void pc_ambience_frame(void) {
     if (!enabled()) {
         return;
     }
+    /* A new fight starts undocked: a pause quit (L+R+A+Start) never
+     * unpauses, so its duck would carry into the next fight, which only a
+     * pause and an unpause brought back up. The audio thread can't reset it
+     * in the menus: it mixes the ambience only while a fight draws. */
+    static uint64_t last_frame;
+    const uint64_t now = now_ns();
+    if (last_frame == 0 || now - last_frame > AMB_STALE_NS) {
+        pc_ambience_set_duck(1.f);
+    }
+    last_frame = now;
     /* None while the stage is held for placing: they start with the fight.
      * None once it's frozen for GAME! or TIME! (frozen in a pause, they
      * duck with the music instead). */
@@ -326,7 +336,7 @@ void pc_ambience_frame(void) {
         craft_frame();
     }
     __atomic_store_n(&s_kind, kind, __ATOMIC_RELAXED);
-    __atomic_store_n(&s_stamp, now_ns(), __ATOMIC_RELEASE);
+    __atomic_store_n(&s_stamp, now, __ATOMIC_RELEASE);
 }
 
 /* ---- audio thread ----------------------------------------------------- */

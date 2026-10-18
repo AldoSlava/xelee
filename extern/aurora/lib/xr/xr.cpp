@@ -2835,6 +2835,12 @@ struct ScreenPose {
 ScreenPose g_screen;
 bool g_screenInit = false;
 bool g_screenMoved = false; // the player has moved or sized it (a grab): the room survey leaves it be
+// How wide the screen looks (its half width over its distance from the
+// eyes): what room_fit sizes it to. The player's own from their last grab;
+// 36 degrees across before one (what the user sized it to on 2026-10-18,
+// 0.73 m at 1.12 m, from the first fit's 48). Written by the XR thread, read
+// by the surface worker.
+std::atomic<float> g_screenTan{0.325f};
 // The room survey's screen (room_survey_apply), glided to over 0.8 s.
 struct ScreenGlide {
   bool on = false;
@@ -3090,7 +3096,11 @@ void end_grab() {
     const ScreenPose& s = screen_pose();
     g_screenMoved = true;
     g_screenGlide.on = false;
-    Log.info("Screen placed at {:.2f},{:.2f},{:.2f}, width {:.2f} m", s.pos.x, s.pos.y, s.pos.z, s.width);
+    const float d = std::hypot(s.pos.x - B.head.x, s.pos.z - B.head.z);
+    if (d > 0.2f)
+      g_screenTan = std::clamp(0.5f * s.width / d, 0.1f, 1.f);
+    Log.info("Screen placed at {:.2f},{:.2f},{:.2f}, width {:.2f} m ({:.0f} degrees across)", s.pos.x, s.pos.y, s.pos.z,
+             s.width, 2.f * std::atan(g_screenTan.load()) * 57.2958f);
     return;
   }
   const ArenaPose a = arena_pose();
@@ -4353,9 +4363,10 @@ bool room_clear(const std::vector<XrVector3f>& points, const XrVector3f& eye, fl
 // it stands over (the box 50 units under its floor to 130 over, 70 deep);
 // brought in and shrunk until it and the view of it are clear of every hit
 // with 6 cm to spare, preferring the farthest spot that shows it within 10%
-// as large as the best. The screen: most of the way to that wall (0.45-3.2
-// m), about 48 degrees across, brought in until clear (in front of a
-// monitor, then).
+// as large as the best. The screen: a little past halfway to that wall
+// (0.45-3 m; the user pulled the first fit's, 85% of the way, in to about
+// half), as wide to the eye as the player last made it (36 degrees before
+// that, g_screenTan), brought in until clear (in front of a monitor, then).
 void room_fit(const RoomSamples& rs, RoomSurvey& out) {
   constexpr float kDeg = 3.14159265f / 180.f;
   // The farthest wall ahead of LOCAL -z (within 40 degrees of it), the
@@ -4420,8 +4431,8 @@ void room_fit(const RoomSamples& rs, RoomSurvey& out) {
       }
   }
   // The screen, along the head's yaw, at its own height (about the eyes').
-  const float tanScreen = std::tan(24.f * kDeg);
-  for (float d = std::clamp(out.far * 0.85f, 0.45f, 3.2f); d >= 0.45f - 1e-3f; d -= 0.05f) {
+  const float tanScreen = g_screenTan.load();
+  for (float d = std::clamp(out.far * 0.55f, 0.45f, 3.f); d >= 0.45f - 1e-3f; d -= 0.05f) {
     const float w = 2.f * d * tanScreen, h = w * 0.75f;
     const FitBox box{d, w * 0.5f, 0.03f, eye.y - h * 0.5f, eye.y + h * 0.5f, eye.y - h * 0.5f};
     if (room_clear(rs.points, eye, out.yaw, box, 0.05f)) {
@@ -4691,22 +4702,24 @@ void surface_frame(bool fight, bool placing, XrTime time) {
 // clear of a wall ahead. Unknown (no raycast and no floor): as it is. Not
 // over an adopted spot, a stage already placed or up, a screen the player
 // moved, or AURORA_XR_ARENA_POS/_SCALE and AURORA_XR_SCREEN_DISTANCE/_WIDTH.
-// A recenter while placing the stage (room_resurvey): when the survey starts
-// over (XR thread).
+// A recenter (room_resurvey): when the survey starts over (XR thread).
 struct {
-  int64_t startNs = 0; // monotonic_ns; 0: none due
-  bool waiting = false; // started; the stage goes where it fits once it's done
+  int64_t startNs = 0;  // monotonic_ns; 0: none due
+  bool waiting = false; // started; the screen (and the stage) go where they fit once it's done
+  bool stage = false;   // the stage was being placed
 } g_resurvey;
 
-// XR thread, at a recenter: while the stage is being placed, a fresh survey
-// from where the player is now and the stage put in front of them, rather
+// XR thread, at a recenter: a fresh survey from where the player is now,
+// and the screen put where it fits ahead of them, as wide to the eye as
+// they last made it; while the stage is being placed, the stage too, rather
 // than kept where it was in the room. A moment later, so the rays are all
 // cast in the new space.
 void room_resurvey() {
   static const bool survey = env_flag("AURORA_XR_ROOM_SURVEY", true);
-  if (!survey || g_placing.load() == 0 || !g_surfaceThread.joinable())
+  if (!survey || !g_surfaceThread.joinable())
     return;
   g_resurvey.startNs = monotonic_ns() + 300 * kMsNs;
+  g_resurvey.stage = g_placing.load() != 0;
 }
 
 void room_survey_apply() {
@@ -4805,21 +4818,37 @@ void room_survey_apply() {
                   : std::string{"none"},
            r.floor ? fmt::format("{:.2f} m under the eyes", r.headY - r.floorY) : std::string{"unknown"}, clearance,
            far, room_kind_name(r.kind), r.fitted ? ", fitted" : "");
+  const bool screenEnv = std::getenv("AURORA_XR_SCREEN_DISTANCE") || std::getenv("AURORA_XR_SCREEN_WIDTH");
   if (resurveyed) {
     g_resurvey.waiting = false;
-    // The stage being placed, ahead of the eyes (LOCAL -z, the recenter's
-    // forward), at its own size; the defaults still those of the launch.
-    std::lock_guard lock{g_arenaMutex};
-    init_arena();
-    ArenaPose a = g_arena;
-    a.pos = XrVector3f{r.head.x, y, r.head.z - dist};
-    a.yaw = 0.f;
-    a.scale = scale * g_stageScale;
-    g_arena = a;
-    if (g_stage >= 0)
-      g_stageArenas[g_stage] = a;
-    Log.info("Recentered while placing: the stage {:.2f} m ahead, {:.2f} m under the eyes, {:.4f} m a unit", dist,
-             r.headY - y, scale);
+    if (g_resurvey.stage) {
+      // The stage being placed, ahead of the eyes (LOCAL -z, the
+      // recenter's forward), at its own size; the defaults still those of
+      // the launch.
+      std::lock_guard lock{g_arenaMutex};
+      init_arena();
+      ArenaPose a = g_arena;
+      a.pos = XrVector3f{r.head.x, y, r.head.z - dist};
+      a.yaw = 0.f;
+      a.scale = scale * g_stageScale;
+      g_arena = a;
+      if (g_stage >= 0)
+        g_stageArenas[g_stage] = a;
+      Log.info("Recentered while placing: the stage {:.2f} m ahead, {:.2f} m under the eyes, {:.4f} m a unit", dist,
+               r.headY - y, scale);
+    }
+    // The screen, ahead, even if the player had moved it: a recenter asks
+    // for things in front. At its height; its size to the eye theirs.
+    if (!screenEnv && r.screenFitted) {
+      g_screenGlide.from = screen_pose();
+      g_screenGlide.to.pos =
+          XrVector3f{r.head.x, g_screenGlide.from.pos.y, r.head.z} + rot_y({0.f, 0.f, -screenD}, r.yaw);
+      g_screenGlide.to.orientation = yaw_quat(r.yaw);
+      g_screenGlide.to.width = screenW;
+      g_screenGlide.startNs = monotonic_ns();
+      g_screenGlide.on = true;
+      Log.info("Recentered: the screen to {:.2f} m wide at {:.2f} m", screenW, screenD);
+    }
     if (applied)
       return;
   }
@@ -4839,7 +4868,6 @@ void room_survey_apply() {
                r.headY - y);
     }
   }
-  const bool screenEnv = std::getenv("AURORA_XR_SCREEN_DISTANCE") || std::getenv("AURORA_XR_SCREEN_WIDTH");
   if (!screenEnv && !g_screenMoved && (screenD != 0.85f || screenW != 0.7f)) {
     g_screenGlide.from = screen_pose();
     g_screenGlide.to.pos = XrVector3f{r.head.x, g_screenGlide.from.pos.y, r.head.z} + rot_y({0.f, 0.f, -screenD}, r.yaw);

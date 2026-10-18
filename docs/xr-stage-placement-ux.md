@@ -459,20 +459,22 @@ brought in and shrunk until its box (50 units under its floor to 130 over, 70
 deep) and the view of it from the eyes are clear of every hit with 6 cm to
 spare, taking the farthest spot that shows it within 10% as large as the
 best. A desk's edge may hide the stage's underside, not the floor up. The
-screen goes most of the way to that wall (0.45-3.2 m), about 48 degrees
-across, brought in until clear.
+screen goes a little past halfway to that wall (55%, 0.45-3 m), as wide to
+the eye as the player last made it (36 degrees before any grab: on
+2026-10-18 the user pulled the first fit's screen, 48 degrees at 85% of the
+way, in to 0.73 m at 1.12 m), brought in until clear.
 
 The angles come from the user's own placement on 2026-10-18: seated at a
 desk, wall about 3.2 m ahead, the stage dragged to 1.6 m, 0.36 m under the
 eyes, 0.0082 m a unit (71 degrees across). The fit on a mock of that room
-gives 1.60 m, 0.37 m under, 0.0080. Other mocks:
+gives 1.60 m, 0.37 m under, 0.0080 (the screen 1.14 m wide at 1.76 m). Other mocks:
 
 | Room | Stage | Screen |
 |---|---|---|
-| desk, a monitor 0.6 m ahead | 0.45 m, 0.0023, in front of the monitor | 0.46 m wide at 0.51 m |
-| couch, wall 4.5 m | 2.25 m, 0.0113, 0.36 m under | 2.5 m at 2.8 m |
-| standing, wall 4.5 m | 2.25 m, 0.0113, 0.52 m under | 2.85 m at 3.2 m |
-| small room, wall 1.8 m | 0.9 m, 0.0045 | 1.36 m at 1.53 m |
+| desk, a monitor 0.6 m ahead | 0.45 m, 0.0023, in front of the monitor | 0.33 m wide at 0.5 m |
+| couch, wall 4.5 m | 2.25 m, 0.0113, 0.36 m under | 1.6 m at 2.5 m |
+| standing, wall 4.5 m | 2.25 m, 0.0113, 0.52 m under | 1.6 m at 2.5 m |
+| small room, wall 1.8 m | 0.9 m, 0.0045 | 0.64 m at 0.99 m |
 
 **The kind**, for the log and for when the rays saw too little to fit
 (under 40 hits, or no wall and no open ray):
@@ -504,7 +506,9 @@ never guessed (Unknown keeps today's desk defaults). Logged as "Room survey:
 (the Place Stage scene, the hold before a fight) surveys again from where the
 player is, 300 ms on, and puts the stage being placed where it fits ahead
 ("Recentered while placing: ..."), rather than keeping it where it was in the
-room. The fit is not yet tried on the
+room. Every recenter also surveys again and glides the screen to where it
+fits ahead ("Recentered: the screen to ..."), even when the player had moved
+it, at its height and their size to the eye. The fit is not yet tried on the
 headset; the survey itself ran there on 2026-10-18 (200/200 rays seen,
 desk 0.27-0.38 m under the eyes, floor 1.05 m, clear ahead 2.11 m).
 
