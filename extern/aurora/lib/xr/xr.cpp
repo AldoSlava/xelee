@@ -3819,6 +3819,7 @@ struct SurfaceShared {
   std::condition_variable cv;
   SurfaceEstimate estimate;         // the worker's latest
   bool surveyWanted = false;        // a room survey: cast from the head until it's done
+  bool surveyFresh = false;         // start it over: what it found so far is gone (room_resurvey)
   XrPosef head{{0.f, 0.f, 0.f, 1.f}, {}};
   bool headValid = false;
   RoomSurvey survey;                // the worker's, once done
@@ -4507,6 +4508,8 @@ RoomSurvey room_finish(const RoomSamples& rs, const XrPosef& head, XrTime time) 
 void surface_main() {
   using State = SurfaceEstimate::State;
   SurfaceWorker w;
+  RoomSamples rs; // the room survey's
+  bool freshSurvey = false;
   w.lineNs = w.timingNs = monotonic_ns();
   for (;;) {
     bool placing, reset, surveying, headValid;
@@ -4528,6 +4531,7 @@ void surface_main() {
       if (g_surface.stop)
         break;
       surveying = g_surface.surveyWanted && !g_surface.survey.done;
+      freshSurvey |= std::exchange(g_surface.surveyFresh, false);
       head = g_surface.head;
       headValid = g_surface.headValid;
       placing = g_surface.placing;
@@ -4544,7 +4548,8 @@ void surface_main() {
       surface_publish(w.est);
     }
     if (surveying && headValid && time != 0) {
-      static RoomSamples rs;
+      if (std::exchange(freshSurvey, false))
+        rs = {};
       if (rs.startNs == 0)
         rs.startNs = now;
       bool canCast = false;
@@ -4686,6 +4691,24 @@ void surface_frame(bool fight, bool placing, XrTime time) {
 // clear of a wall ahead. Unknown (no raycast and no floor): as it is. Not
 // over an adopted spot, a stage already placed or up, a screen the player
 // moved, or AURORA_XR_ARENA_POS/_SCALE and AURORA_XR_SCREEN_DISTANCE/_WIDTH.
+// A recenter while placing the stage (room_resurvey): when the survey starts
+// over (XR thread).
+struct {
+  int64_t startNs = 0; // monotonic_ns; 0: none due
+  bool waiting = false; // started; the stage goes where it fits once it's done
+} g_resurvey;
+
+// XR thread, at a recenter: while the stage is being placed, a fresh survey
+// from where the player is now and the stage put in front of them, rather
+// than kept where it was in the room. A moment later, so the rays are all
+// cast in the new space.
+void room_resurvey() {
+  static const bool survey = env_flag("AURORA_XR_ROOM_SURVEY", true);
+  if (!survey || g_placing.load() == 0 || !g_surfaceThread.joinable())
+    return;
+  g_resurvey.startNs = monotonic_ns() + 300 * kMsNs;
+}
+
 void room_survey_apply() {
   static bool applied = false;
   if (g_screenGlide.on && G.target == Target::Screen && (G.oneHand >= 0 || G.twoHands)) {
@@ -4708,7 +4731,24 @@ void room_survey_apply() {
     if (t >= 1.f)
       g_screenGlide.on = false;
   }
-  if (applied)
+  // A recenter while placing (room_resurvey): the survey over from here,
+  // once the new space has settled, and the stage put where it fits ahead.
+  if (g_resurvey.startNs != 0 && monotonic_ns() >= g_resurvey.startNs) {
+    g_resurvey.startNs = 0;
+    g_resurvey.waiting = true;
+    std::lock_guard lock{g_surface.mutex};
+    g_surface.survey = {};
+    g_surface.surveyFresh = true;
+    g_surface.surveyWanted = true;
+    g_surface.cv.notify_one();
+    return;
+  }
+  bool resurveyed = false;
+  if (g_resurvey.waiting) {
+    std::lock_guard lock{g_surface.mutex};
+    resurveyed = g_surface.survey.done;
+  }
+  if (applied && !resurveyed)
     return;
   RoomSurvey r;
   {
@@ -4717,7 +4757,6 @@ void room_survey_apply() {
       return;
     r = g_surface.survey;
   }
-  applied = true;
   using Kind = RoomSurvey::Kind;
   float scale = 0.0035f, dist = 0.7f, y = r.headY - 0.25f, screenW = 0.7f, screenD = 0.85f;
   switch (r.kind) {
@@ -4766,6 +4805,25 @@ void room_survey_apply() {
                   : std::string{"none"},
            r.floor ? fmt::format("{:.2f} m under the eyes", r.headY - r.floorY) : std::string{"unknown"}, clearance,
            far, room_kind_name(r.kind), r.fitted ? ", fitted" : "");
+  if (resurveyed) {
+    g_resurvey.waiting = false;
+    // The stage being placed, ahead of the eyes (LOCAL -z, the recenter's
+    // forward), at its own size; the defaults still those of the launch.
+    std::lock_guard lock{g_arenaMutex};
+    init_arena();
+    ArenaPose a = g_arena;
+    a.pos = XrVector3f{r.head.x, y, r.head.z - dist};
+    a.yaw = 0.f;
+    a.scale = scale * g_stageScale;
+    g_arena = a;
+    if (g_stage >= 0)
+      g_stageArenas[g_stage] = a;
+    Log.info("Recentered while placing: the stage {:.2f} m ahead, {:.2f} m under the eyes, {:.4f} m a unit", dist,
+             r.headY - y, scale);
+    if (applied)
+      return;
+  }
+  applied = true;
   if (r.kind == Kind::Unknown && !r.fitted)
     return;
   const bool arenaEnv = std::getenv("AURORA_XR_ARENA_POS") || std::getenv("AURORA_XR_ARENA_SCALE");
@@ -7354,6 +7412,7 @@ bool poll_events() {
       Log.info("Reference space {} recentered", static_cast<int>(e.referenceSpaceType));
       spot_recentered(e);
       surface_request(1000, true);
+      room_resurvey();
     } else if (B.anchors && spot_event(ev)) {
       // the stage spot's anchor
     } else if (ev.type == XR_TYPE_EVENT_DATA_DISPLAY_REFRESH_RATE_CHANGED_FB) {

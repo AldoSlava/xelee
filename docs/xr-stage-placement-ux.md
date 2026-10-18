@@ -500,7 +500,11 @@ spot, a stage already placed or up, a screen the player moved, or the
 turns it off. It needs the spatial data permission (as the shadow does);
 without it only the floor is known, so standing is Room and seated Couch is
 never guessed (Unknown keeps today's desk defaults). Logged as "Room survey:
-..." (", fitted" when the fit placed it). The fit is not yet tried on the
+..." (", fitted" when the fit placed it). A recenter while placing the stage
+(the Place Stage scene, the hold before a fight) surveys again from where the
+player is, 300 ms on, and puts the stage being placed where it fits ahead
+("Recentered while placing: ..."), rather than keeping it where it was in the
+room. The fit is not yet tried on the
 headset; the survey itself ran there on 2026-10-18 (200/200 rays seen,
 desk 0.27-0.38 m under the eyes, floor 1.05 m, clear ahead 2.11 m).
 
