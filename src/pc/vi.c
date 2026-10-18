@@ -99,6 +99,14 @@ static void log_pad_wait(void) {
     n = 0;
 }
 
+#ifdef AURORA_ENABLE_OPENXR
+/* Netplay in XR (pc_frame_boundary): the headset tick the next boundary is
+ * due at (0: not paced so), and time sync's lengthening not yet paid as a
+ * whole tick (ns). */
+static u64 s_xr_due;
+static u64 s_xr_carry;
+#endif
+
 void pc_frame_boundary(void) {
     log_pad_wait();
     static int timing_debug = -1;
@@ -295,13 +303,41 @@ void pc_frame_boundary(void) {
      * peer that froze behind the other one by the whole freeze, which time
      * sync then took seconds to close (pc_net_catch_up_ns). */
     u64 late = next_sim_ns != 0 && now > next_sim_ns ? now - next_sim_ns : 0;
+#ifdef AURORA_ENABLE_OPENXR
+    /* Netplay in XR keeps its schedule in the headset's ticks instead
+     * (s_xr_due, below): how far behind it is is counted in those. */
+    const u64 xr_now = pc_net_active() ? aurora_xr_pace_count() : 0;
+    if (xr_now == 0) {
+        s_xr_due = 0;
+    } else {
+        late = s_xr_due != 0 && xr_now > s_xr_due ? (xr_now - s_xr_due) * sim_period : 0;
+    }
+#endif
     late = pc_net_active() ? pc_net_catch_up_ns(late) : late > sim_period * 2 ? 0 : late;
 #ifdef AURORA_ENABLE_OPENXR
     /* XR build: when the headset runs at a multiple of 60 Hz, take the frame
      * cadence from it, so each game frame is shown for the same number of
      * display frames (a free-running timer drifts against the display and
-     * repeats frames unevenly). Netplay keeps its own clock. */
-    if (!pc_net_active() && aurora_xr_pace()) {
+     * repeats frames unevenly). Offline every boundary waits for the next
+     * tick. Netplay too, but by a schedule of whole ticks that time sync
+     * moves: a boundary is due at tick s_xr_due, a frame later each
+     * boundary, later still by what time sync asks (its nudges, which can't
+     * lengthen one display frame, are added up into whole ticks), and as
+     * far behind the headset as the frames a freeze left owing, which then
+     * run back to back (pc_net_catch_up_ns). On its own clock, netplay's
+     * frames drifted against the display and carried the tick the menus
+     * last paced to, which SpaceWarp read as a gap before every frame. */
+    if (xr_now != 0) {
+        if (s_xr_due == 0 || xr_now >= s_xr_due) {
+            s_xr_due = xr_now - late / sim_period; /* due, or owing `late` */
+        }
+        if (aurora_xr_pace_until(s_xr_due)) {
+            next_sim_ns = SDL_GetTicksNS();
+        } else {
+            s_xr_due = 0;      /* the headset stopped pacing: the timer below */
+            next_sim_ns = now; /* from now, not from the frames paced */
+        }
+    } else if (!pc_net_active() && aurora_xr_pace()) {
         next_sim_ns = SDL_GetTicksNS();
     } else
 #endif
@@ -412,7 +448,17 @@ void pc_frame_boundary(void) {
     }
     /* Time sync spreads its correction here: a per-frame lengthening of the
      * next wait, plus a whole frame when a gap is too big to nudge away. */
-    next_sim_ns += pc_net_pace_adjust_ns();
+    const u64 adjust = pc_net_pace_adjust_ns();
+    next_sim_ns += adjust;
+#ifdef AURORA_ENABLE_OPENXR
+    if (s_xr_due != 0) { /* the next boundary: a tick on, and any whole ticks time sync's asked for */
+        s_xr_carry += adjust;
+        s_xr_due += 1 + s_xr_carry / sim_period;
+        s_xr_carry %= sim_period;
+    } else {
+        s_xr_carry = 0;
+    }
+#endif
     if (s_pre_cb) {
         u64 started = timing_debug ? SDL_GetTicksNS() : 0;
         s_pre_cb(s_retrace_count);

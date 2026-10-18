@@ -53,6 +53,17 @@ enum { AURORA_XR_MONO = 0, AURORA_XR_WORLD = 1, AURORA_XR_HUD = 2, AURORA_XR_HID
  * session, a non-multiple rate, AURORA_XR_LOCKSTEP=0). */
 bool aurora_xr_pace(void);
 
+/* The same pacing by tick count, for a caller that keeps its own schedule
+ * of whole ticks (netplay's time sync, src/pc/vi.c): one tick per game
+ * frame. aurora_xr_pace_count is the number of ticks so far, or 0 when there
+ * is nothing to pace to (as aurora_xr_pace returning false); the frame
+ * recorded next then carries no tick. aurora_xr_pace_until blocks until
+ * tick `count` has come (at once if it has), the frame recorded next
+ * carrying the newest tick, and returns false if pacing went away
+ * meanwhile. */
+uint64_t aurora_xr_pace_count(void);
+bool aurora_xr_pace_until(uint64_t count);
+
 /* Whether the fight on screen is paused. Call every frame the fight camera
  * draws. While paused, the controllers show lasers and the grips grab the
  * arena to move, turn and scale it instead of pressing Z. */

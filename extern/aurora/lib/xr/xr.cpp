@@ -9249,6 +9249,11 @@ bool render_eyes(const wgpu::CommandEncoder& cmd, gfx::detail::FramePacket& fram
       g_tweak.epoch && thisTick != 0 && R.epochCur.tick == thisTick ? R.epochBefore : R.epochCur;
   const int perGame = std::max(g_displayPerGameFrame.load(), 1);
   const bool gap = g_tweak.gap && thisTick != 0 && base.tick != 0 && thisTick > base.tick + static_cast<uint64_t>(perGame);
+  // AURORA_XR_GAP_LOG=1: what the gap is judged from, about once a second.
+  static const bool gapLog = env_flag("AURORA_XR_GAP_LOG", false);
+  if (static uint32_t n = 0; gapLog && ++n % 60 == 0)
+    Log.info("gap check: tick {} (display frame {}), base {} (cur {}, before {}), per game frame {}: {}", thisTick,
+             B.displayFrame, base.tick, R.epochCur.tick, R.epochBefore.tick, perGame, gap ? "gap" : "no gap");
   const bool havePrevViews = base.count != 0;
   // One game tick's worth of the head's motion in the vectors however many
   // ticks back `base` is. SpaceWarp extrapolates a frame's vectors as one
@@ -10244,4 +10249,33 @@ extern "C" bool aurora_xr_pace(void) {
   // presentation; 0 without one).
   aurora::gfx::set_xr_game_frame_tick(ticked ? g_lastTickFrame.load() : 0);
   return ticked;
+}
+
+extern "C" uint64_t aurora_xr_pace_count(void) {
+  using namespace aurora::xr;
+  if (g_displayPerGameFrame <= 0 || !g_sessionRunning) {
+    // Nothing to pace to: the frame recorded next carries no tick, rather
+    // than whichever one paced the last.
+    aurora::gfx::set_xr_game_frame_tick(0);
+    return 0;
+  }
+  std::lock_guard lock{g_paceMutex};
+  return g_paceTick;
+}
+
+extern "C" bool aurora_xr_pace_until(uint64_t count) {
+  using namespace aurora::xr;
+  std::unique_lock lock{g_paceMutex};
+  const bool waits = g_paceTick < count;
+  // Bounded like aurora_xr_pace: a session that stops ticking hands the
+  // caller back its own timer.
+  const bool due = g_paceCv.wait_for(lock, std::chrono::milliseconds(100), [&] {
+    return g_paceTick >= count || g_displayPerGameFrame <= 0 || !g_sessionRunning;
+  }) && g_paceTick >= count && g_displayPerGameFrame > 0 && g_sessionRunning;
+  const uint64_t frame = g_lastTickFrame.load();
+  lock.unlock();
+  if (due && waits)
+    pace_wake(frame);
+  aurora::gfx::set_xr_game_frame_tick(due ? frame : 0);
+  return due;
 }
