@@ -1805,7 +1805,7 @@ s32 grZebes_801DB3CC(HSD_GObj* gobj)
                         grZe_BubbleEntry* left = &grZe_8049F170[left_idx];
                         f32 dx = left->x08_x - cur->x08_x;
                         f32 dy = left->x0C_y - cur->x0C_y;
-                        f32 dist = sqrtf(dx * dx + dy * dy);
+                        f32 dist = sqrtf(gk_fmadds(dx, dx, dy * dy));
                         {
                             f32 col_r = yakumono_param->x74;
                             if (dist > col_r) {
@@ -1818,8 +1818,8 @@ s32 grZebes_801DB3CC(HSD_GObj* gobj)
                                 if (push > max_force) {
                                     push = max_force;
                                 }
-                                fx += dx * push;
-                                fy += dist * push;
+                                fx = gk_fmadds(dx, push, fx);
+                                fy = gk_fmadds(dist, push, fy);
                             }
                         }
                         neighbor_count = 1;
@@ -1829,7 +1829,7 @@ s32 grZebes_801DB3CC(HSD_GObj* gobj)
                         if (right->x00_active != 0) {
                             f32 dx2 = right->x08_x - cur->x08_x;
                             f32 dy2 = right->x0C_y - cur->x0C_y;
-                            f32 dist2 = sqrtf(dx2 * dx2 + dy2 * dy2);
+                            f32 dist2 = sqrtf(gk_fmadds(dx2, dx2, dy2 * dy2));
                             {
                                 f32 col_r2 = yakumono_param->x74;
                                 if (dist2 > col_r2) {
@@ -1842,8 +1842,8 @@ s32 grZebes_801DB3CC(HSD_GObj* gobj)
                                     if (push2 > max_force2) {
                                         push2 = max_force2;
                                     }
-                                    fx += dx2 * push2;
-                                    fy += dist2 * push2;
+                                    fx = gk_fmadds(dx2, push2, fx);
+                                    fy = gk_fmadds(dist2, push2, fy);
                                 }
                             }
                             neighbor_count += 1;
@@ -1870,7 +1870,7 @@ s32 grZebes_801DB3CC(HSD_GObj* gobj)
                     if (grZe_8049F170[b].x00_active != 0) {
                         f32 dx = grZe_8049F170[b].x08_x - ea->x08_x;
                         f32 dy = grZe_8049F170[b].x0C_y - ea->x0C_y;
-                        f32 dist = sqrtf(dx * dx + dy * dy);
+                        f32 dist = sqrtf(gk_fmadds(dx, dx, dy * dy));
                         {
                             grZe_YakumonoParam* yp = yakumono_param;
                             f32 avg_size;

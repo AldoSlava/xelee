@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "lbrefract.h"
 
 #include <math.h>
@@ -45,10 +46,10 @@ static struct DISC_STRUCT {
 static inline void lbRefract_WriteTexCoord(lbRefract_CallbackData* cb, s32 row,
                                            u32 col, f32 y, f32 x, f32 param0)
 {
-    u32 y_tex = 127.0f * (y * param0) + 128.0f;
+    u32 y_tex = gk_fmadds(127.0f, (y * param0), 128.0f);
     ((void (*)(lbRefract_CallbackData*, s32, s32, s32, s32, u32,
                u32)) cb->callback0)(cb, row, col, 0, 0, y_tex,
-                                    127.0f * (x * param0) + 128.0f);
+                                    gk_fmadds(127.0f, (x * param0), 128.0f));
 }
 
 /// @todo reconcile with MSL fmodf
@@ -64,7 +65,7 @@ static inline float my_fmodf(float a, float b)
         return a;
     }
     quotient = a / b;
-    return a - b * quotient;
+    return gk_fnmsubs(b, quotient, a);
 }
 
 static void lbRefract_80021CE8(lbRefract_CallbackData* cb, s32 arg1)
@@ -82,7 +83,7 @@ static void lbRefract_80021CE8(lbRefract_CallbackData* cb, s32 arg1)
         float x = -1.0f;
         float y_sq = y * y;
         for (col = 0; col < cb->width; col++) {
-            float dist = sqrtf(x * x + y_sq);
+            float dist = sqrtf(gk_fmadds(x, x, y_sq));
             if (dist > 1.0f) {
                 dist = 1.0f;
             }

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftCo_Damage.h"
 
 #include <Runtime/platform.h>
@@ -247,7 +248,7 @@ static float calcAngle(float angle)
     float sm = M_PI_2_F;
     float x = ca + cm;
     float y = sinf(angle) + sinf(sm);
-    if (x * x + y * y <= 0.0001f) {
+    if (gk_fmadds(x, x, y * y) <= 0.0001f) {
         return 0;
     }
     return atan2f(y, x);
@@ -538,10 +539,9 @@ void ftCo_8008E5A4(Fighter* fp)
         float kb_x = fp->x8c_kb_vel.x;
         float kb_y = fp->x8c_kb_vel.y;
         float kb_vel_x_neg = -kb_x;
-        float kb_mag = kb_vel_x_neg * kb_vel_x_neg + kb_y * kb_y;
+        float kb_mag = gk_fmadds(kb_vel_x_neg, kb_vel_x_neg, kb_y * kb_y);
         if (!(kb_mag < 0.00001f)) {
-            float f3 = kb_y * fp->input.lstick[0].x +
-                       kb_vel_x_neg * fp->input.lstick[0].y;
+            float f3 = gk_fmadds(kb_y, fp->input.lstick[0].x, kb_vel_x_neg * fp->input.lstick[0].y);
             float f30 = f3 * f3 / kb_mag;
             Vec3 lstick_vec3, kb_vel_cross_lstick;
             lstick_vec3.x = fp->input.lstick[0].x;
@@ -555,9 +555,9 @@ void ftCo_8008E5A4(Fighter* fp)
             {
                 float angle = atan2f(kb_y, kb_x);
                 float scale;
-                kb_mag = sqrtf(kb_x * kb_x + kb_y * kb_y);
+                kb_mag = sqrtf(gk_fmadds(kb_x, kb_x, kb_y * kb_y));
                 scale = MTXDegToRad(p_ftCommonData->x1A8);
-                angle += scale * f30;
+                angle = gk_fmadds(scale, f30, angle);
                 fp->x8c_kb_vel.x = kb_mag * cosf(angle);
                 fp->x8c_kb_vel.y = kb_mag * sinf(angle);
             }
@@ -602,7 +602,7 @@ void ftCo_Damage_OnExitHitlag(Fighter_GObj* gobj)
         if (kb_x || kb_y) {
             float kb_angle = atan2f(kb_y, kb_x);
             float scaled_kb_mag =
-                sqrtf(kb_x * kb_x + kb_y * kb_y) * p_ftCommonData->x1AC;
+                sqrtf(gk_fmadds(kb_x, kb_x, kb_y * kb_y)) * p_ftCommonData->x1AC;
             fp->x8c_kb_vel.x = scaled_kb_mag * cosf(kb_angle);
             fp->x8c_kb_vel.y = scaled_kb_mag * sinf(kb_angle);
         }

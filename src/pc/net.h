@@ -35,7 +35,11 @@ extern "C" {
 /* Version 10 computes sinf, cosf, tanf and atanf as the GameCube does
  * (src/pc/libm/pc_msl_trig.c) instead of musl's correctly rounded ones, so
  * a peer on 9 parts from it on the first diagonal air dodge. */
-#define PC_NET_PROTO_VERSION 10
+/* Version 11 rounds as the disc does: fused multiply-adds where the DOL has
+ * them (pc/gekko_fp.h), the SDK's paired-single vector and matrix calls,
+ * MSL's sqrtf from the hardware's frsqrte estimate; and grabs can be mashed
+ * out of again. A peer on 10 parts from it on the first DI. */
+#define PC_NET_PROTO_VERSION 11
 void pc_net_init(void);
 void pc_net_set_input_delay(int frames);
 bool pc_net_active(void);

@@ -70,7 +70,7 @@ f32 it_8026B1D4(HSD_GObj* gobj, HitCapsule* itemHitboxUnk)
                                  ip->x40_vel.y * ip->x40_vel.y +
                                  ip->x40_vel.z * ip->x40_vel.z);
 
-        ret += itemSpeed * it_804D6D28->x80_float[5];
+        ret = gk_fmadds(itemSpeed, it_804D6D28->x80_float[5], ret);
         ret += it_804D6D28->x80_float[6];
         if (ret <= 1.0) {
             return ret = 1;

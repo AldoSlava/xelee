@@ -134,6 +134,10 @@ float pc_cosf(float x) {
     return z * Q(n + 1);
 }
 
+float gk_sqrtf_call(float x) {
+    return gk_sqrtf(x);
+}
+
 float pc_tanf(float x) {
     const float c = pc_cosf(x); /* tanf calls cos__Ff first */
     const float s = pc_sinf(x);

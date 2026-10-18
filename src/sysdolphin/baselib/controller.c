@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include <string.h>
 #include "controller.h"
 
@@ -233,7 +234,7 @@ static inline f32 sq(f32 x)
 static inline f32 vec2DSqDist(f32 x, f32 y)
 {
     f32 ret;
-    ret = (x * x) + (y * y);
+    ret = gk_fmadds(x, x, (y * y));
     return ret;
 }
 

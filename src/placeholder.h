@@ -10,10 +10,13 @@ typedef void (*jmp_t)(void);
 typedef jmp_t jtbl_t[];
 
 #ifndef MWERKS_GEKKO
-/* Reciprocal sqrt estimate; callers Newton-refine it as 1/sqrt. */
-#define __frsqrte(x) (1.0 / sqrt(x))
-#define sqrtf__Ff(x) sqrtf(x)
-#define sqrtf_accurate(x) sqrtf(x)
+/* The hardware's reciprocal sqrt estimate, bit for bit (aurora's
+ * dolphin/ppc_math.h), which callers Newton-refine; and MSL's sqrtf
+ * (pc/gekko_fp.h). */
+#include <dolphin/ppc_math.h>
+#define __frsqrte(x) frsqrte(x)
+#define sqrtf__Ff(x) gk_sqrtf_call(x)
+#define sqrtf_accurate(x) gk_sqrtf_accurate(x)
 #define __fabs(f) fabsf(f)
 #endif
 

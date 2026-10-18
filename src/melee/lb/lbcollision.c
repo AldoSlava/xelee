@@ -1142,7 +1142,7 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
     PAD_STACK(4);
     // Fast reject when the expanded hit segment AABB misses both hurt
     // endpoints.
-    broadphase_radius = (hurt_radius * broadphase_scale) + hit_radius;
+    broadphase_radius = gk_fmadds(hurt_radius, broadphase_scale, hit_radius);
     hit_start_copy = *hit_start;
     hurt_start_copy = *hurt_start;
     hit_end_x = hit_end->x;
@@ -1231,20 +1231,19 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
     (void) hurt_end_z;
     offset.z = hit_start_copy.z - hurt_start_z;
     hurt_start_dot =
-        axis.z * offset.z + (axis.x * offset.x + axis.y * offset.y);
+        gk_fmadds(axis.z, offset.z, (gk_fmadds(axis.x, offset.x, axis.y * offset.y)));
     (void) hurt_end_y;
     (void) hurt_end_x;
     segment_dot =
-        hit_delta.z * axis.z + (hit_delta.x * axis.x + midpoint.y * axis.y);
+        gk_fmadds(hit_delta.z, axis.z, (gk_fmadds(hit_delta.x, axis.x, midpoint.y * axis.y)));
     {
         PAD_STACK(4);
-        hit_start_dot = hit_delta.z * offset.z +
-                        (hit_delta.x * offset.x + midpoint.y * offset.y);
+        hit_start_dot = gk_fmadds(hit_delta.z, offset.z, (gk_fmadds(hit_delta.x, offset.x, midpoint.y * offset.y)));
     }
     hurt_len_sq = axis.y * axis.y;
-    hurt_len_sq = axis.x * axis.x + hurt_len_sq;
-    hurt_len_sq = axis.z * axis.z + hurt_len_sq;
-    closest_denom = (hit_len_sq * hurt_len_sq) - (segment_dot * segment_dot);
+    hurt_len_sq = gk_fmadds(axis.x, axis.x, hurt_len_sq);
+    hurt_len_sq = gk_fmadds(axis.z, axis.z, hurt_len_sq);
+    closest_denom = gk_fmsubs(hit_len_sq, hurt_len_sq, (segment_dot * segment_dot));
     (void) hit_len_sq;
     if (approximatelyZero(hurt_len_sq)) {
         if (approximatelyZero(hit_len_sq)) {
@@ -1261,20 +1260,17 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
         }
     } else {
         if (approximatelyZero(closest_denom)) {
-            midpoint.x = 0.5 * axis.x + hurt_start_copy.x;
-            midpoint.y = 0.5 * axis.y + hurt_start_y;
-            midpoint.z = 0.5 * axis.z + hurt_start_z;
+            midpoint.x = gk_fmadd(0.5, axis.x, hurt_start_copy.x);
+            midpoint.y = gk_fmadd(0.5, axis.y, hurt_start_y);
+            midpoint.z = gk_fmadd(0.5, axis.z, hurt_start_z);
             separation.x = hit_start_copy.x - midpoint.x;
             midpoint.x = hit_end->x - midpoint.x;
             separation.y = hit_start_copy.y - midpoint.y;
             midpoint.y = hit_end->y - midpoint.y;
             separation.z = hit_start_copy.z - midpoint.z;
             midpoint.z = hit_end->z - midpoint.z;
-            if (((separation.z * separation.z) +
-                 ((separation.x * separation.x) +
-                  (separation.y * separation.y))) <
-                ((midpoint.z * midpoint.z) +
-                 ((midpoint.x * midpoint.x) + (midpoint.y * midpoint.y))))
+            if ((gk_fmadds(separation.z, separation.z, (gk_fmadds(separation.x, separation.x, (separation.y * separation.y))))) <
+                (gk_fmadds(midpoint.z, midpoint.z, (gk_fmadds(midpoint.x, midpoint.x, (midpoint.y * midpoint.y))))))
             {
                 Vec3 a2;
                 Vec3 d1;
@@ -1289,11 +1285,10 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
                     float dot;
 
                     a2 = *hit_start;
-                    dot = (d1.z * (c3.z - a2.z)) +
-                          ((d1.x * (c3.x - a2.x)) + (d1.y * (c3.y - a2.y)));
+                    dot = gk_fmadds(d1.z, (c3.z - a2.z), (gk_fmadds(d1.x, (c3.x - a2.x), (d1.y * (c3.y - a2.y)))));
                     hurt_param_from_hit_start =
                         -dot /
-                        ((d1.z * d1.z) + ((d1.x * d1.x) + (d1.y * d1.y)));
+                        (gk_fmadds(d1.z, d1.z, (gk_fmadds(d1.x, d1.x, (d1.y * d1.y)))));
                 }
                 if (hurt_param_from_hit_start > 1.0) {
                     hurt_param_from_hit_start = 1.0F;
@@ -1313,11 +1308,10 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
                 d1.z = hurt_end_z - hurt_start->z;
                 {
                     b0 = *hit_end;
-                    dot = (d1.z * (c2.z - b0.z)) +
-                          ((d1.x * (c2.x - b0.x)) + (d1.y * (c2.y - b0.y)));
+                    dot = gk_fmadds(d1.z, (c2.z - b0.z), (gk_fmadds(d1.x, (c2.x - b0.x), (d1.y * (c2.y - b0.y)))));
                     hurt_param_from_hit_end =
                         -dot /
-                        ((d1.z * d1.z) + ((d1.x * d1.x) + (d1.y * d1.y)));
+                        (gk_fmadds(d1.z, d1.z, (gk_fmadds(d1.x, d1.x, (d1.y * d1.y)))));
                 }
                 if (hurt_param_from_hit_end > 1.0) {
                     hurt_param_from_hit_end = hit_param;
@@ -1327,11 +1321,9 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
                 hurt_param = hurt_param_from_hit_end;
             }
         } else {
-            hit_param = ((segment_dot * hurt_start_dot) -
-                         (hurt_len_sq * hit_start_dot)) /
+            hit_param = (gk_fmsubs(segment_dot, hurt_start_dot, (hurt_len_sq * hit_start_dot))) /
                         closest_denom;
-            hurt_param = ((hit_len_sq * hurt_start_dot) -
-                          (segment_dot * hit_start_dot)) /
+            hurt_param = (gk_fmsubs(hit_len_sq, hurt_start_dot, (segment_dot * hit_start_dot))) /
                          closest_denom;
             if ((hit_param > 1.0) || (hit_param < 0.0) || (hurt_param > 1.0) ||
                 (hurt_param < 0.0))
@@ -1372,18 +1364,17 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
             }
         }
     }
-    hit_closest->x = (hit_delta.x * hit_param) + hit_start_copy.x;
-    hit_closest->y = (hit_delta.y * hit_param) + hit_start_copy.y;
-    hit_closest->z = (hit_delta.z * hit_param) + hit_start_copy.z;
-    hurt_closest->x = (axis.x * hurt_param) + hurt_start_copy.x;
-    hurt_closest->y = (axis.y * hurt_param) + hurt_start_y;
-    hurt_closest->z = (axis.z * hurt_param) + hurt_start_z;
+    hit_closest->x = gk_fmadds(hit_delta.x, hit_param, hit_start_copy.x);
+    hit_closest->y = gk_fmadds(hit_delta.y, hit_param, hit_start_copy.y);
+    hit_closest->z = gk_fmadds(hit_delta.z, hit_param, hit_start_copy.z);
+    hurt_closest->x = gk_fmadds(axis.x, hurt_param, hurt_start_copy.x);
+    hurt_closest->y = gk_fmadds(axis.y, hurt_param, hurt_start_y);
+    hurt_closest->z = gk_fmadds(axis.z, hurt_param, hurt_start_z);
     separation.x = hit_closest->x - hurt_closest->x;
     separation.y = hit_closest->y - hurt_closest->y;
     separation.z = hit_closest->z - hurt_closest->z;
     closest_dist_sq =
-        (separation.z * separation.z) +
-        ((separation.x * separation.x) + (separation.y * separation.y));
+        gk_fmadds(separation.z, separation.z, (gk_fmadds(separation.x, separation.x, (separation.y * separation.y))));
     axis.x = sqrtf(closest_dist_sq);
     if (approximatelyZero(axis.x)) {
         *out_overlap = (hit_radius + hurt_radius) - axis.x;
@@ -1399,8 +1390,7 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
     separation.y = hit_start_copy.y - hit_delta.y;
     separation.z = hit_start_copy.z - hit_delta.z;
     local_dist_sq =
-        (separation.z * separation.z) +
-        ((separation.x * separation.x) + (separation.y * separation.y));
+        gk_fmadds(separation.z, separation.z, (gk_fmadds(separation.x, separation.x, (separation.y * separation.y))));
     local_dist_sq = sqrtf(local_dist_sq);
     scaled_hurt_radius = (hurt_radius * axis.x) / local_dist_sq;
     contact_lerp = scaled_hurt_radius / axis.x;
@@ -1408,13 +1398,13 @@ bool lbColl_80006E58(Vec3* hit_start, Vec3* hit_end, Vec3* hurt_start,
     *out_overlap = allowed_distance - axis.x;
     hurt_closest_x = hurt_closest->x;
     out_contact_pos->x =
-        (contact_lerp * (hit_closest->x - hurt_closest_x)) + hurt_closest_x;
+        gk_fmadds(contact_lerp, (hit_closest->x - hurt_closest_x), hurt_closest_x);
     hurt_closest_y = hurt_closest->y;
     out_contact_pos->y =
-        (contact_lerp * (hit_closest->y - hurt_closest_y)) + hurt_closest_y;
+        gk_fmadds(contact_lerp, (hit_closest->y - hurt_closest_y), hurt_closest_y);
     hurt_closest_z = hurt_closest->z;
     out_contact_pos->z =
-        (contact_lerp * (hit_closest->z - hurt_closest_z)) + hurt_closest_z;
+        gk_fmadds(contact_lerp, (hit_closest->z - hurt_closest_z), hurt_closest_z);
     if (allowed_distance < axis.x) {
         return false;
     }

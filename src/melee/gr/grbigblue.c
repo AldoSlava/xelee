@@ -1318,7 +1318,7 @@ void fn_801E8560(void* user_data, int joint_id, CollData* coll, int coll_x50,
     {
         f32 dx = pos.x - coll->cur_pos.x;
         f32 dy = pos.y - coll->cur_pos.y;
-        dist = sqrtf(dy * dy + dx * dx);
+        dist = sqrtf(gk_fmadds(dy, dy, dx * dx));
     }
 
     if (dist > 2.0F) {
@@ -1332,11 +1332,9 @@ void fn_801E8560(void* user_data, int joint_id, CollData* coll, int coll_x50,
         }
 
         if (pos.x < coll->cur_pos.x) {
-            gp->u.bigblue.data[active_joint].x24 +=
-                dist * ((f32) coll_x50 / 1000.0F);
+            gp->u.bigblue.data[active_joint].x24 = gk_fmadds(dist, ((f32) coll_x50 / 1000.0F), gp->u.bigblue.data[active_joint].x24);
         } else {
-            gp->u.bigblue.data[active_joint].x28 +=
-                dist * ((f32) coll_x50 / 1000.0F);
+            gp->u.bigblue.data[active_joint].x28 = gk_fmadds(dist, ((f32) coll_x50 / 1000.0F), gp->u.bigblue.data[active_joint].x28);
         }
 
         gp->u.bigblue.data[active_joint].x2C++;

@@ -2354,7 +2354,7 @@ void ftCo_800A49B4(Fighter* fp)
     struct CpuFighter* data = &fp->cpu;
     f32 dx = fp->cur_pos.x - data->x54.x;
     f32 dy = fp->cur_pos.y - data->x54.y;
-    data->x5C = sqrtf(dx * dx + dy * dy);
+    data->x5C = sqrtf(gk_fmadds(dx, dx, dy * dy));
 }
 
 static inline bool inlineD0(Fighter* fp, Fighter* fp1)
@@ -3001,7 +3001,7 @@ static inline float ftCo_GetItemDistance(Fighter* fp, Item* ip)
     }
     dx = fp->cur_pos.x - ip->pos.x;
     dy = fp->cur_pos.y - ip->pos.y;
-    return sqrtf(dx * dx + dy * dy);
+    return sqrtf(gk_fmadds(dx, dx, dy * dy));
 }
 
 /// Decide which common item to target
@@ -3895,7 +3895,7 @@ void ftCo_800A80E4(Fighter* fp)
         f32 dx = fp->cur_pos.x - other_fp->cur_pos.x;
         f32 dy = fp->cur_pos.y - other_fp->cur_pos.y;
         Vec3 vec;
-        if (!(sqrtf(dx * dx + dy * dy) > 50.0) &&
+        if (!(sqrtf(gk_fmadds(dx, dx, dy * dy)) > 50.0) &&
             ftCo_800A6700(fp, &other_fp->cur_pos, &vec))
         {
             ftCo_800A1F3C(fp, vec.x, vec.y, 5.0F);
@@ -4867,7 +4867,7 @@ static inline int ftCo_800AA42C_inline0(float clamp, float dist, float near,
     }
     {
         float scale = (dist - near) / (far - near);
-        float tmp = raw + scale * (clamp - raw);
+        float tmp = gk_fmadds(scale, (clamp - raw), raw);
         int new_clamp = tmp;
         if (new_clamp > clamp) {
             new_clamp = clamp;
@@ -4907,7 +4907,7 @@ void ftCo_800AA42C(Fighter* fp)
     {
         float dx = data->x54.x - fp->cur_pos.x;
         float dy = data->x54.y - fp->cur_pos.y;
-        dist = sqrtf(dx * dx + dy * dy);
+        dist = sqrtf(gk_fmadds(dx, dx, dy * dy));
     }
     near = data->x38;
     if (dist - near > data->x3C) {
@@ -5642,11 +5642,11 @@ void ftCo_800AC5A0(Fighter* fp)
         float kb_x = fp->x8c_kb_vel.x;
         float kb_y = fp->x8c_kb_vel.y;
         float kb_mag;
-        kb_mag = kb_x * kb_x + (
+        kb_mag = gk_fmadds(kb_x, kb_x, (
 #ifdef MUST_MATCH
                                    kb_mag =
 #endif
-                                       kb_y * kb_y);
+                                       kb_y * kb_y));
         kb_mag = sqrtf(kb_mag);
         if (!ftCo_IsNearlyZero(kb_mag)) {
             float x = kb_x * (1.0F / kb_mag);
@@ -6149,7 +6149,7 @@ static bool ftCo_800ADE48(Fighter* fp)
         f32 dist;
 
         dx = fp->cur_pos.x - data->x54.x;
-        dist = sqrtf(dx * dx + dy * dy);
+        dist = sqrtf(gk_fmadds(dx, dx, dy * dy));
         data->x5C = dist;
     }
     if (data->x88 > 0) {
@@ -7239,7 +7239,7 @@ void ftCo_800B04DC(Fighter* fp)
         if (target != NULL && fp->ground_or_air != GA_Air) {
             f32 dy = fp->cur_pos.y - target->cur_pos.y;
             f32 dx = fp->cur_pos.x - target->cur_pos.x;
-            dist[0] = sqrtf(dx * dx + dy * dy);
+            dist[0] = sqrtf(gk_fmadds(dx, dx, dy * dy));
             if (!(dist[0] > 50.0) &&
                 ftCo_800A6700(fp, &target->cur_pos, &approach_pos))
             {
@@ -8411,7 +8411,7 @@ static inline void ftCo_CpuUpdateRecoveryScale(Fighter* fp,
 {
     if (*timer % 30 == 0) {
         f32 rand = HSD_Randf();
-        data->x570 = 0.05 * (data->level + 1) + 0.05 * rand;
+        data->x570 = gk_fmadd(0.05, (data->level + 1), 0.05 * rand);
     }
     ftCo_800A0CB0(fp);
 }
@@ -8450,7 +8450,7 @@ void ftCo_800B33B0(Fighter* fp)
     Vec3 ceiling_pos;
 
     if (*timer % 300 == 0) {
-        if (HSD_Randf() < 0.04f * data->level + 0.3f) {
+        if (HSD_Randf() < gk_fmadds(0.04f, data->level, 0.3f)) {
             data->xFA_b34 = 1;
         } else {
             data->xFA_b34 = 0;
@@ -8513,7 +8513,7 @@ void ftCo_800B33B0(Fighter* fp)
     }
     vy = fp->coll_data.cur_pos.y - fp->coll_data.last_pos.y;
     vx = fp->coll_data.cur_pos.x - fp->coll_data.last_pos.x;
-    vmag = sqrtf(vx * vx + vy * vy);
+    vmag = sqrtf(gk_fmadds(vx, vx, vy * vy));
     if (vmag < 0.01) {
         result = 1;
     } else {

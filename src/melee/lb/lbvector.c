@@ -109,7 +109,7 @@ float lbVector_AngleXY(Vec3* a, Vec3* b)
         lbVector_Len_xy_accurate(a) * lbVector_Len_xy_accurate(b);
 
     if (lena_lenb) {
-        float cosine = (a->x * b->x + a->y * b->y) / lena_lenb;
+        float cosine = (gk_fmadds(a->x, b->x, a->y * b->y)) / lena_lenb;
         if (cosine > 1.0f) {
             cosine = 1.0f;
         }
@@ -505,7 +505,7 @@ float lbVector_8000E838(Vec3* a, Vec3* b, Vec3* c, Vec3* d)
     int tooSmall;
 
     lbVector_Diff(b, a, &b_a);
-    sqrlen_b_a = b_a.x * b_a.x + b_a.y * b_a.y + b_a.z * b_a.z;
+    sqrlen_b_a = gk_fmadds(b_a.z, b_a.z, gk_fmadds(b_a.x, b_a.x, b_a.y * b_a.y));
     lbVector_Diff(c, a, &c_a);
     if (sqrlen_b_a < 9.9999997473787516e-06f &&
         sqrlen_b_a > -9.9999997473787516e-06f)
@@ -520,11 +520,11 @@ float lbVector_8000E838(Vec3* a, Vec3* b, Vec3* c, Vec3* d)
     } else {
         Vec3 v3;
         float f1 =
-            (b_a.x * c_a.x + b_a.y * c_a.y + b_a.z * c_a.z) / sqrlen_b_a;
+            (gk_fmadds(b_a.z, c_a.z, gk_fmadds(b_a.x, c_a.x, b_a.y * c_a.y))) / sqrlen_b_a;
 
-        d->x = a->x + b_a.x * f1;
-        d->y = a->y + b_a.y * f1;
-        d->z = a->z + b_a.z * f1;
+        d->x = gk_fmadds(b_a.x, f1, a->x);
+        d->y = gk_fmadds(b_a.y, f1, a->y);
+        d->z = gk_fmadds(b_a.z, f1, a->z);
         lbVector_Diff(c, d, &v3);
         return lbVector_Len(&v3);
     }

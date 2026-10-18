@@ -223,7 +223,7 @@ int ftCo_800B4AB0(Fighter* fp, Fighter* target, void* arg2)
     cpu->x74.x = 0.0f;
     cpu->x6C.y = 0.0f;
     cpu->x6C.x = 0.0f;
-    halfRange = (f32) (0.5 * cpu->x570 + 0.5);
+    halfRange = (f32) (gk_fmadd(0.5, cpu->x570, 0.5));
     if (list == NULL) {
         return 0;
     }
@@ -269,7 +269,7 @@ int ftCo_800B4AB0(Fighter* fp, Fighter* target, void* arg2)
             continue;
         }
         t = list->x04;
-        relx = (tgtVx * t + tgtX) - (fpVx * t + fpX);
+        relx = (gk_fmadds(tgtVx, t, tgtX)) - (gk_fmadds(fpVx, t, fpX));
         if (target->ground_or_air == GA_Air) {
             if (fpGrav < 0.00001f && fpGrav > -0.00001f) {
                 nearzero = true;
@@ -282,20 +282,19 @@ int ftCo_800B4AB0(Fighter* fp, Fighter* target, void* arg2)
                 v = -(fpTermNeg - fpY) / fpGrav;
             }
             if (v <= 0.0f) {
-                fpPredY = fpVy * t + fpY;
+                fpPredY = gk_fmadds(fpVy, t, fpY);
             } else if (t < v) {
                 sq = sqrtf_store(t, &sqrt_tmp[2]);
-                fpPredY = (f32) ((f64) fpY + ((f64) (fpVy * t) -
-                                              0.5 * (f64) (fpGrav * sq)));
+                fpPredY = (f32) ((f64) fpY + (gk_fnmsub(0.5, (f64) (fpGrav * sq), (f64) (fpVy * t))));
             } else {
                 sq = sqrtf_store(v, &sqrt_tmp[1]);
                 fpPredY =
                     (f32) ((f64) fpY +
                            ((f64) (fpTermNeg * (t - v)) +
-                            ((f64) (fpVy * t) - 0.5 * (f64) (fpGrav * sq))));
+                            (gk_fnmsub(0.5, (f64) (fpGrav * sq), (f64) (fpVy * t)))));
             }
         } else {
-            fpPredY = fpVy * t + fpY;
+            fpPredY = gk_fmadds(fpVy, t, fpY);
         }
         if (target->ground_or_air == GA_Air) {
             if (tgtGrav < 0.00001f && tgtGrav > -0.00001f) {
@@ -309,21 +308,19 @@ int ftCo_800B4AB0(Fighter* fp, Fighter* target, void* arg2)
                 v = -(tgtTermNeg - tgtVy) / tgtGrav;
             }
             if (v <= 0.0f) {
-                relPredY = (tgtVy * t + tgtY) - fpPredY;
+                relPredY = (gk_fmadds(tgtVy, t, tgtY)) - fpPredY;
             } else if (t < v) {
                 sq = sqrtf_store(t, &sqrt_tmp[0]);
-                relPredY = (f32) (((f64) (tgtVy * t + tgtY) -
-                                   0.5 * (f64) (tgtGrav * sq)) -
+                relPredY = (f32) ((gk_fnmsub(0.5, (f64) (tgtGrav * sq), (f64) (gk_fmadds(tgtVy, t, tgtY)))) -
                                   (f64) fpPredY);
             } else {
                 sq = sqrtf_store(v, sqrt_tmp - 1);
                 relPredY = (f32) (((f64) (tgtTermNeg * (t - v)) +
-                                   ((f64) (tgtVy * t + tgtY) -
-                                    0.5 * (f64) (tgtGrav * sq))) -
+                                   (gk_fnmsub(0.5, (f64) (tgtGrav * sq), (f64) (gk_fmadds(tgtVy, t, tgtY))))) -
                                   (f64) fpPredY);
             }
         } else {
-            relPredY = (tgtVy * t + tgtY) - fpPredY;
+            relPredY = (gk_fmadds(tgtVy, t, tgtY)) - fpPredY;
         }
         if (fp->facing_dir > 0.0f) {
             dirx = list->x08 * fp->x34_scale.y;
@@ -439,7 +436,7 @@ int ftCo_800B52AC(Fighter* fp, Fighter* target, void* arg2, f32 reach)
     cpu->x74.x = 0.0f;
     cpu->x6C.y = 0.0f;
     cpu->x6C.x = 0.0f;
-    halfRange = (f32) (0.5 * cpu->x570 + 0.5);
+    halfRange = (f32) (gk_fmadd(0.5, cpu->x570, 0.5));
     if (list == NULL) {
         return 0;
     }
@@ -483,7 +480,7 @@ int ftCo_800B52AC(Fighter* fp, Fighter* target, void* arg2, f32 reach)
             continue;
         }
         t = list->x04;
-        relx = (tgtVx * t + tgtX) - (fpVx * t + fpX);
+        relx = (gk_fmadds(tgtVx, t, tgtX)) - (gk_fmadds(fpVx, t, fpX));
         if (target->ground_or_air == GA_Air) {
             if (fpGrav < 0.00001f && fpGrav > -0.00001f) {
                 nearzero = true;
@@ -496,20 +493,19 @@ int ftCo_800B52AC(Fighter* fp, Fighter* target, void* arg2, f32 reach)
                 v = -(fpTermNeg - fpY) / fpGrav;
             }
             if (v <= 0.0f) {
-                fpPredY = fpVy * t + fpY;
+                fpPredY = gk_fmadds(fpVy, t, fpY);
             } else if (t < v) {
                 sq = sqrtf_store(t, &sqrt_tmp[2]);
-                fpPredY = (f32) ((f64) fpY + ((f64) (fpVy * t) -
-                                              0.5 * (f64) (fpGrav * sq)));
+                fpPredY = (f32) ((f64) fpY + (gk_fnmsub(0.5, (f64) (fpGrav * sq), (f64) (fpVy * t))));
             } else {
                 sq = sqrtf_store(v, &sqrt_tmp[1]);
                 fpPredY =
                     (f32) ((f64) fpY +
                            ((f64) (fpTermNeg * (t - v)) +
-                            ((f64) (fpVy * t) - 0.5 * (f64) (fpGrav * sq))));
+                            (gk_fnmsub(0.5, (f64) (fpGrav * sq), (f64) (fpVy * t)))));
             }
         } else {
-            fpPredY = fpVy * t + fpY;
+            fpPredY = gk_fmadds(fpVy, t, fpY);
         }
         if (target->ground_or_air == GA_Air) {
             if (tgtGrav < 0.00001f && tgtGrav > -0.00001f) {
@@ -523,27 +519,25 @@ int ftCo_800B52AC(Fighter* fp, Fighter* target, void* arg2, f32 reach)
                 v = -(tgtTermNeg - tgtVy) / tgtGrav;
             }
             if (v <= 0.0f) {
-                relPredY = (tgtVy * t + tgtY) - fpPredY;
+                relPredY = (gk_fmadds(tgtVy, t, tgtY)) - fpPredY;
             } else if (t < v) {
                 sq = sqrtf_store(t, &sqrt_tmp[0]);
-                relPredY = (f32) (((f64) (tgtVy * t + tgtY) -
-                                   0.5 * (f64) (tgtGrav * sq)) -
+                relPredY = (f32) ((gk_fnmsub(0.5, (f64) (tgtGrav * sq), (f64) (gk_fmadds(tgtVy, t, tgtY)))) -
                                   (f64) fpPredY);
             } else {
                 sq = sqrtf_store(v, sqrt_tmp - 1);
                 relPredY = (f32) (((f64) (tgtTermNeg * (t - v)) +
-                                   ((f64) (tgtVy * t + tgtY) -
-                                    0.5 * (f64) (tgtGrav * sq))) -
+                                   (gk_fnmsub(0.5, (f64) (tgtGrav * sq), (f64) (gk_fmadds(tgtVy, t, tgtY))))) -
                                   (f64) fpPredY);
             }
         } else {
-            relPredY = (tgtVy * t + tgtY) - fpPredY;
+            relPredY = (gk_fmadds(tgtVy, t, tgtY)) - fpPredY;
         }
         if (fp->facing_dir > 0.0f) {
             dirx = list->x08 * fp->x34_scale.y;
-            diry = list->x0C * fp->x34_scale.y + reach;
+            diry = gk_fmadds(list->x0C, fp->x34_scale.y, reach);
         } else {
-            dirx = -list->x0C * fp->x34_scale.y - reach;
+            dirx = gk_fmsubs(-list->x0C, fp->x34_scale.y, reach);
             diry = -list->x08 * fp->x34_scale.y;
         }
         dirx *= halfRange;
@@ -551,7 +545,7 @@ int ftCo_800B52AC(Fighter* fp, Fighter* target, void* arg2, f32 reach)
         scale = fp->x34_scale.y;
         {
             f32 l = list->x10 * scale;
-            f32 u = list->x14 * scale + reach;
+            f32 u = gk_fmadds(list->x14, scale, reach);
             l *= halfRange;
             u *= halfRange;
             lower = l;
@@ -677,7 +671,7 @@ int ftCo_800B5AB0(Fighter* fp, void* arg1, void* arg2)
             continue;
         }
         t = ftCo_CpuAttackValue(list->x04, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        relx = (x50Vx * t + x50X) - (fpVx * t + fpX);
+        relx = (gk_fmadds(x50Vx, t, x50X)) - (gk_fmadds(fpVx, t, fpX));
         if (x50->ground_or_air == GA_Air) {
             if (fpGrav < 0.00001f && fpGrav > -0.00001f) {
                 nearzero = true;
@@ -690,19 +684,17 @@ int ftCo_800B5AB0(Fighter* fp, void* arg1, void* arg2)
                 v = -(fpTermNeg - fpY) / fpGrav;
             }
             if (v <= 0.0f) {
-                fpPredY = fpVy * t + fpY;
+                fpPredY = gk_fmadds(fpVy, t, fpY);
             } else if (t < v) {
                 fpPredY =
-                    (f32) ((f64) fpY + ((f64) (fpVy * t) -
-                                        0.5 * (f64) (fpGrav * sqrtf(t))));
+                    (f32) ((f64) fpY + (gk_fnmsub(0.5, (f64) (fpGrav * sqrtf(t)), (f64) (fpVy * t))));
             } else {
                 fpPredY =
                     (f32) ((f64) fpY + ((f64) (fpTermNeg * (t - v)) +
-                                        ((f64) (fpVy * t) -
-                                         0.5 * (f64) (fpGrav * sqrtf(v)))));
+                                        (gk_fnmsub(0.5, (f64) (fpGrav * sqrtf(v)), (f64) (fpVy * t)))));
             }
         } else {
-            fpPredY = fpVy * t + fpY;
+            fpPredY = gk_fmadds(fpVy, t, fpY);
         }
         if (x50->ground_or_air == GA_Air) {
             if (x50Grav < 0.00001f && x50Grav > -0.00001f) {
@@ -716,19 +708,17 @@ int ftCo_800B5AB0(Fighter* fp, void* arg1, void* arg2)
                 v = -(x50TermNeg - x50Vy) / x50Grav;
             }
             if (v <= 0.0f) {
-                relPredY = (x50Vy * t + x50Y) - fpPredY;
+                relPredY = (gk_fmadds(x50Vy, t, x50Y)) - fpPredY;
             } else if (t < v) {
-                relPredY = (f32) (((f64) (x50Vy * t + x50Y) -
-                                   0.5 * (f64) (x50Grav * sqrtf(t))) -
+                relPredY = (f32) ((gk_fnmsub(0.5, (f64) (x50Grav * sqrtf(t)), (f64) (gk_fmadds(x50Vy, t, x50Y)))) -
                                   (f64) fpPredY);
             } else {
                 relPredY = (f32) (((f64) (x50TermNeg * (t - v)) +
-                                   ((f64) (x50Vy * t + x50Y) -
-                                    0.5 * (f64) (x50Grav * sqrtf(v)))) -
+                                   (gk_fnmsub(0.5, (f64) (x50Grav * sqrtf(v)), (f64) (gk_fmadds(x50Vy, t, x50Y))))) -
                                   (f64) fpPredY);
             }
         } else {
-            relPredY = (x50Vy * t + x50Y) - fpPredY;
+            relPredY = (gk_fmadds(x50Vy, t, x50Y)) - fpPredY;
         }
         if (fp->facing_dir > 0.0f) {
             dirx = list->x08;

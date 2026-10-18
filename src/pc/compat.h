@@ -25,4 +25,10 @@ float melee_powf(float x, float y);
 #define powf melee_powf
 #endif
 
+/* The game's sqrtf is MSL's, not libm's (pc/gekko_fp.h). */
+#if defined(MELEE_GAME_TU) && !defined(__cplusplus)
+#include "pc/gekko_fp.h"
+#define sqrtf gk_sqrtf
+#endif
+
 #endif

@@ -717,7 +717,7 @@ static inline void _tyDisplay_80318CB4_sort_pos(TyDspGrid* grid, s32 n2)
 
 static inline f32 _tyDisplay_80318CB4_calc_dist_sq(f32 dz, f32 dx)
 {
-    return dx * dx + dz * dz;
+    return gk_fmadds(dx, dx, dz * dz);
 }
 
 static inline void _tyDisplay_80318CB4_place_toys(TyDspGrid* grid,
@@ -812,8 +812,8 @@ void _tyDisplay_80318CB4(s32 arg0)
             grid->pos[i].x = radius * cosf(rad);
             grid->pos[i].z = radius * sinf(rad);
             if (arg0 == 0) {
-                grid->pos[i].x = 2.0f * HSD_Randf() + grid->pos[i].x;
-                grid->pos[i].z = 2.0f * HSD_Randf() + grid->pos[i].z;
+                grid->pos[i].x = gk_fmadds(2.0f, HSD_Randf(), grid->pos[i].x);
+                grid->pos[i].z = gk_fmadds(2.0f, HSD_Randf(), grid->pos[i].z);
             }
             if (HSD_Randi(3) != 0) {
                 theta = atan2f(grid->pos[i].z, grid->pos[i].x);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftmewtwospecialhi.h"
 
 #include <Runtime/platform.h>
@@ -433,8 +434,7 @@ void ftMt_SpecialHi_Enter(HSD_GObj* gobj)
             fp->mv.mt.SpecialHi.stickY = stickVec.y;
             fp->gr_vel =
                 fp->facing_dir *
-                (((mewtwoAttrs->x5C_MEWTWO_TELEPORT_MOMENTUM * sqrt_stick) +
-                  mewtwoAttrs->x60_MEWTWO_TELEPORT_MOMENTUM_ADD) *
+                ((gk_fmadds(mewtwoAttrs->x5C_MEWTWO_TELEPORT_MOMENTUM, sqrt_stick, mewtwoAttrs->x60_MEWTWO_TELEPORT_MOMENTUM_ADD)) *
                  cosf(vel));
 
             Fighter_ChangeMotionState(gobj, ftMt_MS_SpecialHiLost, Ft_MF_None,
@@ -504,12 +504,10 @@ void ftMt_SpecialAirHi_Enter(HSD_GObj* gobj)
     }
 
     fp->self_vel.x = fp->facing_dir *
-                     ((mewtwoAttrs->x5C_MEWTWO_TELEPORT_MOMENTUM * sqrt_stick +
-                       mewtwoAttrs->x60_MEWTWO_TELEPORT_MOMENTUM_ADD) *
+                     ((gk_fmadds(mewtwoAttrs->x5C_MEWTWO_TELEPORT_MOMENTUM, sqrt_stick, mewtwoAttrs->x60_MEWTWO_TELEPORT_MOMENTUM_ADD)) *
                       cosf(floatVar));
 
-    fp->self_vel.y = (mewtwoAttrs->x5C_MEWTWO_TELEPORT_MOMENTUM * sqrt_stick +
-                      mewtwoAttrs->x60_MEWTWO_TELEPORT_MOMENTUM_ADD) *
+    fp->self_vel.y = (gk_fmadds(mewtwoAttrs->x5C_MEWTWO_TELEPORT_MOMENTUM, sqrt_stick, mewtwoAttrs->x60_MEWTWO_TELEPORT_MOMENTUM_ADD)) *
                      sinf(floatVar);
 
     Fighter_ChangeMotionState(gobj, ftMt_MS_SpecialAirHiLost, Ft_MF_None, 35,

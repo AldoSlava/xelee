@@ -1,6 +1,7 @@
 #ifndef GALE01_00D2EC
 #define GALE01_00D2EC
 
+#include <pc/gekko_fp.h>
 #include <sysdolphin/baselib/forward.h>
 
 #include <math.h>
@@ -9,7 +10,7 @@
 
 static inline float lbVector_Len(Vec3* vec)
 {
-    return sqrtf(vec->x * vec->x + vec->y * vec->y + vec->z * vec->z);
+    return sqrtf(gk_fmadds(vec->z, vec->z, gk_fmadds(vec->x, vec->x, vec->y * vec->y)));
 }
 
 static inline float lbVector_Len_xy(Vec3* vec)

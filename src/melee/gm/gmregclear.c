@@ -639,7 +639,7 @@ void fn_8017FE54(HSD_GObj* gobj)
     lb_800122C8(ev->efb_copy, 0, 0, 1);
     lb_800138D8(state->x2C, (int) (120.0F * state->x10C) + 1);
 
-    ev->tint_factor = 0.0225F * (f32) state->x110 - 0.175F;
+    ev->tint_factor = gk_fmsubs(0.0225F, (f32) state->x110, 0.175F);
 
     if (ev->tint_factor < 0.05F) {
         ev->tint_factor = 0.0F;

@@ -673,12 +673,12 @@ void grRCruise_80200578(void* user_data, int joint_id, CollData* coll,
         lb_8000B1CC(jobj, NULL, &pos);
         dx = pos.x - coll->cur_pos.x;
         dy = pos.y - coll->cur_pos.y;
-        dist = sqrtf(dy * dy + dx * dx);
+        dist = sqrtf(gk_fmadds(dy, dy, dx * dx));
         if (dist > 4.0f) {
             if (pos.x < coll->cur_pos.x) {
-                gp->u.rcruise.x24 += dist * (coll_x50 / 1000.0f);
+                gp->u.rcruise.x24 = gk_fmadds(dist, (coll_x50 / 1000.0f), gp->u.rcruise.x24);
             } else {
-                gp->u.rcruise.x28 += dist * (coll_x50 / 1000.0f);
+                gp->u.rcruise.x28 = gk_fmadds(dist, (coll_x50 / 1000.0f), gp->u.rcruise.x28);
             }
         }
         gp->u.rcruise.x34++;

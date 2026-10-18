@@ -1089,7 +1089,7 @@ void fn_8003F654(int slot, int index, Vec3* pos, Vec3* prevPos)
         if (count != 0) {
             table->xD90++;
             avg_sum = pl_CalculateAverage(sum, count);
-            avg_sum = (table->xD8C * (table->xD90 - 1)) + avg_sum;
+            avg_sum = gk_fmadds(table->xD8C, (table->xD90 - 1), avg_sum);
             table->xD8C = pl_CalculateAverage(avg_sum, table->xD90);
         }
 
@@ -1099,7 +1099,7 @@ void fn_8003F654(int slot, int index, Vec3* pos, Vec3* prevPos)
         if (abs < 0.0f) {
             abs = -abs;
         }
-        dist = (table->xD94 * (table->xD98 - 1)) + (new_var = abs);
+        dist = gk_fmadds(table->xD94, (table->xD98 - 1), (new_var = abs));
         table->xD94 = pl_CalculateAverage(dist, table->xD98);
     }
 }

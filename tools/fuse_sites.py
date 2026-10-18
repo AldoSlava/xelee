@@ -252,7 +252,8 @@ def main():
 
     def text(f):
         if f not in texts:
-            texts[f] = open(f).read()
+            # latin-1: one character per byte, as libclang's offsets count
+            texts[f] = open(f, encoding="latin-1").read()
         return texts[f]
 
     for path in [os.path.realpath(p) for p in args.files]:
@@ -341,7 +342,7 @@ def main():
             if "gekko_fp.h" not in src:
                 m = re.search(r"^#include .*$", src, re.M)
                 src = src[:m.start()] + "#include <pc/gekko_fp.h>\n" + src[m.start():]
-            open(f, "w").write(src)
+            open(f, "w", encoding="latin-1").write(src)
             print(f"{f}: {len(edits)} rewrites")
     print(dict(totals))
 
