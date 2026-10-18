@@ -80,9 +80,16 @@ static float bef(const uint8_t* p) {
  * clamp, direction bits and scale over every raw value
  * (HSD_PadPcNormalize), once it has its settings. Several raws normalize
  * alike (inside the deadzone, past the rim): of those that also set the
- * direction bits the replay's buttons show, the smallest stands for them
- * all, as any of them gives the game the same input. A table keyed by the
- * two floats' bits and the direction bits. */
+ * direction bits the replay's buttons show, one stands for them all. Any
+ * gives the game the same normalized stick, but not the same raw one, and
+ * UCF reads the raw: past the rim with the other axis near the centre it
+ * snaps the stick to exactly 1.0 (ftucf.c), which automatic smash DI then
+ * moves the fighter by. A stick held off centre is almost always at the
+ * rim, and one held along an axis in its notch: for those a raw UCF
+ * snaps stands for them if there is one, then the largest; at rest, (0, 0),
+ * the smallest. (Replays from Slippi 3.17 on carry the raw C-stick
+ * itself.) A
+ * table keyed by the two floats' bits and the direction bits. */
 #define C_SLOTS (1u << 17)
 static struct {
     uint64_t key; /* x bits << 32 | y bits, plus one: 0 is empty */
@@ -127,7 +134,14 @@ static void build_tables(void) {
             for (uint32_t h = c_hash(k ^ dir);; h++) {
                 const uint32_t i = h & (C_SLOTS - 1);
                 if (s_c[i].key == 0 || (s_c[i].key == k && s_c[i].dir == dir)) {
-                    if (s_c[i].key == 0 || abs(x) + abs(y) < abs(s_c[i].x) + abs(s_c[i].y)) {
+                    /* UCF's cardinal snap (ftucf.c snapCardinal): at the rim on
+                     * one axis, within 6 of centre on the other */
+#define SNAPS(px, py) ((abs(px) >= 80 && abs(py) <= 6) || (abs(py) >= 80 && abs(px) <= 6))
+                    const int m = abs(x) + abs(y), held = abs(s_c[i].x) + abs(s_c[i].y);
+                    const bool snaps = SNAPS(x, y), held_snaps = SNAPS(s_c[i].x, s_c[i].y);
+                    const bool rest = nx == 0.0f && ny == 0.0f;
+#undef SNAPS
+                    if (s_c[i].key == 0 || (rest ? m < held : snaps != held_snaps ? snaps : m > held)) {
                         s_c[i].x = (int8_t)x;
                         s_c[i].y = (int8_t)y;
                     }
@@ -406,6 +420,11 @@ void pc_slp_play_setup(struct StartMeleeData* start) {
         p->defense_ratio = o->defense_ratio;
         p->model_scale = o->model_scale;
     }
+    /* A replay holds no paused frames (Slippi records fight frames only),
+     * so the frame after a pause is the first one unpaused: played back
+     * with pausing on, the Start that paused it would pause this game for
+     * good, the next frame's pads never coming. */
+    r->disable_pausing = true;
     pc_log_line("slp play: match set up from the replay (stage %u)", (unsigned)r->stkind);
 }
 
