@@ -37,11 +37,13 @@ static const struct {
     {Gr_Kind_Corneria, {"WIND", "GREAT FOX", "ARWINGS"}, NULL},
     {Gr_Kind_Kongo, {"FALLS", "JUNGLE"}, NULL},
     {Gr_Kind_Izumi, {"FOUNTAIN", "JETS"}, NULL},
-    /* 2026-10-17: loud against the fighters on purpose, the race being the
-     * point; the engines' body and the rush's middle brought up. */
+    /* 2026-10-18: loud against the fighters on purpose, nearly over the
+     * music, the race being the point; the engines' body and the rush's
+     * middle brought up, the craft's jets and the Flyer brightened. */
     {Gr_Kind_BigBlue,
      {"ENGINES", "RUSH", "CRAFT", "FLYER"},
-     "ENGINES=6.5/190,8.0,1.30/715,4.0,1.00/1350,0.0,0.71;RUSH=6.0/205,1.5,0.71/965,6.0,1.00/3800,0.0,0.71"},
+     "ENGINES=5.5/215,8.5,0.99/435,10.5,1.21/1750,-2.5,1.76;RUSH=6.0/180,2.0,0.71/505,8.0,0.46/2550,5.5,0.71;"
+     "CRAFT=-0.5/450,-0.5,0.71/1250,8.0,1.00/6000,0.0,0.71;FLYER=5.0/595,6.5,0.71/1750,7.0,1.00/6000,0.0,0.71"},
 };
 #define MIX_STAGES ((int)(sizeof s_stages / sizeof s_stages[0]))
 

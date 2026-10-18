@@ -37,7 +37,10 @@ dropped while dozing), reports proximity closed and sets a 30-minute screen
 timeout, so it stays on unworn through a batch of runs; each run ends by
 stopping the game and deleting its run files. At the end of a batch,
 `quest_perf.py handback` (or --hand-back on the last run) hands proximity back
-to the sensor and sets the usual 60-second timeout. Once the headset sleeps
+to the sensor and puts Android's screen timeout back out of the way
+(999999999 ms: the headset's own power manager sleeps it once it's off a
+head; a short Android timeout darkens a worn one, as controllers in VR
+don't count as activity). Once the headset sleeps
 deeply its wifi drops and only a person can wake it, so don't hand back
 between runs. `quest_perf.py wake` keeps it on without a run.
 """
@@ -78,7 +81,12 @@ def pick_device():
 
 
 RUN_SCREEN_TIMEOUT_MS = 14400000  # during a batch: the display stays on unworn, 4 h (gaps between runs too)
-IDLE_SCREEN_TIMEOUT_MS = 60000   # after it: the headset's usual
+# After it: Android's own timeout stays out of the way, as the headset has it.
+# The Quest sleeps an unworn headset itself (its power manager's auto-sleep
+# timer, after the proximity sensor opens); Android's timeout counts only
+# Android input (a gamepad, the volume keys), not the controllers in VR, so
+# 60 s of it darkened a worn headset in the middle of a fight.
+IDLE_SCREEN_TIMEOUT_MS = 999999999
 
 
 def wake_headset(tries=36):
@@ -139,7 +147,8 @@ def remove_run_files():
 def hand_back():
     """The end of a batch: the game stopped, its run files gone (the
     player's own melee-env.txt back), proximity back to the sensor and the
-    usual screen timeout, so the unworn headset sleeps."""
+    headset's own long screen timeout, so the unworn headset sleeps by its
+    auto-sleep timer and the worn one doesn't."""
     adb("shell", "am", "force-stop", PKG, check=False)
     remove_run_files()
     adb("shell", "am", "broadcast", "-a", "com.oculus.vrpowermanager.automation_disable", check=False)

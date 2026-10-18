@@ -4535,6 +4535,41 @@ bool grBigBlue_pc_racer(int lane, float pos[3], float* presence)
     return isfinite(*presence);
 }
 
+bool grBigBlue_pc_racer_ride(int lane, GrBigBluePcRide* out)
+{
+    const Ground* gp = grBigBlue_pc_cars != NULL ? grBigBlue_pc_cars->user_data : NULL;
+    const struct grBigBlue_CarLane* l;
+    HSD_JObj* jobj;
+    if (gp == NULL || lane < 0 || lane >= 4 || gp->u.bigblue.car.collision_jobjs == NULL ||
+        gp->u.bigblue.car.lanes[lane].state == 1)
+    {
+        return false;
+    }
+    l = &gp->u.bigblue.car.lanes[lane];
+    jobj = gp->u.bigblue.car.collision_jobjs[l->collision_slot];
+    if (jobj == NULL) {
+        return false;
+    }
+    out->tilt = HSD_JObjGetRotationZ(jobj);
+    out->speed = l->velocity;
+    out->accel = l->accel;
+    /* Off the track the climb rate is what's stored as its angular velocity
+     * (grBigBlue_801ED694's airborne branch); on it, the hover's bob. */
+    out->airborne = l->direction != 0;
+    out->rise = out->airborne ? l->angular_velocity : l->gravity;
+    out->state = l->state;
+    out->road[0] = out->road[1] = 0.f;
+    {
+        HSD_GObj* map_gobj = Ground_GetMapGObj(34);
+        const Ground* road = map_gobj != NULL ? map_gobj->user_data : NULL;
+        if (road != NULL) {
+            out->road[0] = road->u.bigblue.road.position.x - road->u.bigblue.road.previous_position.x;
+            out->road[1] = road->u.bigblue.road.position.y - road->u.bigblue.road.previous_position.y;
+        }
+    }
+    return isfinite(out->tilt) && isfinite(out->speed) && isfinite(out->accel) && isfinite(out->rise);
+}
+
 bool grBigBlue_pc_lane_pos(const HSD_GObj* part, int lane, float pos[3])
 {
     const Ground* gp = part != NULL ? part->user_data : NULL;

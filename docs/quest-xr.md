@@ -1102,7 +1102,11 @@ and takes the disc from the launcher's `launcher.cfg`.
   debug.oculus.guardian_pause 1`), or the session stops a few seconds in.
   Afterwards, delete `melee-env.txt` (it boots straight into a match) and
   hand the headset back: `guardian_pause 0`, `settings put system
-  screen_off_timeout 60000`, and the `automation_disable` broadcast.
+  screen_off_timeout 999999999`, and the `automation_disable` broadcast.
+  Not 60000: Android's timeout counts only Android input (a gamepad, the
+  volume keys), not the controllers in VR, so it darkens a worn headset a
+  minute into a fight; the headset's power manager sleeps an unworn one
+  by itself.
 - `MELEE_XR_CONTROL=<file>`: once a second, the game reads `mr` or `vr`
   from the file and switches when it changes (`quest_perf.py mode vr`).
 - `AURORA_XR_HANDS=0`: leaves `XR_EXT_hand_tracking` off.

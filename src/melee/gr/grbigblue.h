@@ -88,6 +88,19 @@ extern HSD_GObj* grBigBlue_pc_cars;
  * of it there is (its fade, 0 to 1). False without the cars or with the
  * lane empty (state 1). */
 bool grBigBlue_pc_racer(int lane, float pos[3], float* presence);
+/* PC (stage ambience): how lane `lane`'s car is riding, in the stage's
+ * own units (scaled by the stage like the cars): its tilt (radians, the
+ * nose up while positive), its speed and acceleration along the track
+ * against the pack (a frame), its rise (a frame; off the track, falling
+ * when negative) and whether it's off the track, flying. False as
+ * grBigBlue_pc_racer is. */
+typedef struct GrBigBluePcRide {
+    float tilt, speed, accel, rise;
+    float road[2]; /* the road's own move this frame (x, y) */
+    int state;     /* the lane's state (7, 8: racing off ahead, falling behind) */
+    bool airborne;
+} GrBigBluePcRide;
+bool grBigBlue_pc_racer_ride(int lane, GrBigBluePcRide* out);
 #endif
 
 #endif

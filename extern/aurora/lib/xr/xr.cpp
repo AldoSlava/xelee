@@ -6638,6 +6638,8 @@ void poll_tweaks() {
   gfx::set_xr_bindless(t.bindless && g_bindlessOk);
 }
 
+void log_slots(const char* why);
+
 bool render_xr_frame() {
   XrFrameState fs{XR_TYPE_FRAME_STATE};
   {
@@ -7130,10 +7132,30 @@ bool render_xr_frame() {
     g_present.raisedForLate = 0;
     B.framesShown = 0;
     B.fightFrames = 0;
+    if (B.fightFrames > 0 && B.releasedSinceStats[kStereo] < secs)
+      log_slots("with the 3D stream stalled");
     B.releasedSinceStats = {};
     B.statsStart = now;
   }
   return true;
+}
+
+// Each stream's images, for a stall: state (R released, A acquired, F free,
+// D drawing, Y ready), acquisition order, tick; '*' claimed unwaited.
+void log_slots(const char* why) {
+  static constexpr char kState[] = {'R', 'A', 'F', 'D', 'Y'};
+  std::string out;
+  std::lock_guard lock{g_mutex};
+  for (auto& st : g_streams) {
+    if (st.slots.empty())
+      continue;
+    out += fmt::format(" {}:", st.name);
+    for (const auto& sl : worker_slots(st))
+      out += fmt::format(" {}{}#{}@{}", kState[static_cast<int>(sl.state)], sl.claimed ? "*" : "", sl.acquireSeq,
+                         sl.tickFrame);
+    out += fmt::format(" (drawing {})", st.renderingSlot);
+  }
+  Log.info("Images {} (display frame {}, latency {}):{}", why, B.displayFrame, g_present.latency, out);
 }
 
 // Returns false when the thread should exit.
@@ -7143,6 +7165,7 @@ bool poll_events() {
     if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
       const auto state = reinterpret_cast<const XrEventDataSessionStateChanged&>(ev).state;
       Log.info("Session state {}", static_cast<int>(state));
+      log_slots("at a session change");
       if (state == XR_SESSION_STATE_READY) {
         XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
         bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;

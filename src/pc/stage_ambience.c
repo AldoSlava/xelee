@@ -20,6 +20,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -113,6 +114,7 @@ static void jets_frame(void) {
 typedef struct Racers {
     float pos[RACERS][3];
     float presence[RACERS]; /* 0: the lane's empty */
+    GrBigBluePcRide ride[RACERS];
 } Racers;
 static Racers s_racers;
 static unsigned s_racers_seq;
@@ -124,6 +126,28 @@ static void racers_frame(void) {
             r.presence[k] = 0.f;
         }
         r.presence[k] = fminf(fmaxf(r.presence[k], 0.f), 1.f);
+        if (r.presence[k] > 0.f && !grBigBlue_pc_racer_ride(k, &r.ride[k])) {
+            r.ride[k] = (GrBigBluePcRide){0};
+        }
+    }
+    /* MELEE_RACERS_LOG=2: how each car rides, four times a second. */
+    static int ride_log = -1;
+    static int ride_frames;
+    if (ride_log < 0) {
+        const char* v = getenv("MELEE_RACERS_LOG");
+        ride_log = v != NULL && atoi(v) >= 2;
+    }
+    if (ride_log && ++ride_frames >= 15) {
+        ride_frames = 0;
+        char line[512];
+        int n = 0;
+        for (int k = 0; k < RACERS; k++) {
+            const GrBigBluePcRide* d = &r.ride[k];
+            n += snprintf(line + n, sizeof line - (size_t)n, " %c%.3f/%.2f/%d%s",
+                          r.presence[k] > 0.f ? ' ' : '-', d->tilt, d->rise, d->state, d->airborne ? "/air" : "");
+        }
+        pc_log_line("ride (tilt/rise/state), road %.2f,%.2f, x %.0f %.0f %.0f %.0f:%s", r.ride[0].road[0],
+                    r.ride[0].road[1], r.pos[0][0], r.pos[1][0], r.pos[2][0], r.pos[3][0], line);
     }
     __atomic_add_fetch(&s_racers_seq, 1, __ATOMIC_ACQ_REL);
     s_racers = r;
@@ -954,10 +978,16 @@ static void rush_mix(float* out, int frames, int rate, bool on) {
  *  - the whine of its turbine ten-odd times higher, a sine and a little of
  *    its octave, wavering;
  *  - a little air off its thrusters (noise around 2.4 kHz).
+ * It rides the track: climbing it strains (the hum and whine up, brighter
+ * and louder, the throb quicker), coming down it eases off; off the track
+ * the hum thins (nothing under it to push on), the turbine revs free and the
+ * thrust stutters as it hunts for the road, and it comes back down with a
+ * thump and a surge.
  * Doppler from how fast the car closes on or leaves the listener, so it
  * sweeps down as it passes. Placed (slots 0-3, one a lane); the mixer's
  * ENGINES channel. */
 #define RACER_DOPPLER_C 2400.f /* game units a second: the speed of sound here */
+#define RACER_CLIMB_SIGN 1.f   /* the cars' tilt, climbing (they race toward +x) */
 
 typedef struct RacerSource {
     uint32_t seed;
@@ -970,6 +1000,11 @@ typedef struct RacerSource {
     float ph_hum, ph_whine, ph_whine2, ph_vib, ph_throb;
     float lp1, lp2;
     float bp_low, bp_band;
+    float load;          /* -1 easing down a slope .. 1 climbing hard, glided */
+    float air;           /* 0 on the track .. 1 off it, glided */
+    float surge;         /* after landing, decaying */
+    float thump, ph_thump, thump_lp; /* the landing's knock, decaying */
+    bool was_air;
     StageMixState mix;
 } RacerSource;
 
@@ -1022,7 +1057,6 @@ static void racers_mix(float* out, int frames, int rate, bool on) {
         racers = s_racers;
     } while ((seq & 1u) != 0 || seq != __atomic_load_n(&s_racers_seq, __ATOMIC_ACQUIRE));
     const float w = 6.2831853f / (float)rate;
-    const float a_lp = 1.f - expf(-w * 900.f);
     const float f_bp = 2.f * sinf(3.14159265f * 2400.f / (float)rate);
     const float inv_rate = 1.f / (float)rate;
     float mono[160];
@@ -1059,27 +1093,58 @@ static void racers_mix(float* out, int frames, int rate, bool on) {
                            (0.96f + 0.08f * r->rpm.value);
         const float p0 = r->pitch;
         r->pitch += (want - r->pitch) * (1.f - expf(-dt / 0.03f));
+        /* How it rides: the slope under it (the nose up climbing; full
+         * strain from about 26 degrees, the hills' steepest 38), off the
+         * track or not, and its landing. */
+        const GrBigBluePcRide* ride = &racers.ride[k];
+        const bool airborne = here && ride->airborne;
+        const float slope = airborne ? 0.f : fminf(fmaxf(ride->tilt * RACER_CLIMB_SIGN / 0.45f, -1.f), 1.f);
+        const float load0 = r->load, air0 = r->air, surge0 = r->surge;
+        r->load += (slope - r->load) * (1.f - expf(-dt / 0.3f));
+        r->air += ((airborne ? 1.f : 0.f) - r->air) * (1.f - expf(-dt / (airborne ? 0.06f : 0.15f)));
+        r->surge *= expf(-dt / 0.45f);
+        if (r->was_air && !airborne && here) {
+            /* Down: the harder the fall (up to about 1.7 a frame), the harder the knock. */
+            r->thump = fmaxf(r->thump, fminf(fmaxf(fabsf(ride->rise) / 1.5f, 0.35f), 1.f));
+            r->surge = 1.f;
+        }
+        r->was_air = airborne;
         const float hum_f = s_racer_voice[k].hum, whine_f = hum_f * s_racer_voice[k].whine;
         /* The four together about -32 dBFS in a flat desktop mix (the rush
          * -38 there): the racers over the wind. */
         const float amp = 0.017f * volume;
+        const float thump_k = expf(-inv_rate / 0.13f);
         for (int i = 0; i < frames; i++) {
             const float t = (float)i / (float)frames;
             const float pitch = p0 + (r->pitch - p0) * t;
-            /* The hum: a band-limited sawtooth, rolled off. */
-            const float dh = hum_f * pitch * inv_rate;
+            const float load = load0 + (r->load - load0) * t;
+            const float air = air0 + (r->air - air0) * t;
+            const float surge = surge0 + (r->surge - surge0) * t;
+            const float climb = fmaxf(load, 0.f), ease = fmaxf(-load, 0.f);
+            /* The hum: a band-limited sawtooth, rolled off; up and brighter
+             * as it strains, thin off the track. */
+            const float hum_pitch = pitch * (1.f + 0.06f * climb - 0.03f * ease + 0.05f * surge + 0.04f * air);
+            const float hum_gain = (1.f + 0.3f * climb - 0.25f * ease + 0.6f * surge) * (1.f - 0.45f * air);
+            const float cut = 900.f * (1.f + 0.9f * climb - 0.2f * ease + 0.7f * surge) * (1.f - 0.35f * air);
+            const float a_lp = w * cut / (1.f + w * cut);
+            const float dh = hum_f * hum_pitch * inv_rate;
             r->ph_hum += dh;
             r->ph_hum -= floorf(r->ph_hum);
             const float saw = 2.f * r->ph_hum - 1.f - poly_blep(r->ph_hum, dh);
             r->lp1 += a_lp * (saw - r->lp1);
             r->lp2 += a_lp * (r->lp1 - r->lp2);
-            r->ph_throb += s_racer_voice[k].throb * inv_rate;
+            /* The throb as it rides: quicker climbing; off the track, the
+             * thrust stuttering slower and deeper, hunting for the road. */
+            r->ph_throb += s_racer_voice[k].throb * (1.f + 0.35f * climb - 0.5f * air) * inv_rate;
             r->ph_throb -= floorf(r->ph_throb);
-            const float throb = 1.f - 0.3f * (0.5f + 0.5f * sinf(6.2831853f * r->ph_throb));
-            /* The whine, wavering. */
+            const float throb =
+                1.f - (0.3f + 0.15f * climb + 0.4f * air) * (0.5f + 0.5f * sinf(6.2831853f * r->ph_throb));
+            /* The whine, wavering; it climbs with the strain, and off the
+             * track the turbine runs free. */
             r->ph_vib += 5.7f * inv_rate;
             r->ph_vib -= floorf(r->ph_vib);
-            const float wf = whine_f * pitch * (1.f + 0.006f * sinf(6.2831853f * r->ph_vib));
+            const float whine_pitch = pitch * (1.f + 0.1f * climb - 0.04f * ease + 0.22f * air + 0.06f * surge);
+            const float wf = whine_f * whine_pitch * (1.f + 0.006f * sinf(6.2831853f * r->ph_vib));
             r->ph_whine += wf * inv_rate;
             r->ph_whine -= floorf(r->ph_whine);
             r->ph_whine2 += 2.01f * wf * inv_rate;
@@ -1092,7 +1157,15 @@ static void racers_mix(float* out, int frames, int rate, bool on) {
             r->bp_low += f_bp * r->bp_band;
             const float lv = (level0 + (s_racer_mix.level - level0) * t) * (duck0 + (duck1 - duck0) * t) *
                              (rl0 + (r->level - rl0) * t);
-            mono[i] = (1.6f * r->lp2 * throb + 0.22f * whine + 0.12f * r->bp_band) * amp * lv;
+            /* The knock of landing: a low thud, the road taking its weight. */
+            r->ph_thump += (48.f + 30.f * r->thump) * inv_rate;
+            r->ph_thump -= floorf(r->ph_thump);
+            r->thump_lp += 0.08f * (n - r->thump_lp);
+            const float knock = r->thump * (sinf(6.2831853f * r->ph_thump) + 1.2f * r->thump_lp);
+            r->thump *= thump_k;
+            mono[i] = (1.6f * hum_gain * r->lp2 * throb + 0.22f * (1.f + 0.6f * climb + 1.4f * air) * whine +
+                       0.12f * (1.f + 0.7f * climb + 1.8f * air) * r->bp_band + 1.4f * knock) *
+                      amp * lv;
         }
         pc_stage_mix_apply(STAGE_MIX_ENGINES, &r->mix, mono, frames, 1);
         if (!pc_spatial_render_placed(k, r->pos, mono)) {
@@ -1102,17 +1175,21 @@ static void racers_mix(float* out, int frames, int rate, bool on) {
             }
         }
     }
-    /* MELEE_RACERS_LOG=1: the cars' distances and Doppler, twice a second. */
+    /* MELEE_RACERS_LOG=1: the cars' distances, Doppler and ride, twice a second. */
     static int log_on = -1;
     if (log_on < 0) {
         log_on = getenv("MELEE_RACERS_LOG") != NULL;
     }
     if (log_on && ++s_racer_mix.log_frames >= rate / frames / 2) {
         s_racer_mix.log_frames = 0;
-        pc_log_line("racers: %.0f/%.0f/%.2f %.0f/%.0f/%.2f %.0f/%.0f/%.2f %.0f/%.0f/%.2f (distance/rate/pitch)",
-                    s_racer_mix.src[0].dist, s_racer_mix.src[0].vr, s_racer_mix.src[0].pitch, s_racer_mix.src[1].dist,
-                    s_racer_mix.src[1].vr, s_racer_mix.src[1].pitch, s_racer_mix.src[2].dist, s_racer_mix.src[2].vr,
-                    s_racer_mix.src[2].pitch, s_racer_mix.src[3].dist, s_racer_mix.src[3].vr, s_racer_mix.src[3].pitch);
+        char line[400];
+        int n = 0;
+        for (int k = 0; k < RACERS; k++) {
+            const RacerSource* r = &s_racer_mix.src[k];
+            n += snprintf(line + n, sizeof line - (size_t)n, " %.0f/%.0f/%.2f/%+.2f/%.2f", r->dist, r->vr, r->pitch,
+                          r->load, r->air);
+        }
+        pc_log_line("racers (distance/rate/pitch/load/air):%s", line);
     }
 }
 
