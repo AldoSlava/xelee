@@ -102,6 +102,76 @@ void slp_info_block(uint8_t out[SLP_INFO_BLOCK_SIZE], const SlpInfoBlock* b) {
     }
 }
 
+static uint16_t get_u16(const uint8_t* p, size_t off) {
+    return (uint16_t)((p[off] << 8) | p[off + 1]);
+}
+static uint32_t get_u32(const uint8_t* p, size_t off) {
+    return ((uint32_t)p[off] << 24) | ((uint32_t)p[off + 1] << 16) | ((uint32_t)p[off + 2] << 8) | p[off + 3];
+}
+static float get_f32(const uint8_t* p, size_t off) {
+    const uint32_t u = get_u32(p, off);
+    float f;
+    memcpy(&f, &u, sizeof f);
+    return f;
+}
+
+void slp_info_parse(const uint8_t in[SLP_INFO_BLOCK_SIZE], SlpInfoBlock* b) {
+    memset(b, 0, sizeof *b);
+    b->match_kind = (uint8_t)(in[0x0] >> 5);
+    b->x0_3 = (uint8_t)((in[0x0] >> 2) & 7);
+    b->timer_enabled = (in[0x0] & 0x02) != 0;
+    b->timer_counts_up = (in[0x0] & 0x01) != 0;
+    b->bits1 = in[0x1];
+    b->bits2 = in[0x2];
+    b->bits3 = in[0x3];
+    b->bits4 = in[0x4];
+    b->bits5 = in[0x5];
+    b->x6 = in[0x6];
+    b->x7 = in[0x7];
+    b->is_teams = in[0x8];
+    b->x9 = in[0x9];
+    b->xA = in[0xA];
+    b->item_freq = (int8_t)in[0xB];
+    b->sd_penalty = (int8_t)in[0xC];
+    b->xD = in[0xD];
+    b->stkind = get_u16(in, 0xE);
+    b->time_limit = get_u32(in, 0x10);
+    b->x14 = in[0x14];
+    b->x18 = get_u32(in, 0x18);
+    b->x1C = get_u32(in, 0x1C);
+    b->item_mask = ((uint64_t)get_u32(in, 0x20) << 32) | get_u32(in, 0x24);
+    b->x28 = (int32_t)get_u32(in, 0x28);
+    b->x2C = get_f32(in, 0x2C);
+    b->damage_ratio = get_f32(in, 0x30);
+    b->game_speed = get_f32(in, 0x34);
+    for (int i = 0; i < 6; i++) {
+        SlpInfoPlayer* p = &b->players[i];
+        const uint8_t* o = in + 0x60 + 0x24 * i;
+        p->ckind = (int8_t)o[0x0];
+        p->slot_type = o[0x1];
+        p->stocks = (int8_t)o[0x2];
+        p->color = o[0x3];
+        p->slot = o[0x4];
+        p->spawn_pos = (int8_t)o[0x5];
+        p->spawn_dir = (int8_t)o[0x6];
+        p->sub_color = o[0x7];
+        p->handicap = (int8_t)o[0x8];
+        p->team = o[0x9];
+        p->nametag = o[0xA];
+        p->xB = o[0xB];
+        p->flags_c = o[0xC];
+        p->flags_d = o[0xD];
+        p->cpu_kind = o[0xE];
+        p->cpu_level = o[0xF];
+        p->damage = get_u16(o, 0x10);
+        p->damage1 = get_u16(o, 0x12);
+        p->hp = get_u16(o, 0x14);
+        p->attack_ratio = get_f32(o, 0x18);
+        p->defense_ratio = get_f32(o, 0x1C);
+        p->model_scale = get_f32(o, 0x20);
+    }
+}
+
 /* ---- events ------------------------------------------------------------ */
 
 size_t slp_event_payloads(uint8_t* out) {

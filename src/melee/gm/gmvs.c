@@ -2305,6 +2305,7 @@ static void slippiSyncRng(UNUSED HSD_GObj* gobj)
 {
     u32 f = gm_801A4BB8();
     *HSD_RandSeedPtr = ((f << 16) | (f >> 16)) + pc_net_rng_offset();
+    pc_slp_sync_rng(*HSD_RandSeedPtr); /* the seed Slippi's frame start reads */
 }
 
 /* InitOnlinePlay, at the top of the match setup: the seed starts as the
@@ -2312,7 +2313,8 @@ static void slippiSyncRng(UNUSED HSD_GObj* gobj)
 static void slippiMatchInit(void)
 {
     HSD_GObj* gobj;
-    if (!pc_net_active() || !pc_net_slippi_active()) {
+    /* A Slippi replay played back (src/pc/slp_play.c) is an online match too. */
+    if ((!pc_net_active() || !pc_net_slippi_active()) && !pc_slp_play_active()) {
         return;
     }
     *HSD_RandSeedPtr = pc_net_rng_offset();

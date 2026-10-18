@@ -1,4 +1,5 @@
 #include "pc/xr_place.h"
+#include "pc/slp.h"
 #include "gmvsmode.h"
 
 #include <stdlib.h>
@@ -286,6 +287,8 @@ static void fillDebugVs(GameModeState* state, UNUSED bool dummy)
             }
         }
     }
+    /* MELEE_SLP_PLAY=<file.slp>: the replay's match instead (src/pc/slp_play.c). */
+    pc_slp_play_setup(start);
 #endif
 
     start->players[0].rumble_enabled = false;

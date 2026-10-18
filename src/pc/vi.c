@@ -30,6 +30,7 @@ extern void browser_yield(void);
 #include "pc/xr_scene.h"
 #include "pc/widescreen.h"
 #include "pc/net.h"
+#include "pc/slp.h"
 #include "pc/net_chat.h"
 #include <melee/if/ifnetchat.h>
 #include <dolphin/pad.h>
@@ -106,6 +107,14 @@ static void log_pad_wait(void) {
 static u64 s_xr_due;
 static u64 s_xr_carry;
 #endif
+
+static bool unpaced_playback(void) {
+    static int on = -1;
+    if (on < 0) {
+        on = pc_slp_play_active() && getenv("MELEE_SLP_PLAY_PACED") == NULL;
+    }
+    return on > 0;
+}
 
 void pc_frame_boundary(void) {
     log_pad_wait();
@@ -341,7 +350,11 @@ void pc_frame_boundary(void) {
         next_sim_ns = SDL_GetTicksNS();
     } else
 #endif
-    if (next_sim_ns == 0 || now > next_sim_ns) {
+    /* A Slippi replay played back (src/pc/slp_play.c) runs as fast as it
+     * renders, unless MELEE_SLP_PLAY_PACED=1 (to watch it). */
+    if (unpaced_playback()) {
+        next_sim_ns = now;
+    } else if (next_sim_ns == 0 || now > next_sim_ns) {
         next_sim_ns = now - late;
     } else if (now < next_sim_ns) {
         const u64 want = next_sim_ns - now;

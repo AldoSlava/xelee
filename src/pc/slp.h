@@ -34,6 +34,38 @@ void pc_slp_tick_end(uint64_t proc_mask);
  * Fighter_Spaghetti_8006AD10, where Slippi's SendGamePreFrame hooks): the
  * pre-frame event's state and inputs are taken here. */
 void pc_slp_pre_frame(struct HSD_GObj* gobj);
+/* Slippi's SyncRNG has just seeded this tick (gmvs.c slippiSyncRng): in an
+ * online match the frame-start event carries this seed, which Slippi reads
+ * after SyncRNG has run, not the one the tick began with. */
+void pc_slp_sync_rng(uint32_t seed);
+
+/* ---- playback ---------------------------------------------------------
+ * MELEE_SLP_PLAY=<file.slp> (src/pc/slp_play.c): plays a Slippi replay's
+ * match back through the game, as Slippi online played it -- the match set
+ * up from the replay's game start (with MELEE_BOOT_SCENE=vs), SyncRNG from
+ * its rngOffset, UCF and the online rules on (a deterministic run), and
+ * every fight frame's physical pads fed in before its tick: the raw main
+ * stick, the button word, the raw C-stick and triggers (or, before Slippi
+ * 3.17, the raw values the recorded normalized ones come from). With
+ * MELEE_SLP_DIR set the run records its own replay, to set beside the
+ * original (tools/slp_compare.py): the first frame they part is where this
+ * game differs from Dolphin's. The game leaves once the replay is done. */
+struct PADStatus;
+bool pc_slp_play_active(void);
+/* The replay's rngOffset (the seed its game start carries). */
+uint32_t pc_slp_play_rng_offset(void);
+/* gmvsmode.c fillDebugVs: the debug match becomes the replay's. */
+void pc_slp_play_setup(struct StartMeleeData* start);
+/* The VS scene has set up (pc_slp_match_start): fight frames count from
+ * here. */
+void pc_slp_play_match_start(void);
+/* net.c fresh tick: the next tick's pads into the queue head. */
+void pc_slp_play_feed(struct PADStatus* head);
+/* The match scene is leaving (pc_slp_match_end): the game leaves too,
+ * the replay it recorded written. */
+void pc_slp_play_match_end(void);
+/* After every tick (pc_slp_tick_end): whether the fighters ran in it. */
+void pc_slp_play_tick_end(bool fight_frame);
 
 /* net_snapshot.c, for the recorder. The netplay frame number of the tick
  * running: a rollback's re-run frame, otherwise the newest fresh one (it

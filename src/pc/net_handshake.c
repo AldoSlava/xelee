@@ -38,6 +38,7 @@
  * yet, so none of it is implemented here. */
 #include "compat.h"
 #include "pc/net_internal.h"
+#include "pc/slp.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wscalar-storage-order" /* disc-struct unions in lb/types.h */
@@ -171,6 +172,9 @@ uint32_t pc_net_seed(void) {
 }
 
 uint32_t pc_net_rng_offset(void) {
+    if (pc_slp_play_active()) {
+        return pc_slp_play_rng_offset(); /* the replay's own (src/pc/slp_play.c) */
+    }
     return net.rng_offset;
 }
 

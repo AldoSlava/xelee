@@ -114,6 +114,12 @@ typedef struct PcRawSticks {
 } PcRawSticks;
 extern PcRawSticks pc_pad_master_raw[4];
 extern PcRawSticks pc_pad_game_raw[4];
+/* A raw sample's sticks and triggers (mp's stickX..analogB) clamped and
+ * scaled into its nml_ values as HSD_PadRenewMasterStatus does, with the
+ * pad library's settings: what Slippi replay playback (src/pc/slp_play.c)
+ * inverts, to find the raw C-stick and triggers a replay only has
+ * processed. */
+void HSD_PadPcNormalize(HSD_PadStatus* mp);
 #endif
 extern HSD_PadStatus HSD_PadGameStatus[4];
 extern HSD_PadStatus HSD_PadCopyStatus[4];

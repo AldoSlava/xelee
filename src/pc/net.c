@@ -28,6 +28,7 @@
  * snapshots are the net_*.c modules listed in net_internal.h. */
 #include "compat.h"
 #include "pc/file_cache.h"
+#include "pc/slp.h"
 #include "pc/net_internal.h"
 #include "pc/net_sfx.h"
 #include "pc/slippi/slp_adapter.h"
@@ -3739,6 +3740,7 @@ static void fresh_tick(PADStatus* head, bool raw) {
         write_head(head, net.frame); /* after anything that can run the pad alarm */
     }
     replay_feed(head);
+    pc_slp_play_feed(head); /* MELEE_SLP_PLAY: a Slippi replay's pads (slp_play.c) */
 
     if (net.start_frame == net.frame && net.hs != HS_FAILED) {
         *HSD_RandSeedPtr = net.seed; /* both peers enter the match from the agreed seed */

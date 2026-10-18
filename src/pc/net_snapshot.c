@@ -160,7 +160,8 @@ void record_open(void) {
 }
 
 bool record_active(void) {
-    return s_rec != NULL || s_rep != NULL;
+    /* Slippi replay playback too: a replay that has to come out as recorded. */
+    return s_rec != NULL || s_rep != NULL || pc_slp_play_active();
 }
 
 static FrameRecord s_rep_cur;

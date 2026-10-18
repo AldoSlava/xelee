@@ -311,6 +311,14 @@ static void HSD_PadScale(HSD_PadStatus* mp)
     mp->nml_analogB = (f32) mp->analogB / (f32) p->scale_analogAB;
 }
 
+#ifdef TARGET_PC
+void HSD_PadPcNormalize(HSD_PadStatus* mp)
+{
+    HSD_PadClamp(mp);
+    HSD_PadScale(mp);
+}
+#endif
+
 static void HSD_PadCrossDir(HSD_PadStatus* mp)
 {
     switch (HSD_PadLibData.cross_dir) {

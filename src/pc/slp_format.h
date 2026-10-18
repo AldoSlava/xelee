@@ -111,6 +111,9 @@ typedef struct SlpInfoBlock {
 } SlpInfoBlock;
 
 void slp_info_block(uint8_t out[SLP_INFO_BLOCK_SIZE], const SlpInfoBlock* b);
+/* The other way: a replay's block back into the struct (replay playback,
+ * src/pc/slp_play.c). The pointers it left zero stay out. */
+void slp_info_parse(const uint8_t in[SLP_INFO_BLOCK_SIZE], SlpInfoBlock* b);
 
 /* ---- events ------------------------------------------------------------ */
 typedef struct SlpGameStart {

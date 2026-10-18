@@ -250,6 +250,7 @@ static void on_exit_finish(void) {
 }
 
 void pc_slp_match_start(const struct StartMeleeData* data) {
+    pc_slp_play_match_start();
     if (s_rec) {
         finish("a new match began"); /* the last scene left without its exit hook */
     }
@@ -406,6 +407,12 @@ static void fill_pre(SlpPreFrame* pre, int i, const Fighter* fp) {
         pre->raw_y = s_begin.raw[port].stickY;
         pre->raw_cx = s_begin.raw[port].substickX;
         pre->raw_cy = s_begin.raw[port].substickY;
+    }
+}
+
+void pc_slp_sync_rng(uint32_t seed) {
+    if (s_begin.on) {
+        s_begin.seed = seed;
     }
 }
 
@@ -608,6 +615,7 @@ static void capture_end(Staged* s, const VsSceneController* vs) {
 }
 
 void pc_slp_tick_end(uint64_t proc_mask) {
+    pc_slp_play_tick_end(slp_scene() && !(proc_mask & (1ULL << HSD_GOBJ_PLINK_FIGHTER)));
     if (!s_begin.on || !s_rec || !slp_scene()) {
         return;
     }
@@ -795,4 +803,5 @@ static void finish(const char* why) {
 
 void pc_slp_match_end(void) {
     finish("match scene left");
+    pc_slp_play_match_end();
 }
