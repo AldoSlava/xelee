@@ -3610,6 +3610,17 @@ static inline void ftKb_LoadHatParts(Fighter_GObj* gobj, int arg1,
     ftKb_SpecialN_800EF0E4(gobj, arg1, part_dobj_indices);
     ftKb_SpecialN_800EF35C(gobj, arg1, part_dobj_indices);
     ftKb_SpecialN_800EF438(gobj, hat);
+    /* The hat's parts and its animated textures: lost in this tree, where
+     * the disc and upstream (doldecomp/melee) have them (0x800F106C and
+     * 0x800F1080 in ftKb_SpecialN_800F0FC0, the hat itself and hat + 8 as
+     * the descriptors). */
+    ftParts_8007487C((FtPartsDesc*) hat, &fp->u.kb.hat.x24, fp->costume_id, &fp->u.kb.hat.x14,
+                     &fp->u.kb.hat.x1C);
+    /* hat + 8: desc.vis_table, a disc (byte-swapped) field, so by offset */
+    ftAnim_80070200(fp,
+                    (ftData_x8_x8*) ((u8*) hat + offsetof(KirbyHatStruct, desc) +
+                                     offsetof(FtPartsDesc, vis_table)),
+                    &fp->u.kb.x44, &fp->u.kb.hat.x14);
 }
 
 void ftKb_SpecialN_800F0FC0(Fighter_GObj* gobj)

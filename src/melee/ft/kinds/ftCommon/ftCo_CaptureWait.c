@@ -117,6 +117,11 @@ void ftCo_CaptureWaitHi_Anim(Fighter_GObj* gobj)
     f32 zero;
     fp->mv.co.capturewait.x0 += 1.0;
     fp->grab_timer -= p_ftCommonData->grab_timer_decrement;
+    /* The mash: lost in this tree's port of upstream's overlay removal
+     * (doldecomp/melee #3495), where the disc has it (bl ftCommon_GrabMash at
+     * 0x800DB958, its result to fp+2348): without it a held fighter's
+     * mashing did nothing, and every grab ran its whole timer. */
+    fp->mv.co.capturewait.x8 = ftCommon_GrabMash(fp, p_ftCommonData->x3A8);
     if (fp->grab_timer <= 0.0F) {
         ftCo_800DA698(fp->victim_gobj, 0);
         if (fp->mv.co.capturewait.xC != 0 || fn_800DC044(gobj)) {
