@@ -35,15 +35,23 @@ static const struct {
 } s_stages[] = {
     {Gr_Kind_Zebes, {"ACID"}, NULL},
     {Gr_Kind_Corneria, {"WIND", "GREAT FOX", "ARWINGS"}, NULL},
-    {Gr_Kind_Kongo, {"FALLS", "JUNGLE"}, NULL},
-    {Gr_Kind_Izumi, {"FOUNTAIN", "JETS"}, NULL},
-    /* 2026-10-18: loud against the fighters on purpose, nearly over the
-     * music, the race being the point; the engines' body and the rush's
-     * middle brought up, the craft's jets and the Flyer brightened. */
+    /* 2026-10-18, the user's: the falls up, the jungle's rumble cut below
+     * its birds. Stage sounds 2 dB under busy fighters (desktop, a replayed
+     * CPU fight, music off): where every stage's sit. */
+    {Gr_Kind_Kongo, {"FALLS", "JUNGLE"}, "FALLS=4.0;JUNGLE=0.0/635,-18.0,0.71"},
+    /* 2026-10-18: the user's (fountain 1.5, jets 2.5) was 12 dB under the
+     * fighters; up 5.5 dB, to 7 under. */
+    {Gr_Kind_Izumi, {"FOUNTAIN", "JETS"}, "FOUNTAIN=7.0;JETS=8.0"},
+    /* 2026-10-18: the user's bands kept (the engines' body 200-430 Hz, the
+     * rush's air up top, the craft's jets at 1.25 kHz, the Flyer's rumble
+     * and roar), their boosts halved and the rush's middle moved off the
+     * engines' (700 Hz, not a wide 505); the four in the user's balance,
+     * the craft a little more forward. 1.7 dB under busy fighters (the
+     * user's mix was 7.6 over). */
     {Gr_Kind_BigBlue,
      {"ENGINES", "RUSH", "CRAFT", "FLYER"},
-     "ENGINES=5.5/215,8.5,0.99/435,10.5,1.21/1750,-2.5,1.76;RUSH=6.0/180,2.0,0.71/505,8.0,0.46/2550,5.5,0.71;"
-     "CRAFT=-0.5/450,-0.5,0.71/1250,8.0,1.00/6000,0.0,0.71;FLYER=5.0/595,6.5,0.71/1750,7.0,1.00/6000,0.0,0.71"},
+     "ENGINES=1.0/200,4.0,0.71/430,5.0,1.20/1750,-3.0,0.71;RUSH=2.0/180,-3.0,0.71/700,4.0,0.70/2550,4.0,0.71;"
+     "CRAFT=0.0/450,-2.0,0.71/1250,5.0,1.00/6000,0.0,0.71;FLYER=-2.2/300,4.0,0.71/1750,4.0,1.00/6000,0.0,0.71"},
 };
 #define MIX_STAGES ((int)(sizeof s_stages / sizeof s_stages[0]))
 
