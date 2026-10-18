@@ -21,6 +21,7 @@
 #include <sysdolphin/baselib/debug.h>
 #include <sysdolphin/baselib/gobj.h>
 
+
 struct mpColl_80458810_t {
     /*  +0 */ int right[9];
     /* +24 */ int left[9];
@@ -1000,8 +1001,8 @@ void mpColl_800439FC(CollData* coll)
     right_dx = ABS(coll->ecb.right.x);
 
     // recalculate ceiling direction from its normal
-    f1 = (coll->ceiling.normal.y * right_dx) + right_x;
-    f2 = -(coll->ceiling.normal.x * right_dx) + right_y;
+    f1 = gk_fmadds(coll->ceiling.normal.y, right_dx, right_x);
+    f2 = gk_fnmsubs(coll->ceiling.normal.x, right_dx, right_y);
     if (!mpCheckLeftWall(f1, f2, right_x, right_y, &coll->contact, NULL, NULL,
                          NULL, coll->joint_id_skip, coll->joint_id_only))
     {
@@ -1036,8 +1037,8 @@ void mpColl_80043ADC(CollData* coll)
     left_dx = ABS(coll->ecb.left.x);
 
     // recalculate ceiling direction from its normal
-    f1 = -(coll->ceiling.normal.y * left_dx) + left_x;
-    f2 = (coll->ceiling.normal.x * left_dx) + left_y;
+    f1 = gk_fnmsubs(coll->ceiling.normal.y, left_dx, left_x);
+    f2 = gk_fmadds(coll->ceiling.normal.x, left_dx, left_y);
     if (!mpCheckRightWall(f1, f2, left_x, left_y, &coll->contact, NULL, NULL,
                           NULL, coll->joint_id_skip, coll->joint_id_only))
     {
@@ -1092,8 +1093,8 @@ void mpColl_80043C6C(CollData* coll, int line_id, bool ignore_bottom)
     pos.y = coll->cur_pos.y + coll->ecb.right.y;
     if (mpLib_8004E398_LeftWall(line_id, &pos, NULL, NULL, NULL) != -1) {
         // recalculate floor direction from its normal
-        float floor_x = -(coll->floor.normal.y * right_dx) + pos.x;
-        float floor_y = (coll->floor.normal.x * right_dx) + pos.y;
+        float floor_x = gk_fnmsubs(coll->floor.normal.y, right_dx, pos.x);
+        float floor_y = gk_fmadds(coll->floor.normal.x, right_dx, pos.y);
         if (mpCheckLeftWall(floor_x, floor_y, pos.x, pos.y, &coll->contact,
                             &wall_id, NULL, NULL, coll->joint_id_skip,
                             coll->joint_id_only))
@@ -1116,8 +1117,8 @@ void mpColl_80043C6C(CollData* coll, int line_id, bool ignore_bottom)
         mpLeftWallGetTop(line_id, &pos);
         f1 = pos.x - 2.0F;
         f2 = pos.y;
-        pos.x = -((2.0F * right_dx) - f1);
-        pos.y = -((2.0F * (coll->ecb.right.y - coll->ecb.bottom.y)) - f2);
+        pos.x = -(gk_fmsubs(2.0F, right_dx, f1));
+        pos.y = -(gk_fmsubs(2.0F, (coll->ecb.right.y - coll->ecb.bottom.y), f2));
         if (mpCheckFloor(f1, f2, pos.x, pos.y, 0.0F, &coll->contact, NULL,
                          NULL, NULL, coll->floor_skip, coll->joint_id_skip,
                          coll->joint_id_only, NULL, NULL))
@@ -1174,8 +1175,8 @@ void mpColl_80043F40(CollData* coll, int line_id, bool ignore_bottom)
     pos.y = coll->cur_pos.y + coll->ecb.left.y;
     if (mpLib_8004E684_RightWall(line_id, &pos, NULL, NULL, NULL) != -1) {
         // recalculate floor direction from its normal
-        float floor_x = (coll->floor.normal.y * left_dx) + pos.x;
-        float floor_y = -(coll->floor.normal.x * left_dx) + pos.y;
+        float floor_x = gk_fmadds(coll->floor.normal.y, left_dx, pos.x);
+        float floor_y = gk_fnmsubs(coll->floor.normal.x, left_dx, pos.y);
         if (mpCheckRightWall(floor_x, floor_y, pos.x, pos.y, &coll->contact,
                              &wall_id, NULL, NULL, coll->joint_id_skip,
                              coll->joint_id_only))
@@ -1199,8 +1200,8 @@ void mpColl_80043F40(CollData* coll, int line_id, bool ignore_bottom)
         f1 = 2.0F + pos.x;
         f2 = pos.y;
         // 2.0 * (ecb bottom -> ecb left).normal() + ecb left
-        pos.x = 2.0F * left_dx + f1;
-        pos.y = -(2.0F * (coll->ecb.left.y - coll->ecb.bottom.y)) + f2;
+        pos.x = gk_fmadds(2.0F, left_dx, f1);
+        pos.y = gk_fnmsubs(2.0F, (coll->ecb.left.y - coll->ecb.bottom.y), f2);
         if (mpCheckFloor(f1, f2, pos.x, pos.y, 0.0F, &coll->contact, NULL,
                          NULL, NULL, coll->floor_skip, coll->joint_id_skip,
                          coll->joint_id_only, NULL, NULL))

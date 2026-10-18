@@ -4565,12 +4565,12 @@ bool mpLib_80054ED8(int line_id)
     return true;
 }
 
-static inline int mpLineGetNextFrom(MapLine* line, const u32* flags_base)
+static inline int mpLineGetNextFrom(MapLine* line)
 {
     int result = line->next_id1;
 
     if (result != -1) {
-        u32 flags = flags_base[result * 2];
+        u32 flags = groundCollLine[result].flags;
 
         if ((flags & LINE_FLAG_ENABLED) && !(flags & LINE_FLAG_HIDDEN)) {
             CollVtx* v1 = &groundCollVtx[line->v1_idx];
@@ -4585,12 +4585,12 @@ static inline int mpLineGetNextFrom(MapLine* line, const u32* flags_base)
     return line->next_id0;
 }
 
-static inline int mpLineGetPrevFrom(MapLine* line, const u32* flags_base)
+static inline int mpLineGetPrevFrom(MapLine* line)
 {
     int result = line->prev_id1;
 
     if (result != -1) {
-        u32 flags = flags_base[result * 2];
+        u32 flags = groundCollLine[result].flags;
 
         if ((flags & LINE_FLAG_ENABLED) && !(flags & LINE_FLAG_HIDDEN)) {
             CollVtx* v0 = &groundCollVtx[line->v0_idx];
@@ -4610,7 +4610,6 @@ bool mpLinesConnected(int start_id, int target_id)
     int line_id;
     u32 kind;
     MapLine* start_line;
-    u32* flags_base;
 
     LINEID_CHECK(4656, start_id);
     LINEID_CHECK(4657, target_id);
@@ -4619,9 +4618,12 @@ bool mpLinesConnected(int start_id, int target_id)
     }
 
     start_line = groundCollLine[start_id].x0;
-    flags_base = &groundCollLine->flags;
-    kind = flags_base[start_id * 2] & LINE_FLAG_KIND;
-    line_id = mpLineGetNextFrom(start_line, flags_base);
+    /* The disc's code reads each line's flags as every other word from
+     * groundCollLine->flags, which only holds while a CollLine is a
+     * 4-byte pointer and its flags: on a 64-bit build that stride lands on
+     * another line's, and lines that join came out unconnected. */
+    kind = groundCollLine[start_id].flags & LINE_FLAG_KIND;
+    line_id = mpLineGetNextFrom(start_line);
     while (line_id != -1 &&
            kind == (groundCollLine[line_id].flags & LINE_FLAG_KIND))
     {
@@ -4632,7 +4634,7 @@ bool mpLinesConnected(int start_id, int target_id)
         line_id = mpLineGetNext(line_id);
     }
 
-    line_id = mpLineGetPrevFrom(start_line, flags_base);
+    line_id = mpLineGetPrevFrom(start_line);
     while (line_id != -1 &&
            kind == (groundCollLine[line_id].flags & LINE_FLAG_KIND))
     {
@@ -4914,18 +4916,20 @@ void mpLib_80055E9C(int joint_id)
         m0_3 = mtx[0][3];
         m1_3 = mtx[1][3];
         v_r4 = &groundCollVtx[joint->inner->vtx_start];
+        /* fused as the DOL has it (its loop unrolled eight times, so
+         * tools/fuse_sites.py counts 22 there and cannot match them) */
         for (i = 0; i < vtx_count; i++, v_r4++) {
-            v_r4->pos.x = v_r4->x0 * m0_0 + m0_3;
-            v_r4->pos.y = v_r4->x4 * m0_0 + m1_3;
+            v_r4->pos.x = gk_fmadds(v_r4->x0, m0_0, m0_3);
+            v_r4->pos.y = gk_fmadds(v_r4->x4, m0_0, m1_3);
         }
         joint->bounding_min.x =
-            (joint->inner->left_bound * m0_0 + m0_3) - 30.0F;
+            gk_fmadds(joint->inner->left_bound, m0_0, m0_3) - 30.0F;
         joint->bounding_min.y =
-            (joint->inner->bottom_bound * m0_0 + m1_3) - 30.0F;
+            gk_fmadds(joint->inner->bottom_bound, m0_0, m1_3) - 30.0F;
         joint->bounding_max.x =
-            30.0F + (joint->inner->right_bound * m0_0 + m0_3);
+            30.0F + gk_fmadds(joint->inner->right_bound, m0_0, m0_3);
         joint->bounding_max.y =
-            30.0F + (joint->inner->top_bound * m0_0 + m1_3);
+            30.0F + gk_fmadds(joint->inner->top_bound, m0_0, m1_3);
         joint->flags |= CollJoint_B8;
         goto after0;
     }

@@ -22,6 +22,7 @@ The rewrite follows what the DOL shows mwcc doing:
   a*b + c*d           fmadds(a, b, c*d)    the first product fused
   a*b - c             fmsubs(a, b, c)      (a*b - c*d likewise)
   c - a*b             fnmsubs(a, b, c)
+  -(a*b) + c          fnmsubs(a, b, c)     (c + -(a*b) likewise)
   -(a*b + c)          fnmadds(a, b, c)
   x += a*b            x = fmadds(a, b, x)
   x -= a*b            x = fnmsubs(a, b, x)
@@ -154,6 +155,16 @@ def is_mul(n, src, prec):
     return n.kind == ci.CursorKind.BINARY_OPERATOR and op_of(n, src) == "*" and fp(n) == prec
 
 
+def neg_mul(n, src, prec):
+    """-(a*b): the product's two operands, or None."""
+    n = strip(n)
+    kids = list(n.get_children())
+    if n.kind != ci.CursorKind.UNARY_OPERATOR or len(kids) != 1 or \
+            src[n.extent.start.offset:kids[0].extent.start.offset].strip() != "-":
+        return None
+    return list(strip(kids[0]).get_children()) if is_mul(kids[0], src, prec) else None
+
+
 def find_sites(fn, src, path):
     sites = []
 
@@ -178,10 +189,16 @@ def find_sites(fn, src, path):
             elif is_mul(r, src, prec):
                 m = list(strip(r).get_children())
                 sites.append(Site(n, "madd" if op == "+" else "nmsub", prec, m[0], m[1], l))
+            elif op == "+" and neg_mul(l, src, prec):
+                m = neg_mul(l, src, prec)
+                sites.append(Site(n, "nmsub", prec, m[0], m[1], r))
+            elif op == "+" and neg_mul(r, src, prec):
+                m = neg_mul(r, src, prec)
+                sites.append(Site(n, "nmsub", prec, m[0], m[1], l))
         elif k == ci.CursorKind.CALL_EXPR and re.match(r"(gk|ppc)_fn?m(add|sub)s?$", n.spelling or ""):
-            # already written fused (by hand, or an earlier run): counted, kept
+            # already written fused (by hand, or an earlier run): counted, kept,
+            # and so are the fused ops in its arguments
             sites.append(Site(n, None, "single" if n.spelling.endswith("s") else "double", None, None, None))
-            return
         elif prec and k == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR and op_of(n, src) in ("+=", "-="):
             l, r = list(n.get_children())
             lhs = src[l.extent.start.offset:l.extent.end.offset]
