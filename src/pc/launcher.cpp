@@ -477,7 +477,7 @@ class Launcher final : public Rml::EventListener {
                 "stage-sounds", "defaults-audio"};
         case 2:
             return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes",
-                "defaults-cheats"};
+                "cstick-1p", "defaults-cheats"};
         case 4:
             return {"auth-sign-in", "auth-sign-out", "auth-email", "auth-password", "net-name",
                 "net-delay"};
@@ -751,6 +751,8 @@ class Launcher final : public Rml::EventListener {
         text("ucf", std::getenv("MELEE_UCF") ? "Environment override" : prefs.ucf ? "On" : "Off");
         text("slippi-fixes", std::getenv("MELEE_SLIPPI_FIXES") ? "Environment override" :
                                  prefs.slippi_fixes ? "On" : "Off");
+        text("cstick-1p", std::getenv("MELEE_CSTICK_1P") ? "Environment override" :
+                              prefs.cstick_1p ? "On" : "Off");
         text("unlock-all", prefs.unlock_all ? "Unlocked" : "Normal");
         text("backend", backend_name(prefs.backend));
         slider("volume", prefs.volume * 100.0f);
@@ -887,6 +889,7 @@ class Launcher final : public Rml::EventListener {
             prefs.free_camera = d.free_camera;
             prefs.ucf = d.ucf;
             prefs.slippi_fixes = d.slippi_fixes;
+            prefs.cstick_1p = d.cstick_1p;
             message = "Gameplay settings are back to their defaults.";
         } else if (id == "defaults-launcher") {
             prefs.scale = d.scale;
@@ -1068,6 +1071,11 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("slippi-fixes")->Focus();
+        } else if (id == "cstick-1p") {
+            prefs.cstick_1p = !prefs.cstick_1p;
+            save();
+            refresh_settings();
+            element("cstick-1p")->Focus();
         } else if (id == "unlock-all") {
             prefs.unlock_all = !prefs.unlock_all;
             save();
@@ -1803,7 +1811,8 @@ public:
             return {"volume", "music-volume", "sfx-volume", "mute", "reverb", "fps", "scale",
                 "port-check-update"};
         case 2:
-            return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes"};
+            return {"unlock-all", "frozen-stadium", "free-camera", "ucf", "slippi-fixes",
+                "cstick-1p"};
         case 4:
             return {"auth-email", "auth-password", "auth-sign-in", "auth-sign-out", "net-name",
                 "net-delay"};
@@ -1917,6 +1926,8 @@ public:
         label("ucf", std::getenv("MELEE_UCF") ? "Environment override" : prefs.ucf ? "On" : "Off");
         label("slippi-fixes", std::getenv("MELEE_SLIPPI_FIXES") ? "Environment override" :
                                   prefs.slippi_fixes ? "On" : "Off");
+        label("cstick-1p", std::getenv("MELEE_CSTICK_1P") ? "Environment override" :
+                               prefs.cstick_1p ? "On" : "Off");
         label("unlock-all", prefs.unlock_all ? "Unlocked" : "Normal");
         label("backend", backend_name(prefs.backend));
         slider("volume", prefs.volume * 100.0f);
@@ -2119,6 +2130,8 @@ public:
             prefs.ucf = !prefs.ucf;
         } else if (id == "slippi-fixes") {
             prefs.slippi_fixes = !prefs.slippi_fixes;
+        } else if (id == "cstick-1p") {
+            prefs.cstick_1p = !prefs.cstick_1p;
         } else if (id == "unlock-all") {
             prefs.unlock_all = !prefs.unlock_all;
         } else if (id == "backend") {
@@ -2466,6 +2479,17 @@ extern "C" bool pc_is_slippi_fixes_enabled(void) {
     }
     static const char* env = std::getenv("MELEE_SLIPPI_FIXES");
     return env ? env[0] != '0' : prefs.slippi_fixes;
+}
+/* The C-stick's attacks in the 1P modes (Classic, Adventure, Training and the
+ * rest), where Melee gives it to the camera's zoom instead: a common Gecko
+ * code. VS, and so every online or replay run, has it either way; such a run
+ * still pins it to Melee's own rule. */
+extern "C" bool pc_is_cstick_1p_enabled(void) {
+    if (pc_net_deterministic()) {
+        return false;
+    }
+    static const char* env = std::getenv("MELEE_CSTICK_1P");
+    return env ? env[0] != '0' : prefs.cstick_1p;
 }
 extern "C" int pc_get_hud_mode(void) {
     return prefs.hud_mode;

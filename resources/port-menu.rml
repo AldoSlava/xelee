@@ -24,6 +24,7 @@
 <div class="setting"><div class="description"><h3>Free camera</h3><p>Unlock 360° orbital rotation and zoom distance in pause mode.</p></div><button id="free-camera">Normal</button></div>
 <div class="setting"><div class="description"><h3>Universal Controller Fix</h3><p>UCF 0.84 as Slippi plays it: dashback, shield drop, SDI, tumble and 1.0 cardinals.</p></div><button id="ucf">On</button></div>
 <div class="setting"><div class="description"><h3>Slippi gameplay fixes</h3><p>No wobbling, neutral spawns and the freeze-glitch fix offline. Always on online.</p></div><button id="slippi-fixes">On</button></div>
+<div class="setting"><div class="description"><h3>C-Stick in 1P</h3><p>The C-stick attacks in Classic, Adventure, Training and the other 1P modes, as in VS.</p></div><button id="cstick-1p">On</button></div>
 </div>
 <div id="page-audio" class="page">
 <div class="setting"><div class="description"><h3>Master volume</h3><p>Left/right or drag to adjust.</p></div><div class="slider-control"><input type="range" id="volume" min="0" max="100" step="5" value="100" /><span id="volume-val" class="slider-value">100%</span></div></div>

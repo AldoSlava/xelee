@@ -1850,7 +1850,8 @@ void Fighter_procInput(Fighter_GObj* gobj)
                            HSD_PadGameStatus[fp->pad_port].nml_stickX,
                            HSD_PadGameStatus[fp->pad_port].nml_stickY);
                 if (DbLevel < DbLKind_DebugRom &&
-                    gm_IsCurrently1PMode_inline() == 0)
+                    (gm_IsCurrently1PMode_inline() == 0 ||
+                     pc_is_cstick_1p_enabled()))
                 {
                     SET_STICKS(fp->input.cstick[0].x, fp->input.cstick[0].y,
                                HSD_PadGameStatus[fp->pad_port].nml_subStickX,

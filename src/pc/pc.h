@@ -91,6 +91,7 @@ bool pc_is_frozen_stadium_enabled(void);
 bool pc_is_free_camera_enabled(void);
 bool pc_is_ucf_enabled(void);
 bool pc_is_slippi_fixes_enabled(void); /* wobbling, neutral spawns, freeze-glitch fix */
+bool pc_is_cstick_1p_enabled(void);    /* the C-stick attacks in the 1P modes */
 int pc_get_hud_mode(void);
 float pc_get_music_volume(void);
 float pc_get_sfx_volume(void);

@@ -43,6 +43,7 @@ struct Preferences {
     bool free_camera = false;
     bool ucf = true;             // UCF 0.84 rules (dashback, shield drop, SDI, tumble, cardinals)
     bool slippi_fixes = true;    // Slippi's other gameplay rules: no wobbling, neutral spawns, freeze-glitch fix
+    bool cstick_1p = true;       // the C-stick attacks in the 1P modes too (a common Gecko code)
     float music_volume = 1.0f;
     float sfx_volume = 1.0f;
     bool spatial_audio = true;  // fighters' and items' sounds placed (src/pc/spatial_audio.h)

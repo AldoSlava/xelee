@@ -1410,7 +1410,11 @@ void Camera_8002B0E0(void)
     f32 var_f1;
     f32 var_f2;
 
-    if ((gm_IsCurrently1PMode_inline() != 0) && (game_camera.x2C0 > 0.0f)) {
+    /* With the C-stick attacking in 1P (pc_is_cstick_1p_enabled), it no
+     * longer zooms. */
+    if ((gm_IsCurrently1PMode_inline() != 0) && (game_camera.x2C0 > 0.0f) &&
+        !pc_is_cstick_1p_enabled())
+    {
         var_f1 = HSD_PadGetNmlSubStickY(Player_GetPadPort(0));
         var_f2 = var_f1;
         if (var_f2 < 0.0f) {

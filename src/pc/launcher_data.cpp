@@ -373,7 +373,7 @@ Preferences load_preferences(const std::filesystem::path& path) {
                 prefs.scale = value;
         } else if (key == "check_updates" || key == "custom_textures" || key == "unlock_all" ||
                    key == "frozen_stadium" || key == "free_camera" || key == "ucf" ||
-                   key == "slippi_fixes" || key == "reverb" || key == "spatial_audio" ||
+                   key == "slippi_fixes" || key == "cstick_1p" || key == "reverb" || key == "spatial_audio" ||
                    key == "stage_sounds" || key == "xr_spacewarp" ||
                    key == "xr_shadow" || key == "xr_place_hold")
         {
@@ -393,6 +393,8 @@ Preferences load_preferences(const std::filesystem::path& path) {
                     prefs.ucf = value;
                 else if (key == "slippi_fixes")
                     prefs.slippi_fixes = value;
+                else if (key == "cstick_1p")
+                    prefs.cstick_1p = value;
                 else if (key == "reverb")
                     prefs.reverb = value;
                 else if (key == "spatial_audio")
@@ -450,7 +452,7 @@ bool save_preferences(
          << "\nmusic_volume " << prefs.music_volume << "\nsfx_volume " << prefs.sfx_volume
          << "\ninstall_id " << std::hex << prefs.install_id << std::dec << '\n';
     text << "reverb " << prefs.reverb << '\n';
-    text << "slippi_fixes " << prefs.slippi_fixes << '\n';
+    text << "slippi_fixes " << prefs.slippi_fixes << "\ncstick_1p " << prefs.cstick_1p << '\n';
     text << "spatial_audio " << prefs.spatial_audio << "\nstage_sounds " << prefs.stage_sounds
          << "\nxr_resolution " << prefs.xr_resolution
          << "\nxr_spacewarp " << prefs.xr_spacewarp << "\nxr_shadow " << prefs.xr_shadow
