@@ -21,7 +21,8 @@ extern "C" {
 
 /* The channels, by stage (pc/stage_mix.c's table names them). */
 enum {
-    STAGE_MIX_ACID = 0, /* Brinstar */
+    STAGE_MIX_ACID = 0, /* Brinstar: its simmer (pc/stage_ambience.c) */
+    STAGE_MIX_ACID_RUMBLE = 1, /* Melee's, as it starts to move */
     STAGE_MIX_WIND = 0, /* Corneria */
     STAGE_MIX_GREAT_FOX = 1,
     STAGE_MIX_ARWINGS = 2,

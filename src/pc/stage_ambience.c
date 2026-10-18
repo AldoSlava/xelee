@@ -31,7 +31,7 @@
 #define AMB_FADE_IN_S 0.3f /* in, as the fight starts: quickly */
 #define AMB_DUCK_S 0.15f /* the pause duck's glide, full scale */
 
-enum { AMB_NONE, AMB_WIND, AMB_FALLS, AMB_FOUNTAIN, AMB_RUSH };
+enum { AMB_NONE, AMB_WIND, AMB_FALLS, AMB_FOUNTAIN, AMB_RUSH, AMB_ACID };
 
 static uint64_t s_stamp; /* game thread writes, audio thread reads (__atomic) */
 static int s_kind;
@@ -232,6 +232,49 @@ bool pc_ambience_racers(void) {
     return enabled() && pc_spatial_enabled();
 }
 
+/* Brinstar's acid (grzebes.c: part 8's Ground, its proc grZebes_801D99E0):
+ * its surface, where it burns (Ground_801C4368), how fast it's moving,
+ * and the camera's quake before it moves (the last 120 frames of its
+ * wait), published under a sequence count like the jets. */
+typedef struct Acid {
+    float surface; /* game units */
+    float speed;   /* units a frame, either way */
+    float warn;    /* 0 to 1 over the quake before it moves */
+    bool here;
+} Acid;
+static Acid s_acid;
+static unsigned s_acid_seq;
+
+static void acid_frame(void) {
+    Acid a = {0};
+    HSD_GObj* g = Ground_GetMapGObj(8);
+    const Ground* gp = g != NULL ? g->user_data : NULL;
+    if (gp != NULL) {
+        float surface, delta;
+        Ground_801C4368(&surface, &delta);
+        a.surface = surface;
+        a.speed = fabsf(delta);
+        if (gp->u.zebes5.xC8 == 1 && gp->u.zebes5.xC6 < 0x78) {
+            a.warn = fminf(fmaxf(1.f - (float)gp->u.zebes5.xC6 / 120.f, 0.f), 1.f);
+        }
+        a.here = isfinite(a.surface) && isfinite(a.speed);
+    }
+    /* MELEE_ACID_LOG=1: the acid, four times a second. */
+    static int log = -1;
+    static int frames;
+    if (log < 0) {
+        log = getenv("MELEE_ACID_LOG") != NULL;
+    }
+    if (log && ++frames >= 15) {
+        frames = 0;
+        pc_log_line("acid: surface %.1f speed %.3f warn %.2f state %d timer %d", a.surface, a.speed, a.warn,
+                    gp != NULL ? (int)gp->u.zebes5.xC8 : -1, gp != NULL ? (int)gp->u.zebes5.xC6 : -1);
+    }
+    __atomic_add_fetch(&s_acid_seq, 1, __ATOMIC_ACQ_REL);
+    s_acid = a;
+    __atomic_add_fetch(&s_acid_seq, 1, __ATOMIC_RELEASE);
+}
+
 /* Kongo Jungle's jungle: Melee plays a stereo recording (sound 0x55D, 16
  * kHz, 18.4 s) once as the stage loads; it rises over half a second, holds
  * to about 7.5 s (a louder call at 5.8 to 6.5 s) and fades over the rest.
@@ -328,12 +371,15 @@ void pc_ambience_frame(void) {
                      : stage_info.grkind == Gr_Kind_Kongo  ? AMB_FALLS
                      : stage_info.grkind == Gr_Kind_Izumi  ? AMB_FOUNTAIN
                      : stage_info.grkind == Gr_Kind_BigBlue ? AMB_RUSH
+                     : stage_info.grkind == Gr_Kind_Zebes  ? AMB_ACID
                                                            : AMB_NONE;
     if (kind == AMB_FOUNTAIN) {
         jets_frame();
     } else if (kind == AMB_RUSH) {
         racers_frame();
         craft_frame();
+    } else if (kind == AMB_ACID) {
+        acid_frame();
     }
     __atomic_store_n(&s_kind, kind, __ATOMIC_RELAXED);
     __atomic_store_n(&s_stamp, now, __ATOMIC_RELEASE);
@@ -1321,6 +1367,179 @@ static void craft_mix(float* out, int frames, int rate, bool on) {
     }
 }
 
+/* Brinstar's acid, which Melee only sounds as it starts to rise or fall
+ * (0x61A80/1, about 2.5 s; pc/spatial_audio.c places them): a simmer heard
+ * all the time from its surface, at two points across the stretch of it
+ * the 3D view keeps (where Melee's rumble sits), each its own noise: a low
+ * churning rumble (brown noise, 60 to 260 Hz), thick bubbles that swell
+ * and break (Minnaert's ring, a sine rising as it dies: 90 to 400 Hz,
+ * slower than water's, with a soft burst as each breaks) and a faint
+ * sizzle where it burns. Louder the higher it comes, up under the stage,
+ * beyond what the distance gain does (flat within a stage's width), and
+ * churning harder through the camera's quake before it moves and while it
+ * moves. Placed sounds, slots 0-1. */
+#define ACID_SOURCES 2
+#define ACID_NEAR_Y (-20.f)  /* the surface up under the stage: full */
+#define ACID_FAR_Y (-170.f)  /* down out of the way: ACID_FAR_GAIN */
+#define ACID_FAR_GAIN 0.25f
+#define ACID_SPEED 0.9f      /* units a frame: churning flat out (it moves at up to about 1) */
+#define BUBBLES 8
+static const float s_acid_x[ACID_SOURCES] = {-120.f + 245.f / 3.f, -120.f + 245.f * 2.f / 3.f};
+
+typedef struct Bubble {
+    float phase, freq, amp, env, decay, rise; /* decay: per sample; rise: pitch per sample */
+} Bubble;
+
+typedef struct AcidSource {
+    uint32_t seed;
+    Gust churn;
+    float br, rb_lp, rb_hp;                /* the rumble */
+    float sz_lp, sz_hp, sz_env, sz_target; /* the sizzle */
+    int sz_hold;
+    float pop_lp, pop_env; /* the bursts */
+    Bubble bub[BUBBLES];
+    float next_bubble; /* samples */
+    StageMixState mix;
+} AcidSource;
+
+static struct {
+    bool init;
+    float level;
+    float near, stir; /* gliding to the acid's height and motion */
+    float y;          /* its surface, last seen */
+    AcidSource src[ACID_SOURCES];
+} s_acid_snd;
+
+static void acid_init(void) {
+    for (int c = 0; c < ACID_SOURCES; c++) {
+        AcidSource* s = &s_acid_snd.src[c];
+        *s = (AcidSource){0};
+        s->seed = c == 0 ? 0x3C6EF372u : 0xA54FF53Au;
+        s->churn = (Gust){.seed = c == 0 ? 0x510E527Fu : 0x9B05688Cu, .value = 0.6f, .target = 0.6f};
+    }
+    s_acid_snd.near = -1.f; /* taken as is the first time */
+    s_acid_snd.init = true;
+}
+
+/* a: the rumble's low-pass and high-pass, the sizzle's; per sample. */
+static float acid_sample(AcidSource* s, const float a[4], float rate, float stir, float near) {
+    const float n = rnd_unit(&s->seed) * 2.f - 1.f;
+    s->br = 0.995f * s->br + 0.1f * n;
+    s->rb_lp += a[0] * (s->br - s->rb_lp);
+    s->rb_hp += a[1] * (s->rb_lp - s->rb_hp);
+    const float rumble = s->rb_lp - s->rb_hp;
+    /* The sizzle: white noise, 3.5 to 9 kHz, flickering. */
+    if (--s->sz_hold <= 0) {
+        const float r = rnd_unit(&s->seed);
+        s->sz_target = r * r * r;
+        s->sz_hold = 30 + (int)(rnd_unit(&s->seed) * 240.f);
+    }
+    s->sz_env += (s->sz_target - s->sz_env) * 0.02f;
+    s->sz_lp += a[2] * (n - s->sz_lp);
+    s->sz_hp += a[3] * (s->sz_lp - s->sz_hp);
+    const float sizzle = (s->sz_lp - s->sz_hp) * s->sz_env;
+    /* The bubbles: about 7 a second, three times that churning; most of
+     * them big and low (90 to 400 Hz, 25 to 80 ms), some small. */
+    if (--s->next_bubble <= 0.f) {
+        for (int d = 0; d < BUBBLES; d++) {
+            Bubble* p = &s->bub[d];
+            if (p->env < 1e-3f) {
+                const bool big = rnd_unit(&s->seed) < 0.7f;
+                const float u = rnd_unit(&s->seed);
+                const float tau = (big ? 0.025f + 0.055f * rnd_unit(&s->seed) : 0.006f + 0.01f * rnd_unit(&s->seed)) * rate;
+                p->freq = (big ? 90.f + 310.f * u * u : 400.f + 600.f * u) / rate;
+                p->decay = expf(-1.f / tau);
+                p->rise = p->freq * 0.6f / tau;
+                p->amp = (big ? 0.6f + 0.4f * rnd_unit(&s->seed) : 0.25f + 0.2f * rnd_unit(&s->seed)) * (1.f + 0.5f * stir);
+                p->env = 1.f;
+                p->phase = 0.f;
+                s->pop_env = fmaxf(s->pop_env, big ? p->amp : 0.5f * p->amp);
+                break;
+            }
+        }
+        s->next_bubble = -logf(1.f - rnd_unit(&s->seed) * 0.999f) * rate / (7.f * (1.f + 2.f * stir));
+    }
+    float bubbles = 0.f;
+    for (int d = 0; d < BUBBLES; d++) {
+        Bubble* p = &s->bub[d];
+        if (p->env < 1e-3f) {
+            continue;
+        }
+        /* It swells over its first few milliseconds, then rings down. */
+        const float swell = fminf(1.f, (1.f - p->env) * 12.f + 0.05f);
+        bubbles += sinf(6.2831853f * p->phase) * p->env * p->amp * swell;
+        p->phase += p->freq;
+        p->phase -= floorf(p->phase);
+        p->freq += p->rise;
+        p->env *= p->decay;
+    }
+    s->pop_lp += 0.25f * (n - s->pop_lp); /* about 1.5 kHz down */
+    const float pop = s->pop_lp * s->pop_env;
+    s->pop_env *= 0.992f; /* about 4 ms */
+    return rumble * (1.f + 1.5f * stir) * 1.6f + bubbles * 0.32f + pop * 0.5f + sizzle * 0.12f * near * near;
+}
+
+static void acid_mix(float* out, int frames, int rate, bool on) {
+    const float dt = (float)frames / (float)rate;
+    if (!on && s_acid_snd.level <= 0.f) {
+        s_acid_snd.init = false;
+        return;
+    }
+    if (!s_acid_snd.init) {
+        acid_init();
+    }
+    Acid acid;
+    unsigned seq;
+    do {
+        seq = __atomic_load_n(&s_acid_seq, __ATOMIC_ACQUIRE);
+        acid = s_acid;
+    } while ((seq & 1u) != 0 || seq != __atomic_load_n(&s_acid_seq, __ATOMIC_ACQUIRE));
+    if (!acid.here) {
+        on = false;
+    }
+    const float level0 = s_acid_snd.level;
+    s_acid_snd.level = on ? fminf(1.f, level0 + dt / AMB_FADE_IN_S) : fmaxf(0.f, level0 - dt / AMB_FADE_S);
+    if (acid.here) {
+        s_acid_snd.y = acid.surface;
+        const float near = fminf(fmaxf((acid.surface - ACID_FAR_Y) / (ACID_NEAR_Y - ACID_FAR_Y), 0.f), 1.f);
+        const float stir = fmaxf(0.7f * acid.warn, fminf(acid.speed / ACID_SPEED, 1.f));
+        s_acid_snd.near = s_acid_snd.near < 0.f ? near : s_acid_snd.near + (near - s_acid_snd.near) * (1.f - expf(-dt / 0.3f));
+        s_acid_snd.stir += (stir - s_acid_snd.stir) * (1.f - expf(-dt / 0.4f));
+    }
+    const float near = fmaxf(s_acid_snd.near, 0.f), stir = s_acid_snd.stir;
+    const float volume = pc_get_sfx_volume() * ambience_gain();
+    const float duck0 = s_duck0, duck1 = s_duck;
+    const float w = 6.2831853f / (float)rate;
+    const float a[4] = {1.f - expf(-w * 260.f * (1.f + 0.6f * stir)), 1.f - expf(-w * 60.f), 1.f - expf(-w * 9000.f),
+                        1.f - expf(-w * 3500.f)};
+    const float height = ACID_FAR_GAIN + (1.f - ACID_FAR_GAIN) * near * sqrtf(near);
+    float mono[160];
+    if (frames > 160) {
+        frames = 160;
+    }
+    for (int c = 0; c < ACID_SOURCES; c++) {
+        AcidSource* s = &s_acid_snd.src[c];
+        gust_step(&s->churn, dt * 0.6f);
+        /* Measured as the other stages are (desktop, a replayed CPU fight,
+         * music off): about 8 dB under busy fighters alone, 5 with Melee's
+         * rumble, where Kongo's and Big Blue's mixes sit. */
+        const float amp = (0.7f + 0.3f * s->churn.value) * height * 0.083f * volume;
+        for (int i = 0; i < frames; i++) {
+            const float t = (float)i / (float)frames;
+            const float lv = (level0 + (s_acid_snd.level - level0) * t) * (duck0 + (duck1 - duck0) * t);
+            mono[i] = acid_sample(s, a, (float)rate, stir, near) * amp * lv;
+        }
+        pc_stage_mix_apply(STAGE_MIX_ACID, &s->mix, mono, frames, 1);
+        const float pos[3] = {s_acid_x[c], s_acid_snd.y + 2.f, 0.f};
+        if (!pc_spatial_render_placed(c, pos, mono)) {
+            for (int i = 0; i < frames; i++) { /* not placed (spatial audio bypassed): plain, centred */
+                out[i * 2] += mono[i] * 0.7071f;
+                out[i * 2 + 1] += mono[i] * 0.7071f;
+            }
+        }
+    }
+}
+
 /* A layer heard all around (into the ambient bus), through its stage mixer
  * channel: made into a frame of its own, mixed, then added. */
 typedef void (*BusLayer)(float* out, int frames, int rate, bool on);
@@ -1364,4 +1583,5 @@ void pc_ambience_mix(float* out, int frames, int rate) {
     bus_layer(rush_mix, STAGE_MIX_RUSH, rush, out, frames, rate, fresh && kind == AMB_RUSH);
     racers_mix(out, frames, rate, fresh && kind == AMB_RUSH && pc_spatial_enabled());
     craft_mix(out, frames, rate, fresh && kind == AMB_RUSH);
+    acid_mix(out, frames, rate, fresh && kind == AMB_ACID);
 }

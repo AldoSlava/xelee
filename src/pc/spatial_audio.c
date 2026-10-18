@@ -229,12 +229,14 @@ static const StageSound s_stage_sounds[] = {
      * under the stage): from there it is a cue to where the acid is, a little
      * quieter by the distance gain alone. The rumble is quiet in the game's
      * own mix (-30 to -50 dB, about 2.5 s), and lost under the stage, so it
-     * is played 6 dB up. */
+     * is played 7 dB up, about 8 dB under busy fighters over a fight, with
+     * the acid's own simmer (pc/stage_ambience.c) between. */
     {.grkind = 0x08,
      .sfx = {0x61A80, 0x61A81},
      .x = {-120.f + 245.f / 3.f, -120.f + 245.f * 2.f / 3.f},
      .lava_y = true,
-     .gain = 2.f},
+     .gain = 2.25f,
+     .mix = STAGE_MIX_ACID_RUMBLE},
     /* Corneria (grcorneria.c). The Great Fox (part 3) flies nose to the
      * left. Its engine hum, a stereo loop from the stage's start whose right
      * channel runs about 9 dB over its left (as plain stereo it sat in the

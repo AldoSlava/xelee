@@ -33,21 +33,24 @@ static const struct {
     const char* names[MIX_CHANNELS];
     const char* preset;
 } s_stages[] = {
-    {Gr_Kind_Zebes, {"ACID"}, NULL},
+    /* Brinstar flat: the acid's simmer and Melee's rumble as it moves, each
+     * about 8 dB under busy fighters, 5 together. */
+    {Gr_Kind_Zebes, {"ACID", "RUMBLE"}, NULL},
     {Gr_Kind_Corneria, {"WIND", "GREAT FOX", "ARWINGS"}, NULL},
     /* 2026-10-18, the user's: the falls up, the jungle's rumble cut below
-     * its birds. Stage sounds 2 dB under busy fighters (desktop, a replayed
-     * CPU fight, music off): where every stage's sit. */
+     * its birds. Stage sounds 5 dB under busy fighters (desktop at full
+     * speed, a replayed CPU fight, music off; about the fighters' mean):
+     * where every stage's sit. */
     {Gr_Kind_Kongo, {"FALLS", "JUNGLE"}, "FALLS=4.0;JUNGLE=0.0/635,-18.0,0.71"},
-    /* 2026-10-18: the user's (fountain 1.5, jets 2.5) was 12 dB under the
-     * fighters; up 5.5 dB, to 7 under. */
+    /* 2026-10-18: the user's (fountain 1.5, jets 2.5) was 16 dB under busy
+     * fighters; up 5.5 dB, to 10.5 under. */
     {Gr_Kind_Izumi, {"FOUNTAIN", "JETS"}, "FOUNTAIN=7.0;JETS=8.0"},
     /* 2026-10-18: the user's bands kept (the engines' body 200-430 Hz, the
      * rush's air up top, the craft's jets at 1.25 kHz, the Flyer's rumble
      * and roar), their boosts halved and the rush's middle moved off the
      * engines' (700 Hz, not a wide 505); the four in the user's balance,
-     * the craft a little more forward. 1.7 dB under busy fighters (the
-     * user's mix was 7.6 over). */
+     * the craft a little more forward. 4.8 dB under busy fighters (the
+     * user's mix was 3.7 over). */
     {Gr_Kind_BigBlue,
      {"ENGINES", "RUSH", "CRAFT", "FLYER"},
      "ENGINES=1.0/200,4.0,0.71/430,5.0,1.20/1750,-3.0,0.71;RUSH=2.0/180,-3.0,0.71/700,4.0,0.70/2550,4.0,0.71;"
