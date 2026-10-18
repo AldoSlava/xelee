@@ -34,6 +34,8 @@ static struct { bool active; int frame; } net;
 /* net.c owns the scene; this harness runs no scene, so every record it
  * writes carries -1. */
 static int scene_kind(void) { return -1; }
+/* slp_play.c: no Slippi replay plays back here (MELEE_SLP_PLAY) */
+static bool pc_slp_play_active(void) { return false; }
 static char messages[4096];
 static void pc_log_line(const char* fmt, ...) {
     va_list args;

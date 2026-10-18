@@ -125,6 +125,13 @@ bool pc_net_slippi_send_setup(uint32_t seed, int32_t start_frame) {
 int pc_net_slippi_conn_state(void) {
     return 0;
 }
+/* slp_play.c: no Slippi replay plays back here (MELEE_SLP_PLAY) */
+bool pc_slp_play_active(void) {
+    return false;
+}
+uint32_t pc_slp_play_rng_offset(void) {
+    return 0;
+}
 
 void pc_log_line(const char* fmt, ...) {
     va_list ap;

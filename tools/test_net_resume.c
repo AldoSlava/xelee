@@ -403,6 +403,10 @@ bool record_active(void) {
 void replay_feed(PADStatus* head) {
     (void)head;
 }
+/* slp_play.c: a Slippi replay's pads (MELEE_SLP_PLAY) */
+void pc_slp_play_feed(PADStatus* head) {
+    (void)head;
+}
 void record_frame(const PADStatus* head, uint32_t ck, int32_t f) {
     (void)head;
     (void)ck;
