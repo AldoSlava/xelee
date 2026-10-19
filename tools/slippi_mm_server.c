@@ -279,10 +279,18 @@ static void handle_message(ENetPeer* peer, const char* text, size_t len) {
     enet_address_get_host_ip(&peer->address, t.ip, sizeof t.ip);
     const char* colon = strrchr(t.lan, ':');
     /* A client on this machine reaches us over loopback (mm.slippi.gg mapped
-     * to 127.0.0.1), which a player elsewhere on the LAN (a headset) cannot
-     * dial back: give out this machine's LAN address instead. */
+     * to 127.0.0.1), and a Slippi Dolphin then advertises 127.0.0.1 as its LAN
+     * address too, which a player elsewhere on the LAN (a headset) cannot dial
+     * back: give out this machine's LAN address for both. A peer on the same
+     * /16 takes ipAddressLan, so ipAddress alone is not enough. */
     if (strncmp(t.ip, "127.", 4) == 0 && relay_base == 0) {
         self_lan_ip(t.ip, sizeof t.ip);
+        if (strncmp(t.lan, "127.", 4) == 0 && strncmp(t.ip, "127.", 4) != 0 && colon != NULL) {
+            char port[16];
+            snprintf(port, sizeof port, "%s", colon);
+            snprintf(t.lan, sizeof t.lan, "%s%s", t.ip, port);
+            colon = strrchr(t.lan, ':');
+        }
     }
     t.game_port = colon != NULL ? (unsigned)atoi(colon + 1) : 0;
     char app[32];
