@@ -30,18 +30,17 @@ static inline void splGetCardinalPoint(Vec3* p, Vec3* cp, f32 tension, f32 u)
 {
     f32 u2 = u * u;
     f32 u3 = u2 * u;
-    f32 car0 = tension * (-u3 + 2.0F * u2 - u);
-    f32 car1 = ((2.0F - tension) * u3) + ((tension - 3.0F) * u2) + 1.0F;
-    f32 car2 = ((tension - 2.0F) * u3) + ((3.0F - (2.0F * tension)) * u2) +
-               (tension * u);
+    /* fused as the DOL has them (0x80378D04..0x80378DD0) */
+    f32 car0 = tension * (gk_fmadds(2.0F, u2, -u3) - u);
+    f32 car1 = gk_fmadds((2.0F - tension), u3, (tension - 3.0F) * u2) + 1.0F;
+    f32 car2 = gk_fmadds(tension, u,
+                         gk_fmadds((tension - 2.0F), u3,
+                                   gk_fnmsubs(2.0F, tension, 3.0F) * u2));
     f32 car3 = tension * (u3 - u2);
 
-    p->x = (cp[0].x * car0) + (cp[1].x * car1) + (cp[2].x * car2) +
-           (cp[3].x * car3);
-    p->y = (cp[0].y * car0) + (cp[1].y * car1) + (cp[2].y * car2) +
-           (cp[3].y * car3);
-    p->z = (cp[0].z * car0) + (cp[1].z * car1) + (cp[2].z * car2) +
-           (cp[3].z * car3);
+    p->x = gk_fmadds(cp[3].x, car3, gk_fmadds(cp[2].x, car2, gk_fmadds(cp[0].x, car0, cp[1].x * car1)));
+    p->y = gk_fmadds(cp[3].y, car3, gk_fmadds(cp[2].y, car2, gk_fmadds(cp[0].y, car0, cp[1].y * car1)));
+    p->z = gk_fmadds(cp[3].z, car3, gk_fmadds(cp[2].z, car2, gk_fmadds(cp[0].z, car0, cp[1].z * car1)));
 }
 
 static void splGetBSplinePoint(Vec3* p, Vec3* cp, f32 u)
@@ -50,14 +49,15 @@ static void splGetBSplinePoint(Vec3* p, Vec3* cp, f32 u)
     f32 u3 = u2 * u;
     f32 u_1 = 1.0F - u;
     f32 k1_6 = (1.0F / 6.0F);
+    /* fused as the DOL has them (0x80378C34..0x80378CFC) */
     f32 b0 = k1_6 * u_1 * u_1 * u_1;
-    f32 b1 = k1_6 * (4.0F + (3.0F * u3 - 6.0F * u2));
-    f32 b2 = k1_6 * (3.0F * (-u3 + u2 + u) + 1.0F);
+    f32 b1 = k1_6 * (4.0F + gk_fmsubs(3.0F, u3, 6.0F * u2));
+    f32 b2 = k1_6 * gk_fmadds(3.0F, (-u3 + u2 + u), 1.0F);
     f32 b3 = k1_6 * u3;
 
-    p->x = (cp[0].x * b0) + (cp[1].x * b1) + (cp[2].x * b2) + (cp[3].x * b3);
-    p->y = (cp[0].y * b0) + (cp[1].y * b1) + (cp[2].y * b2) + (cp[3].y * b3);
-    p->z = (cp[0].z * b0) + (cp[1].z * b1) + (cp[2].z * b2) + (cp[3].z * b3);
+    p->x = gk_fmadds(cp[3].x, b3, gk_fmadds(cp[2].x, b2, gk_fmadds(cp[0].x, b0, cp[1].x * b1)));
+    p->y = gk_fmadds(cp[3].y, b3, gk_fmadds(cp[2].y, b2, gk_fmadds(cp[0].y, b0, cp[1].y * b1)));
+    p->z = gk_fmadds(cp[3].z, b3, gk_fmadds(cp[2].z, b2, gk_fmadds(cp[0].z, b0, cp[1].z * b1)));
 }
 
 static inline void splGetBezierPoint(Vec3* p, Vec3* cp, f32 u)
@@ -70,12 +70,10 @@ static inline void splGetBezierPoint(Vec3* p, Vec3* cp, f32 u)
     f32 bez2 = 3.0F * u2 * u_1;
     f32 bez3 = u2 * u;
 
-    p->x = (cp[0].x * bez0) + (cp[1].x * bez1) + (cp[2].x * bez2) +
-           (cp[3].x * bez3);
-    p->y = (cp[0].y * bez0) + (cp[1].y * bez1) + (cp[2].y * bez2) +
-           (cp[3].y * bez3);
-    p->z = (cp[0].z * bez0) + (cp[1].z * bez1) + (cp[2].z * bez2) +
-           (cp[3].z * bez3);
+    /* fused as the DOL has them (0x80378B8C..0x80378C2C) */
+    p->x = gk_fmadds(cp[3].x, bez3, gk_fmadds(cp[2].x, bez2, gk_fmadds(cp[0].x, bez0, cp[1].x * bez1)));
+    p->y = gk_fmadds(cp[3].y, bez3, gk_fmadds(cp[2].y, bez2, gk_fmadds(cp[0].y, bez0, cp[1].y * bez1)));
+    p->z = gk_fmadds(cp[3].z, bez3, gk_fmadds(cp[2].z, bez2, gk_fmadds(cp[0].z, bez0, cp[1].z * bez1)));
 }
 
 /* Load 4 consecutive on-disc control points (base may be any valid index). */
@@ -114,9 +112,9 @@ void splGetSplinePoint(Vec3* p, HSD_Spline* spline, f32 u)
         case 0:
             // lerp
             spl_load4(spline, idx, cp);
-            p->x = (t * (cp[1].x - cp[0].x)) + cp[0].x;
-            p->y = (t * (cp[1].y - cp[0].y)) + cp[0].y;
-            p->z = (t * (cp[1].z - cp[0].z)) + cp[0].z;
+            p->x = gk_fmadds(t, (cp[1].x - cp[0].x), cp[0].x);
+            p->y = gk_fmadds(t, (cp[1].y - cp[0].y), cp[0].y);
+            p->z = gk_fmadds(t, (cp[1].z - cp[0].z), cp[0].z);
             return;
         case 1:
             spl_load4(spline, idx * 3, cp);
