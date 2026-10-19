@@ -6215,6 +6215,13 @@ static bool ftCo_800ADE48(Fighter* fp)
             } else {
                 data2->xFA_b1 = false;
             }
+#ifdef TARGET_PC
+            /* The C leaves switch_cmd unset here, as the decomp found it; the
+             * DOL keeps it in r31, which nothing in this function writes on
+             * the way (0x800AE20C..0x800AE270), so it is the caller's: &fp->cpu
+             * or fp, never 0. PC zero-fills locals, so the CPU never switched. */
+            switch_cmd = 1;
+#endif
         }
         if (switch_cmd != 0) {
             ftCo_800B4A78(fp);
