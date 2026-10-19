@@ -129,6 +129,14 @@ cp -r "${ROOT_DIR}/resources/"* "${ANDROID_DIR}/app/src/main/assets/resources/"
 # it would only have it merged into pipeline_cache.db and dropped again.
 rm -f "${ANDROID_DIR}/app/src/main/assets/initial_pipeline_cache.db" \
     "${ANDROID_DIR}/app/src/main/assets/resources/initial_pipeline_cache.db"
+# The Quest build ships its own seed instead, recorded on a Quest 3
+# (platforms/android/quest-pipeline-cache.db): the pipelines, the pairs its
+# draws asked for and its built-on-device marks. A fresh install's launcher
+# precompiles them into Dawn's cache before the first fight. Regenerate it
+# from a headset's pipeline_cache.db when the GX config version changes.
+if [[ "${MELEE_XR}" == 1 ]]; then
+    cp "${ANDROID_DIR}/quest-pipeline-cache.db" "${ANDROID_DIR}/app/src/main/assets/initial_pipeline_cache.db"
+fi
 
 mkdir -p "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a"
 "${STRIP_TOOL}" --strip-unneeded -o "${ANDROID_DIR}/app/src/main/jniLibs/arm64-v8a/libmelee.so" "${BUILD_DIR}/libmelee.so"
