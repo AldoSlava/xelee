@@ -1058,9 +1058,7 @@ static inline void ftNess_atan2(HSD_GObj* gobj)
 
     ftPartSetRotX(
         fighter_data2, 0,
-        (fighter_data2->facing_dir *
-         atan2f(fighter_data2->self_vel.x, fighter_data2->self_vel.y)) -
-            (float) M_PI_2);
+        gk_fmsubs(fighter_data2->facing_dir, atan2f(fighter_data2->self_vel.x, fighter_data2->self_vel.y), (float) M_PI_2));
 }
 
 static inline void* getFtSpecialAttrs2(Fighter* fp)

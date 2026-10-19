@@ -81,16 +81,22 @@ def dol_reader(iso):
 
 
 def census(iso, symbols):
-    """name -> Counter of 'single'/'double' fused instructions."""
+    """name -> Counter of 'single'/'double' fused instructions; and name ->
+    (address, the addresses it calls)."""
     read = dol_reader(iso)
     out = {}
+    calls = {}
+    weak = {}  # address -> name: out-of-line copies of inline functions (sqrtf__Ff)
     for line in open(symbols):
         m = re.match(r"(\S+) = \.text:0x([0-9A-F]+); // type:function size:0x([0-9A-F]+)", line)
         if not m:
             continue
         name, addr, size = m.group(1), int(m.group(2), 16), int(m.group(3), 16)
+        if "scope:weak" in line:
+            weak[addr] = name
         code = read(addr, size)
         c = collections.Counter()
+        targets = collections.Counter()
         for i in range(0, len(code) - 3, 4):
             w = struct.unpack(">I", code[i:i + 4])[0]
             op, xo = w >> 26, (w >> 1) & 31
@@ -98,8 +104,24 @@ def census(iso, symbols):
                 c["single"] += 1
             elif op == 63 and xo in FUSED:
                 c["double"] += 1
+            elif op == 18 and (w & 2) == 0:  # bl, or b out of the function (a tail call)
+                li = w & 0x03FFFFFC
+                if li & 0x02000000:
+                    li -= 0x04000000
+                t = (addr + i + li) & 0xFFFFFFFF
+                if (w & 1) or not addr <= t < addr + size:
+                    targets[t] += 1
         out.setdefault(name, collections.Counter()).update(c)
-    return out
+        calls[name] = (addr, targets)
+    # A weak function is an inline one mwcc emitted out of line and called;
+    # the C inlines it, and counts its fused ops in the caller, once a call.
+    own = {n: collections.Counter(c) for n, c in out.items()}
+    for name, (addr, targets) in calls.items():
+        for t, n in targets.items():
+            if t in weak and weak[t] != name:
+                for _ in range(n):
+                    out[name].update(own.get(weak[t], {}))
+    return out, calls
 
 
 # ---- the C -------------------------------------------------------------------
@@ -472,7 +494,7 @@ def main():
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--quiet", action="store_true", help="only the totals and the mismatches")
     args = ap.parse_args()
-    dol = census(args.iso, args.symbols)
+    dol, dol_calls = census(args.iso, args.symbols)
     db = json.load(open(args.db))
     totals = collections.Counter()
     texts = {}
@@ -488,6 +510,13 @@ def main():
             # latin-1: one character per byte, as libclang's offsets count
             texts[f] = open(f, encoding="latin-1").read()
         return texts[f]
+
+    def inlined_by_mwcc(caller, callee):
+        """A function the DOL has, which this caller never branches to:
+        mwcc inlined it there (it_802A3C98 in it_802A44CC, 0x802A4530)."""
+        if caller not in dol_calls or callee not in dol_calls:
+            return False
+        return dol_calls[callee][0] not in dol_calls[caller][1]
 
     for path in [os.path.realpath(p) for p in args.files]:
         cargs, cwd = compile_args(db, path)
@@ -508,6 +537,7 @@ def main():
             if fn.kind == ci.CursorKind.FUNCTION_DECL and fn.is_definition() and fn.extent.start.file is not None:
                 defs[fn.get_usr()] = fn
         own = {}
+        sqrtf_usr = [u for u, d in defs.items() if d.spelling == "gk_sqrtf"]
 
         def own_sites(usr):
             if usr not in own:
@@ -520,9 +550,15 @@ def main():
             out = []
 
             def walk(n):
-                if n.kind == ci.CursorKind.CALL_EXPR and n.referenced is not None:
+                if n.kind == ci.CursorKind.CALL_EXPR and n.referenced is not None and \
+                        n.referenced.spelling == "gk_sqrtf_call" and sqrtf_usr:
+                    # sqrtf__Ff, the inline sqrtf out of line: the DOL's count
+                    # takes its fused ops once a call (census), so this does
+                    out.append(sqrtf_usr[0])
+                elif n.kind == ci.CursorKind.CALL_EXPR and n.referenced is not None:
                     r = n.referenced.get_usr()
-                    if r in defs and r != usr and defs[r].spelling not in dol and \
+                    if r in defs and r != usr and (defs[r].spelling not in dol or
+                                                   inlined_by_mwcc(defs[usr].spelling, defs[r].spelling)) and \
                             not re.match(r"(gk|ppc)_fn?m(add|sub)s?$", defs[r].spelling):
                         out.append(r)
                 for ch in n.get_children():
@@ -564,7 +600,9 @@ def main():
                     for st in own_sites(u):
                         print(f"    {defs[u].spelling}:{st.node.extent.start.line} {st.kind} {st.prec}")
             if not ok:
-                veto.update(u for u in used if u != usr)
+                # its helpers; and itself, which a caller mwcc inlined it
+                # into might otherwise rewrite
+                veto.update(used)
             else:
                 for u in set(used):
                     f = own[u][0]
