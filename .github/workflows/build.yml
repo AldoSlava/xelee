@@ -1,12 +1,9 @@
 name: Build
 
-# melee-pc's desktop, phone and iOS builds: still built as a check, but no
-# longer published. Xelee releases only the Quest build (quest.yml), so a v*
-# tag doesn't run this and there is no release job.
+# melee-pc's desktop, phone and iOS builds, inherited from upstream: kept,
+# but run only by hand (Actions > Build > Run workflow). Xelee builds and
+# releases only the Quest APK (quest.yml).
 on:
-  push:
-    branches: ['**']
-  pull_request:
   workflow_dispatch:
 
 # Build jobs are read-only; only the release job needs to write.
