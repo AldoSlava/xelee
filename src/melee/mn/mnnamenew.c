@@ -1241,7 +1241,9 @@ static void pc_hide(NameNewEntry* data)
 
 /* The pointer (a headset laser, or the mouse when testing) follows the keys
  * and buttons: what it is over becomes the highlighted one, and its click is
- * A, which is how the pad's A already reaches this screen. */
+ * A, which is how the pad's A already reaches this screen. Melee's own Name
+ * Entry too: there every key and button counts, and Slippi's chips aren't
+ * there. */
 static void pc_pointer(NameNewEntry* data)
 {
     HSD_CObj* cobj = mn_PcMenuCamera();
@@ -1254,7 +1256,7 @@ static void pc_pointer(NameNewEntry* data)
         return;
     }
     pc_xr_pointer_target(false);
-    for (k = 0; k < s_chips.n; k++) {
+    for (k = 0; s_pc.active && k < s_chips.n; k++) {
         float c[3] = { s_chips.x[k] + s_chips.w[k] * 0.5f, -(CHIP_Y + CHIP_H * 0.5f), 17.0f };
         float e[3] = { s_chips.x[k] + s_chips.w[k], -CHIP_Y, 17.0f };
         float cx, cy, ex, ey;
@@ -1279,7 +1281,7 @@ static void pc_pointer(NameNewEntry* data)
     dx = fabsf(kx[5] - kx[0]);
     dy = fabsf(ky[1] - ky[0]);
     for (k = 0; k < 50; k++) {
-        if (s_pc.key_ch[k] != '\0' && fabsf(px - kx[k]) < dx * 0.5f &&
+        if ((!s_pc.active || s_pc.key_ch[k] != '\0') && fabsf(px - kx[k]) < dx * 0.5f &&
             fabsf(py - ky[k]) < dy * 0.5f) {
             best = k;
         }
@@ -1288,7 +1290,7 @@ static void pc_pointer(NameNewEntry* data)
         HSD_JObj* j = data->jobjs[mnNameNew_KeyMap.key_jobj_ids[sel - 0x32]];
         Vec3 w;
         float bx, by, rx, ry;
-        if (pc_sel_hidden(sel) || sel == 0x39 || j == NULL) {
+        if ((s_pc.active && pc_sel_hidden(sel)) || sel == 0x39 || j == NULL) {
             continue;
         }
         lb_8000B1CC(j, NULL, &w);
@@ -1482,6 +1484,9 @@ void mnNameNew_MainInput(HSD_GObj* arg0)
         mnNameNew_GlyphVariantInput(arg0);
         return;
     }
+#ifdef TARGET_PC
+    pc_pointer(data);
+#endif
 
     buttons = (mn_804A04F0.buttons = mn_80229624((u32) mnNameNew_PortInUse));
     n = 0;
