@@ -1671,6 +1671,13 @@ static const ParticleRule s_particles[] = {
      * 1, y -178..299; MELEE_XR_PTCL_STATS). The fountain's water is groups 0,
      * 2 and 3 of the same bank and stays. */
     {0x0C, 30, -1, 1},
+    /* Pokémon Stadium: the fireworks over the stands, all match long: rockets
+     * rising from the stands (texture group 0, y 0..420), their sparks (1,
+     * y 90..500, ~50 a frame) and bursts (2). Nothing else on the stage draws
+     * from these groups (MELEE_XR_PTCL_STATS; a 3D dump with and without). */
+    {0x10, 30, -1, 0},
+    {0x10, 30, -1, 1},
+    {0x10, 30, -1, 2},
 };
 #define PARTICLE_COUNT ((int)(sizeof s_particles / sizeof s_particles[0]))
 
