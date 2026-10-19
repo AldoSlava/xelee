@@ -372,12 +372,10 @@ static void grLast_8021AAB0(Ground_GObj* gobj)
     if (!gp->u.map.xC4_b1 && !gp->u.map.xC4_b0) {
 #ifdef TARGET_PC
         if (pc_is_slippi_fixes_enabled()) {
-            /* Slippi's DesyncProofBGTransformations (hook 0x8021AAE4): the
-             * background transformation picks its look from the shared RNG,
-             * so its draws are put back. */
-            u32 seed = *HSD_RandSeedPtr;
-            grLast_8021B2E8(gobj);
-            *HSD_RandSeedPtr = seed;
+            /* Slippi's gecko set writes a nop over this call (04 0x8021AAE4
+             * 60000000, in every replay): the background never transforms.
+             * Calling it and putting the seed back is not the same; its timer
+             * and state run on (a5 90b12657 parts at frame 3877). */
         } else
 #endif
         {
