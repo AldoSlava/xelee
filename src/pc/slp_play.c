@@ -299,9 +299,13 @@ static void c_snaps_from_nana(void) {
 static void c_snaps_from_asdi(void) {
     const float k = p_ftCommonData->x4BC;
     const float min = p_ftCommonData->sdi_min_stick_mag;
+    /* the frames whose raw an ASDI showed, and that raw */
+    static int32_t ev_frame[4096];
+    static s8 ev_x[4096], ev_y[4096];
     for (int port = 0; port < 4; port++) {
-        for (int32_t i = 1; i < P.count; i++) {
-            PlayFrame* fr = &P.frames[i];
+        int n = 0;
+        for (int32_t i = 1; i < P.count && n < (int)(sizeof ev_frame / sizeof *ev_frame); i++) {
+            const PlayFrame* fr = &P.frames[i];
             const PlayFrame* pv = &P.frames[i - 1];
             if (!fr->have[port] || !pv->have[port] || !pv->have_post[port] ||
                 !(pv->hitlag[port] > 0.0f && pv->hitlag[port] <= 1.0f)) {
@@ -322,24 +326,41 @@ static void c_snaps_from_asdi(void) {
                 continue; /* something else moved it too */
             }
             const int snap = off_snap < off_plain;
-            s8 rx, ry;
-            if (!c_raw(cx, cy, pv->cdir[port], snap, &rx, &ry)) {
+            if (!c_raw(cx, cy, pv->cdir[port], snap, &ev_x[n], &ev_y[n])) {
                 continue;
             }
-            int32_t a = i - 1, b = i - 1;
+            ev_frame[n++] = i - 1;
+            P.c_snaps_read++;
+        }
+        /* Each frame of a hold takes the raw of the nearest frame an ASDI
+         * read in it: the stick can wobble across UCF's snap inside a hold
+         * the replay shows as one value (a5 00298f66: plain at one hitlag's
+         * end, snapped at the next two). */
+        for (int e = 0; e < n;) {
+            const int32_t at = ev_frame[e];
+            const PlayFrame* fr = &P.frames[at];
+            const float cx = fr->c[port][0], cy = fr->c[port][1];
+            int32_t a = at, b = at;
             while (a > 0 && P.frames[a - 1].have[port] && P.frames[a - 1].c[port][0] == cx &&
-                   P.frames[a - 1].c[port][1] == cy && P.frames[a - 1].cdir[port] == pv->cdir[port]) {
+                   P.frames[a - 1].c[port][1] == cy && P.frames[a - 1].cdir[port] == fr->cdir[port]) {
                 a--;
             }
             while (b + 1 < P.count && P.frames[b + 1].have[port] && P.frames[b + 1].c[port][0] == cx &&
-                   P.frames[b + 1].c[port][1] == cy && P.frames[b + 1].cdir[port] == pv->cdir[port]) {
+                   P.frames[b + 1].c[port][1] == cy && P.frames[b + 1].cdir[port] == fr->cdir[port]) {
                 b++;
             }
-            for (int32_t j = a; j <= b; j++) {
-                P.frames[j].pad[port].substickX = rx;
-                P.frames[j].pad[port].substickY = ry;
+            int last = e;
+            while (last + 1 < n && ev_frame[last + 1] <= b) {
+                last++;
             }
-            P.c_snaps_read++;
+            for (int32_t j = a, cur = e; j <= b; j++) {
+                while (cur < last && abs(ev_frame[cur + 1] - j) < abs(ev_frame[cur] - j)) {
+                    cur++;
+                }
+                P.frames[j].pad[port].substickX = ev_x[cur];
+                P.frames[j].pad[port].substickY = ev_y[cur];
+            }
+            e = last + 1;
         }
     }
 }
