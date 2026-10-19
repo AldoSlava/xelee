@@ -1416,7 +1416,7 @@ static inline float sqrDistance(Vec3* a, Vec3* b)
     float x = a->x - b->x;
     float y = a->y - b->y;
     float z = a->z - b->z;
-    return x * x + y * y + z * z;
+    return gk_fmadds(z, z, gk_fmadds(x, x, y * y));
 }
 
 static inline float sqrtf_store(float x, volatile float* y)
@@ -1479,14 +1479,17 @@ void lbColl_800077A0(Vec3* a, MtxPtr arg1, Vec3* b, Vec3* c, Vec3* d, Vec3* e,
         if (approximatelyZero(dot_diff_cb)) {
             scl = 0.0f;
         } else {
-            n0 = 2.0f * diff_cb.x * diff_ba.x + 2.0f * diff_cb.y * diff_ba.y +
-                 2.0f * diff_cb.z * diff_ba.z;
+            /* fused as the DOL has them (0x80007984..0x800079AC): diff_ba
+             * is in registers there, diff_cb read back from the stack */
+            n0 = gk_fmadds(2.0f * diff_cb.z, diff_ba.z,
+                           gk_fmadds(2.0f * diff_cb.x, diff_ba.x,
+                                     2.0f * diff_cb.y * diff_ba.y));
 
-            ba_dot = diff_ba.x * diff_ba.x + diff_ba.y * diff_ba.y +
-                     diff_ba.z * diff_ba.z;
+            ba_dot = gk_fmadds(diff_ba.z, diff_ba.z,
+                               gk_fmadds(diff_ba.x, diff_ba.x, diff_ba.y * diff_ba.y));
 
-            n1 = n0 * n0 -
-                 (4.0f * dot_diff_cb * -(offset_dist * offset_dist - ba_dot));
+            n1 = gk_fmsubs(n0, n0,
+                           4.0f * dot_diff_cb * gk_fnmsubs(offset_dist, offset_dist, ba_dot));
 
             if (n1 < 0.0f) {
                 n1 = 0.0f;
@@ -1498,16 +1501,16 @@ void lbColl_800077A0(Vec3* a, MtxPtr arg1, Vec3* b, Vec3* c, Vec3* d, Vec3* e,
                 (-n0 - sqrtf_store(n1, &sqrt_tmp[1])) / (2.0f * dot_diff_cb);
         }
 
-        normalize_e.x = scl * diff_cb.x + b->x - a->x;
-        normalize_e.y = scl * diff_cb.y + b->y - a->y;
-        normalize_e.z = scl * diff_cb.z + b->z - a->z;
+        normalize_e.x = gk_fmadds(scl, diff_cb.x, b->x) - a->x;
+        normalize_e.y = gk_fmadds(scl, diff_cb.y, b->y) - a->y;
+        normalize_e.z = gk_fmadds(scl, diff_cb.z, b->z) - a->z;
 
         PSVECNormalize(&normalize_e, e);
 
         *angle = lbVector_AngleXY(e, &diff_cb);
-        d->x = dist * e->x + a->x;
-        d->y = dist * e->y + a->y;
-        d->z = dist * e->z + a->z;
+        d->x = gk_fmadds(dist, e->x, a->x);
+        d->y = gk_fmadds(dist, e->y, a->y);
+        d->z = gk_fmadds(dist, e->z, a->z);
     } else {
         *angle = M_PI;
         e->z = 0.0f;

@@ -31,7 +31,8 @@ typedef struct PlayFrame {
     float pre_pos[4][2];  /* the fighter's position going in */
     float post_pos[4][2]; /* and coming out */
     float hitlag[4];      /* its hitlag coming out */
-    bool have[4], have_post[4];
+    float fc[4][2];       /* the follower's (Nana's) C-stick as the game read it */
+    bool have[4], have_post[4], have_f[4];
 } PlayFrame;
 
 static struct {
@@ -47,7 +48,7 @@ static struct {
     bool started;  /* the VS scene has set up */
     int32_t next;  /* the fight frame the next tick is */
     bool converted;
-    unsigned c_misses, lr_misses, c_snaps_read;
+    unsigned c_misses, lr_misses, c_snaps_read, c_snaps_nana;
 } P;
 
 /* Event fields, as offsets from the command byte (SPEC.md). */
@@ -206,6 +207,93 @@ static bool c_raw(float x, float y, uint32_t dir, int snap, s8* rx, s8* ry) {
  * it by the C-stick times x4BC, between the frame's post-frame position
  * before and its pre-frame one; snapped, by exactly x4BC along the axis.
  * The raw that agrees goes to the whole hold: a held stick does not move. */
+/* Popo's C-stick as Nana gets it (ftCo_800B0918, ftCo_GetCpuCStickY): the
+ * fighter's stick after UCF, as an s8, then back to a float. */
+static float nana_axis(float c) {
+    const int8_t q = c >= 0.0f ? (int8_t)(uint8_t)(127.0f * c) : (int8_t)(128.0f * c);
+    return q > 0 ? q / 127.0f : q / 128.0f;
+}
+
+/* Ice Climbers: Nana copies Popo's C-stick a few frames later from what
+ * Popo's fighter read after UCF, snapped or not, so her recorded stick
+ * says which. The lag is found from the frames that hold no doubt. A hold
+ * at the rim can snap on some frames and not others (the other axis
+ * wobbles inside the deadzone), so a frame Nana answers for takes the raw
+ * she shows; the rest of the hold, the one most of her frames show. */
+static void c_snaps_from_nana(void) {
+    for (int port = 0; port < 4; port++) {
+        int best_lag = -1, best = 0;
+        for (int lag = 1; lag <= 12; lag++) {
+            int agree = 0;
+            for (int32_t i = 0; i + lag < P.count; i++) {
+                const PlayFrame* a = &P.frames[i];
+                const PlayFrame* b = &P.frames[i + lag];
+                if (!a->have[port] || !b->have_f[port] || (a->c[port][0] == 0.0f && a->c[port][1] == 0.0f)) {
+                    continue;
+                }
+                agree += nana_axis(a->c[port][1]) == b->fc[port][1] && nana_axis(a->c[port][0]) == b->fc[port][0];
+            }
+            if (agree > best) {
+                best = agree;
+                best_lag = lag;
+            }
+        }
+        if (best_lag < 0 || best < 20) {
+            continue;
+        }
+        for (int32_t a = 0; a < P.count;) {
+            const PlayFrame* fr = &P.frames[a];
+            const float cx = fr->c[port][0], cy = fr->c[port][1];
+            int32_t b = a;
+            while (b + 1 < P.count && P.frames[b + 1].have[port] && P.frames[b + 1].c[port][0] == cx &&
+                   P.frames[b + 1].c[port][1] == cy && P.frames[b + 1].cdir[port] == fr->cdir[port]) {
+                b++;
+            }
+            const int axis = fabsf(cx) >= fabsf(cy) ? 0 : 1;
+            const float c = fr->c[port][axis];
+            if (fr->have[port] && c != 0.0f && fabsf(c) != 1.0f) {
+                int snap = 0, plain = 0;
+                for (int32_t j = a; j <= b && j + best_lag < P.count; j++) {
+                    const PlayFrame* n = &P.frames[j + best_lag];
+                    if (!n->have_f[port]) {
+                        continue;
+                    }
+                    const float v = n->fc[port][axis];
+                    snap += v == (c < 0 ? -1.0f : 1.0f) && n->fc[port][1 - axis] == 0.0f;
+                    plain += v == nana_axis(c);
+                }
+                s8 rx, ry, sx, sy, px, py;
+                const bool have_s = c_raw(cx, cy, fr->cdir[port], 1, &sx, &sy);
+                const bool have_p = c_raw(cx, cy, fr->cdir[port], 0, &px, &py);
+                if (snap != plain && c_raw(cx, cy, fr->cdir[port], snap > plain, &rx, &ry)) {
+                    for (int32_t j = a; j <= b; j++) {
+                        P.frames[j].pad[port].substickX = rx;
+                        P.frames[j].pad[port].substickY = ry;
+                    }
+                    P.c_snaps_nana++;
+                }
+                for (int32_t j = a; j <= b && j + best_lag < P.count && have_s && have_p; j++) {
+                    const PlayFrame* n = &P.frames[j + best_lag];
+                    if (!n->have_f[port]) {
+                        continue;
+                    }
+                    const float v = n->fc[port][axis];
+                    if (v == (c < 0 ? -1.0f : 1.0f) && n->fc[port][1 - axis] == 0.0f) {
+                        P.frames[j].pad[port].substickX = sx;
+                        P.frames[j].pad[port].substickY = sy;
+                    } else if (v == nana_axis(c)) {
+                        P.frames[j].pad[port].substickX = px;
+                        P.frames[j].pad[port].substickY = py;
+                    }
+                }
+            }
+            a = b + 1;
+        }
+        pc_log_line("slp play: port %d's follower copies its C-stick %d frames later (%d frames agree)", port,
+            best_lag, best);
+    }
+}
+
 static void c_snaps_from_asdi(void) {
     const float k = p_ftCommonData->x4BC;
     const float min = p_ftCommonData->sdi_min_stick_mag;
@@ -263,6 +351,33 @@ static bool lr_raw(float v, u8* raw) {
     return false;
 }
 
+/* Slippi 3.16's online codes froze Pokemon Stadium outright (a branch
+ * written over grStadium_801D4548's transformation at 0x801D4610), before
+ * the game start carried a frozen flag: a replay that ran them had it
+ * frozen. Walks the Gecko list for that write. */
+static bool gecko_freezes_stadium(const uint8_t* g, size_t n) {
+    size_t i = 0;
+    while (i + 8 <= n) {
+        const uint32_t w0 = be32(g + i), w1 = be32(g + i + 4);
+        const uint8_t t = (uint8_t)(w0 >> 24);
+        if (t == 0xC2 || t == 0xC3) {
+            i += 8 + (size_t)w1 * 8;
+        } else if (t == 0x04 || t == 0x05) {
+            if ((0x80000000u | (w0 & 0x01FFFFFFu)) == 0x801D4610u && w1 == 0x4800004Cu) {
+                return true;
+            }
+            i += 8;
+        } else if (t == 0x06 || t == 0x07) {
+            i += 8 + ((size_t)w1 + 7) / 8 * 8;
+        } else if (w0 == 0xF0000000u) {
+            break;
+        } else {
+            i += 8;
+        }
+    }
+    return false;
+}
+
 static bool load(const char* path) {
     FILE* f = fopen(path, "rb");
     if (f == NULL) {
@@ -285,6 +400,8 @@ static bool load(const char* path) {
     const uint8_t* end = e + (raw_len <= (uint32_t)(size - 15) ? raw_len : (uint32_t)(size - 15));
     uint16_t sizes[256] = {0};
     bool have_start = false;
+    uint8_t* split = NULL; /* the Message Splitter's chunks of the Gecko list */
+    size_t split_len = 0;
     int32_t cap = 0;
     while (e < end) {
         const uint8_t cmd = e[0];
@@ -300,10 +417,27 @@ static bool load(const char* path) {
             break; /* an event without a size, or cut short: the replay ends here */
         }
         const size_t len = 1u + sizes[cmd];
-        if (cmd == SLP_CMD_GAME_START && len >= START_SEED + 4) {
+        if (cmd == 0x10 && len >= 0x205) {
+            /* Message Splitter: 512 data bytes, their used size, the inner
+             * command, whether it is the last chunk */
+            const uint16_t used = (uint16_t)((e[0x201] << 8) | e[0x202]);
+            uint8_t* grown = realloc(split, split_len + used);
+            if (grown != NULL && used <= 512) {
+                split = grown;
+                memcpy(split + split_len, e + 1, used);
+                split_len += used;
+            }
+            if (e[0x204] && e[0x203] == 0x3D) {
+                if (gecko_freezes_stadium(split, split_len)) {
+                    P.frozen_ps = true;
+                    pc_log_line("slp play: the replay's codes freeze Pokemon Stadium (3.16's online codes)");
+                }
+                split_len = 0;
+            }
+        } else if (cmd == SLP_CMD_GAME_START && len >= START_SEED + 4) {
             memcpy(P.info, e + 5, SLP_INFO_BLOCK_SIZE);
             P.seed = be32(e + START_SEED);
-            P.frozen_ps = len > START_FROZEN_PS && e[START_FROZEN_PS] != 0;
+            P.frozen_ps = P.frozen_ps || (len > START_FROZEN_PS && e[START_FROZEN_PS] != 0);
             have_start = true;
             pc_log_line("slp play: %s, Slippi %u.%u.%u, stage %u, rngOffset %08x", path, e[1], e[2], e[3],
                 (unsigned)((e[5 + 0xE] << 8) | e[5 + 0xF]), P.seed);
@@ -346,6 +480,15 @@ static bool load(const char* path) {
                     P.count = idx + 1;
                 }
             }
+        } else if (cmd == SLP_CMD_PRE_FRAME && len > PRE_C_Y + 3 && e[PRE_FOLLOWER] && e[PRE_PORT] < 4) {
+            /* a follower's comes after its leader's, which made room */
+            const int32_t idx = (int32_t)be32(e + PRE_FRAME) - SLP_FIRST_FRAME;
+            if (idx >= 0 && idx < cap) {
+                PlayFrame* fr = &P.frames[idx];
+                fr->fc[e[PRE_PORT]][0] = bef(e + PRE_C_X);
+                fr->fc[e[PRE_PORT]][1] = bef(e + PRE_C_Y);
+                fr->have_f[e[PRE_PORT]] = true;
+            }
         } else if (cmd == SLP_CMD_POST_FRAME && len > POST_HITLAG + 3 && !e[PRE_FOLLOWER] && e[PRE_PORT] < 4) {
             /* the frame's pre-frame came first and made room for it */
             const int32_t idx = (int32_t)be32(e + PRE_FRAME) - SLP_FIRST_FRAME;
@@ -361,6 +504,7 @@ static bool load(const char* path) {
         e += len;
     }
     free(data);
+    free(split);
     if (!have_start || P.count == 0) {
         pc_log_line("slp play: %s has no game start or no frames", path);
         return false;
@@ -404,6 +548,7 @@ static void convert(void) {
     }
     if (!P.raw_c) {
         c_snaps_from_asdi();
+        c_snaps_from_nana();
     }
     /* A frame a port's fighter sent nothing for (asleep, or out of the
      * match) keeps the pad it last had: the controller stays plugged in. */
@@ -416,9 +561,9 @@ static void convert(void) {
         }
     }
     P.converted = true;
-    pc_log_line("slp play: %d frames (%d to %d); C-stick %s, %u unmatched, %u snaps read from ASDI; "
-                "%u unmatched triggers", P.count, SLP_FIRST_FRAME, P.last,
-        P.raw_c ? "raw" : "from its normalized values", P.c_misses, P.c_snaps_read, P.lr_misses);
+    pc_log_line("slp play: %d frames (%d to %d); C-stick %s, %u unmatched, %u snaps read from ASDI, %u from "
+                "the follower; %u unmatched triggers", P.count, SLP_FIRST_FRAME, P.last,
+        P.raw_c ? "raw" : "from its normalized values", P.c_misses, P.c_snaps_read, P.c_snaps_nana, P.lr_misses);
 }
 
 bool pc_slp_play_active(void) {
