@@ -380,7 +380,7 @@ bool it_8026DF34(Item_GObj* gobj)
 
 bool it_8026DFB0(Item_GObj* gobj)
 {
-    bool cond;
+    s32 cond; /* collision flags: an int on the GameCube */
     CollData* coll;
     Item* ip;
     PAD_STACK(26);
@@ -403,7 +403,7 @@ bool it_8026DFB0(Item_GObj* gobj)
 
 bool it_8026E058(Item_GObj* gobj)
 {
-    bool cond;
+    s32 cond; /* collision flags: an int on the GameCube */
     CollData* coll;
     Item* ip;
     PAD_STACK(26);

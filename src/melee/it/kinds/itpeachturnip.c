@@ -222,7 +222,9 @@ void itPeachturnip_UnkMotion3_Phys(Item_GObj* item_gobj)
 bool itPeachturnip_UnkMotion3_Coll(Item_GObj* item_gobj)
 {
     s32 first_check, second_check;
-    bool chk;
+    /* the collision flags (it_8026DAA8): a bool on the GameCube is an int,
+     * and holds them; _Bool would make a wall (4) a floor (1) */
+    s32 chk;
 
     first_check = 0xE;
     second_check = 0x3;
