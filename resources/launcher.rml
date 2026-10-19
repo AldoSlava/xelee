@@ -1,12 +1,12 @@
 <rml>
-<head><title>Melee-PC</title><link type="text/rcss" href="launcher.rcss" /></head>
+<head><title>Xelee</title><link type="text/rcss" href="launcher.rcss" /></head>
 <!-- The body's classes are set by src/pc/launcher.cpp: the platform
      (desktop, mobile or quest, plus ios) hides what that platform has no use
      for, and theme-* colours the frame after the focused main-menu plate. -->
 <body class="desktop theme-choose">
   <div id="frame">
     <div id="titlebar">
-      <span id="title">Melee PC</span><span id="title-sub">/ Settings</span>
+      <span id="title">Xelee</span><span id="title-sub">/ Settings</span>
       <span class="stripes"><span></span><span></span><span></span><span></span><span></span></span>
       <span id="edition"><span id="app-version">v0.1.8-beta</span> &#183; NTSC-U 1.02</span>
     </div>
@@ -16,7 +16,7 @@
         <button id="choose" class="plate" data-desc="Pick a Melee disc image: ISO, GCM, CISO, RVZ, GCZ or WIA."><span>Choose Disc</span></button>
         <button id="verify" class="plate" data-desc="Check the disc image against the original NTSC-U 1.02 disc."><span id="verify-label">Verify Disc</span></button>
         <button id="settings" class="plate" data-desc="Graphics, audio, gameplay, controls, online play and the launcher itself."><span>Settings</span></button>
-        <button id="quit" class="plate" data-desc="Close Melee PC."><span>Quit</span></button>
+        <button id="quit" class="plate" data-desc="Close Xelee."><span>Quit</span></button>
       </div>
       <div id="side">
         <div id="update-card" style="display: none;">
@@ -24,7 +24,7 @@
             <span class="update-badge">NEW</span>
             <span id="update-tag" class="update-tag">v0.1.8-beta</span>
           </div>
-          <div id="update-title" class="update-title">Melee PC Update</div>
+          <div id="update-title" class="update-title">Xelee Update</div>
           <p id="update-desc" class="update-desc">A newer version is available.</p>
           <div id="update-progress-row" class="update-progress-row" style="display: none;">
             <div class="progress-bar-bg">
@@ -126,7 +126,7 @@
           <div class="row" data-desc="The size of these menus."><span class="name">Interface size</span>
             <div class="slider-control"><input type="range" class="range" id="scale" min="75" max="150" step="25" value="100" /><span id="scale-val" class="slider-value">100%</span></div></div>
           <div class="row no-quest" data-desc="Look for a new release on GitHub at each start."><span class="name">Check for updates</span><button id="check-updates" class="value">On</button></div>
-          <div class="row no-quest" id="check-row" data-desc="Look for a new release now."><span class="name">Updates <span id="check-status" class="detail">Melee-PC is up to date.</span></span><button id="check-now" class="value action">Check now</button></div>
+          <div class="row no-quest" id="check-row" data-desc="Look for a new release now."><span class="name">Updates <span id="check-status" class="detail">Xelee is up to date.</span></span><button id="check-now" class="value action">Check now</button></div>
           <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-launcher" class="value action">Restore</button></div>
         </div>
         <p id="settings-status" style="display: none;"></p>
