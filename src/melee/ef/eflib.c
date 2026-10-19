@@ -547,15 +547,6 @@ static void efLib_pc_hide_joints(HSD_JObj* jobj, u32 mask, int* index, u32* save
 
 static void efLib_pc_blast_render(HSD_GObj* gobj, intptr_t pass)
 {
-    static int dump = -2;
-    if (dump == -2) {
-        dump = getenv("MELEE_EF_TREE") != NULL ? 1 : 0;
-    }
-    if (dump == 1) {
-        int index = 0;
-        dump = 0;
-        efLib_pc_dump_tree(GET_JOBJ(gobj), 0, &index);
-    }
     const int began = pc_xr_blast_clip_begin();
     /* Only in the 3D view (pc_xr_blast_clip_begin is non-zero there). */
     const u32 mask = began != 0 ? efLib_pc_ko_hidden_joints() : 0;
@@ -575,6 +566,17 @@ static void efLib_pc_blast_render(HSD_GObj* gobj, intptr_t pass)
         efLib_pc_hide_joints(GET_JOBJ(gobj), mask, &index, &saved, false);
     }
     pc_xr_blast_clip_end(began);
+}
+
+/* The Poke Ball's opening burst (efAsync 0x449): eight rays from one point
+ * that take a new random turn every few ticks. SpaceWarp would carry each
+ * ray's last turn on as motion and smear it across the burst; in the 3D
+ * view they go in as fixed in the world instead (pc_xr_world_still). */
+static void efLib_pc_still_render(HSD_GObj* gobj, intptr_t pass)
+{
+    const bool still = pc_xr_world_still_begin();
+    HSD_GObj_JObjCallback(gobj, pass);
+    pc_xr_world_still_end(still);
 }
 #endif
 
@@ -667,9 +669,12 @@ EF_Effect* efLib_Create(int gfx_id, HSD_GObj* parent_gobj)
     }
 #ifdef TARGET_PC
     /* The KO explosion (efAsync 0x42B/0x42C): cut to the blast zones in the
-     * 3D view (src/pc/xr_scene.c). */
+     * 3D view (src/pc/xr_scene.c). The Poke Ball's burst: still for
+     * SpaceWarp. */
     if (gfx_id == 0x19 || gfx_id == 0x1A) {
         GObj_SetupGXLink(effect->gobj, efLib_pc_blast_render, 7, 1);
+    } else if (gfx_id == 0x26) {
+        GObj_SetupGXLink(effect->gobj, efLib_pc_still_render, 7, 1);
     } else
 #endif
     GObj_SetupGXLink(effect->gobj, HSD_GObj_JObjCallback, 7, 1);
@@ -708,6 +713,20 @@ EF_Effect* efLib_Create(int gfx_id, HSD_GObj* parent_gobj)
                 }
             }
         }
+#ifdef TARGET_PC
+        {
+            static int tree_id = -2; /* MELEE_EF_TREE, once */
+            static int tree_done;
+            if (tree_id == -2) {
+                tree_id = getenv("MELEE_EF_TREE") != NULL ? atoi(getenv("MELEE_EF_TREE")) : -1;
+            }
+            if (!tree_done && tree_id == gfx_id) {
+                int index = 0;
+                tree_done = 1;
+                efLib_pc_dump_tree(jobj, 0, &index);
+            }
+        }
+#endif
         {
             u8 kind = HSD_GObj_JObjKind;
             HSD_GObjObject_80390A70(effect->gobj, kind, jobj);

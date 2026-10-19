@@ -274,6 +274,12 @@ static void fillDebugVs(GameModeState* state, UNUSED bool dummy)
             start->rules.item_freq = (s8) freq;
         }
     }
+    /* MELEE_DEBUG_VS_ITEM_MASK=<hex>: only these items (bit = item kind;
+     * 0x400000000 Poke Balls alone, which open as they land only when
+     * thrown: CPUs rarely throw them). */
+    if (getenv("MELEE_DEBUG_VS_ITEM_MASK") != NULL) {
+        start->rules.x20 = strtoull(getenv("MELEE_DEBUG_VS_ITEM_MASK"), NULL, 16);
+    }
     /* MELEE_DEBUG_VS_STOCKS=<n>: a stock match instead of an untimed time
      * one, so a run can end on GAME! with stocks the replay (src/pc/slp.c)
      * must carry. */

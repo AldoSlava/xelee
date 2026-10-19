@@ -71,6 +71,10 @@ void pc_xr_jobj_end(int changed);
  * particles out of the 3D view under mixed reality. `pos` is its position. */
 bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const float pos[3]);
 void pc_xr_particle_end(bool hidden);
+/* Around an effect's draw: in the 3D view, it goes into SpaceWarp as fixed
+ * in the world (aurora_xr_world_still). Hand the result to the end. */
+bool pc_xr_world_still_begin(void);
+void pc_xr_world_still_end(bool began);
 /* A KO: its explosion is about to draw (ft_0D31.c), so dynamic resolution
  * drops ahead of it (aurora_xr_heavy_effect). */
 void pc_xr_heavy_effect(void);
@@ -139,6 +143,8 @@ static inline bool pc_xr_particle_begin(int bank, int id, int tex_group, float s
 }
 static inline void pc_xr_particle_end(bool hidden) { (void)hidden; }
 static inline void pc_xr_heavy_effect(void) {}
+static inline bool pc_xr_world_still_begin(void) { return false; }
+static inline void pc_xr_world_still_end(bool began) { (void)began; }
 static inline void pc_xr_kb_smoke(unsigned idnum) { (void)idnum; }
 static inline int pc_xr_blast_clip_begin(void) { return 0; }
 static inline void pc_xr_blast_clip_end(int began) { (void)began; }

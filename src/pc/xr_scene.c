@@ -1891,6 +1891,20 @@ void pc_xr_heavy_effect(void) {
     aurora_xr_heavy_effect();
 }
 
+bool pc_xr_world_still_begin(void) {
+    if (s_category != AURORA_XR_WORLD) {
+        return false;
+    }
+    aurora_xr_world_still(true);
+    return true;
+}
+
+void pc_xr_world_still_end(bool began) {
+    if (began) {
+        aurora_xr_world_still(false);
+    }
+}
+
 int pc_xr_blast_clip_begin(void) {
     static int off = -1;
     if (off < 0) {
