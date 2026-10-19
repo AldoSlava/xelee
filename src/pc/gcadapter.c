@@ -21,10 +21,6 @@
 #include "pc/pc.h"
 
 #include <dolphin/pad.h>
-/* rumble.h references DiscU16 (on-disc rumble stream); disc.h defines it for
- * this C TU, which is not force-included with compat.h like the game code. */
-#include "pc/disc.h"
-#include <sysdolphin/baselib/rumble.h>
 
 #include <SDL3/SDL.h>
 
@@ -39,12 +35,6 @@
 #define GC_SLOT_WIRED 0x10
 #define GC_SLOT_WIRELESS 0x20
 #define GC_SLOT_RUMBLE_POWER 0x04
-
-/* Game-side motor state (sysdolphin/baselib/rumble.c). last_status is what
- * the game last asked PADControlMotor for: 0 hard stop, 1 stop, 2 rumble.
- * aurora's PADControlMotor only talks to SDL gamepads, so the raw path reads
- * the same state here instead of threading a new hook through aurora. */
-extern HSD_RumbleData HSD_Rumble_804C22E0[GC_SLOTS];
 
 static bool s_enabled;
 static SDL_hid_device* s_dev;
@@ -111,6 +101,8 @@ static uint64_t s_combo_since[GC_SLOTS]; /* X+Y+Start held since (ns), 0 = not h
 static atomic_flag s_snapshot_lock = ATOMIC_FLAG_INIT;
 static PADStatus s_published_status[GC_SLOTS];
 static bool s_published_present[GC_SLOTS];
+/* The motor each slot is asked for (pc_gcadapter_motor, from rumble.c's
+ * routing): 0 hard stop, 1 stop, 2 rumble. */
 static _Atomic unsigned char s_motor_request[GC_SLOTS];
 
 static void lock_snapshot(void) {
@@ -315,8 +307,8 @@ static void parse_slot(int i, const uint8_t* s, uint64_t now_ns) {
 }
 
 static void update_rumble(const uint8_t* slots) {
-    /* Adapter motor byte: 0 stop, 1 rumble, 2 brake. Game state last_status:
-     * 0 hard stop, 1 stop, 2 rumble. Only a wired pad on a slot with the
+    /* Adapter motor byte: 0 stop, 1 rumble, 2 brake; requests: 0 hard stop,
+     * 1 stop, 2 rumble. Only a wired pad on a slot with the
      * second USB cable powered can rumble. */
     static const uint8_t k_motor[3] = {2, 0, 1};
     bool changed = false;
@@ -337,6 +329,13 @@ static void update_rumble(const uint8_t* slots) {
     if (changed && SDL_hid_write(s_dev, s_rumble, sizeof(s_rumble)) < 0) {
         pc_log_line("GC adapter: rumble write failed: %s", SDL_GetError());
     }
+}
+
+void pc_gcadapter_motor(int slot, unsigned command) {
+    /* PADControlMotor's commands: 0 stop, 1 rumble, 2 hard stop. */
+    static const unsigned char k_request[3] = {1, 2, 0};
+    if (slot >= 0 && slot < GC_SLOTS && command < 3)
+        atomic_store_explicit(&s_motor_request[slot], k_request[command], memory_order_relaxed);
 }
 
 void pc_gcadapter_poll(void) {
@@ -387,8 +386,6 @@ void pc_gcadapter_apply(void) {
     memcpy(present, s_published_present, sizeof(present));
     unlock_snapshot();
     for (int i = 0; i < GC_SLOTS; i++) {
-        atomic_store_explicit(
-            &s_motor_request[i], HSD_Rumble_804C22E0[i].last_status, memory_order_relaxed);
         if (i != 0) {
             if (present[i]) {
                 PADSetVirtualStatus((u32)i, &status[i]);

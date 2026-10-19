@@ -49,6 +49,23 @@ void pc_gcadapter_poll(void);
 void pc_gcadapter_apply(void); /* main-thread publication to virtual pads */
 struct PADStatus;
 bool pc_gcadapter_status(int port, struct PADStatus* out);
+/* A slot's rumble motor, as a PADControlMotor command (0 stop, 1 rumble,
+ * 2 hard stop). Any thread. */
+void pc_gcadapter_motor(int slot, unsigned command);
+
+/* Rumble routing (src/pc/pad_rumble.c). Port 1's devices, as bits of the
+ * mask keyboard.c reports each frame: the one that most recently began to
+ * show input gets port 1's rumble. */
+enum {
+    PC_PAD_DEVICE_NONE,
+    PC_PAD_DEVICE_KEYS, /* keyboard, touchscreen overlay: no motor */
+    PC_PAD_DEVICE_GAMEPAD,
+    PC_PAD_DEVICE_XR,
+    PC_PAD_DEVICE_GCADAPTER,
+};
+bool pc_pad_engaged(const struct PADStatus* st); /* a button, or a stick or trigger off rest */
+void pc_pad_rumble_engaged(unsigned engaged); /* main thread, once a frame; adds the gamepad */
+void pc_pad_rumble_command(unsigned port, unsigned command); /* a game port's PAD_MOTOR_* */
 /* HUD snapshot: raw[6] = stick x,y  c-stick x,y  L R as the adapter reports
  * them (0-255). Returns false when no controller is in that slot. Safe from
  * any thread. */

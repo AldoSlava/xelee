@@ -227,6 +227,7 @@ static void publish_locked(void) {
     }
     PADStatus st = {0};
     bool any_active = false;
+    unsigned engaged = 0; /* port 1's devices showing input, for rumble */
     if (s_active) {
         size_t i;
         int n = 0;
@@ -273,6 +274,8 @@ static void publish_locked(void) {
         st.triggerRight = (s_key[SDL_SCANCODE_E] || s_key_latched[SDL_SCANCODE_E]) ? 255 : 0;
         memset(s_key_latched, 0, sizeof(s_key_latched));
         any_active = true;
+        if (pc_pad_engaged(&st))
+            engaged |= 1u << PC_PAD_DEVICE_KEYS;
     }
 
 #ifdef AURORA_ENABLE_OPENXR
@@ -280,6 +283,8 @@ static void publish_locked(void) {
      * the touch overlay below. */
     PADStatus xr_st = {0};
     if (aurora_xr_get_pad(&xr_st)) {
+        if (pc_pad_engaged(&xr_st))
+            engaged |= 1u << PC_PAD_DEVICE_XR;
         st.button |= xr_st.button;
         if (xr_st.stickX != 0 || xr_st.stickY != 0) {
             st.stickX = xr_st.stickX;
@@ -299,6 +304,8 @@ static void publish_locked(void) {
 
     PADStatus touch_st = {0};
     if (pc_touch_get_status(&touch_st)) {
+        if (pc_pad_engaged(&touch_st))
+            engaged |= 1u << PC_PAD_DEVICE_KEYS;
         st.button |= touch_st.button;
         if (touch_st.stickX != 0 || touch_st.stickY != 0) {
             st.stickX = touch_st.stickX;
@@ -323,6 +330,8 @@ static void publish_locked(void) {
      * when every source goes quiet so a released button does not stick. */
     PADStatus gc_st;
     if (pc_gcadapter_status(0, &gc_st)) {
+        if (pc_pad_engaged(&gc_st))
+            engaged |= 1u << PC_PAD_DEVICE_GCADAPTER;
         st.button |= gc_st.button;
         if (i8abs(gc_st.stickX) > i8abs(st.stickX))
             st.stickX = gc_st.stickX;
@@ -344,7 +353,9 @@ static void publish_locked(void) {
     if (pointer_buttons != 0) {
         st.button |= pointer_buttons;
         any_active = true;
+        engaged |= 1u << PC_PAD_DEVICE_XR;
     }
+    pc_pad_rumble_engaged(engaged);
 
     static bool s_published0;
     if (any_active) {

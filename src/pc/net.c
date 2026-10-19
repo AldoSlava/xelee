@@ -1176,7 +1176,7 @@ void pc_net_rumble_command(unsigned port, unsigned command) {
     static int motor[4] = {-1, -1, -1, -1};
     if (port >= 4 || net.resim || motor[port] == (int)command)
         return;
-    PADControlMotor(port, command);
+    pc_pad_rumble_command(port, command);
     motor[port] = (int)command;
 }
 

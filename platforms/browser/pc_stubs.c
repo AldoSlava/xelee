@@ -77,6 +77,10 @@ bool pc_gcadapter_raw(int port, uint8_t raw[6], bool* wireless) {
 uint64_t pc_gcadapter_report_count(void) {
     return 0;
 }
+void pc_gcadapter_motor(int slot, unsigned command) {
+    (void)slot;
+    (void)command;
+}
 
 /* Archive cache and background prewarm: the page owns disc caching. */
 bool pc_file_cache_get(const char* filename, void* dst, size_t* size) {

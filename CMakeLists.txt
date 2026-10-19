@@ -251,6 +251,7 @@ set(PC_SOURCES
         src/pc/gx.c
         src/pc/input_poll.c
         src/pc/keyboard.c
+        src/pc/pad_rumble.c
         src/pc/main.c
         src/pc/misc.c
         src/pc/os.c
