@@ -42,7 +42,7 @@ is GPL-3.0-or-later. Details under [License](#license).
 
 1. Enable developer mode for your headset in the Meta Horizon app.
 2. Install the APK from the
-   [releases page](https://github.com/rhythmerc/melee-pc/releases) with
+   [releases page](https://github.com/rhythmerc/xelee/releases) with
    SideQuest, or over USB: `adb install Xelee-Quest-arm64.apk`
 3. Copy your disc image onto the headset (for example into `Download`, over
    USB or with `adb push`).

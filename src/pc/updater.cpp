@@ -331,7 +331,7 @@ std::vector<Release> parse_github_releases(std::string_view json) {
 
 /* Xelee's releases: the fork's, never upstream melee-pc's, whose builds
  * would replace this one. */
-#define XELEE_RELEASES_REPO "rhythmerc/melee-pc"
+#define XELEE_RELEASES_REPO "rhythmerc/xelee"
 
 constexpr std::string_view current_platform() {
 #if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
