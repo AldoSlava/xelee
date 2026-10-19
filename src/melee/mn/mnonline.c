@@ -70,6 +70,9 @@ const char* mnOnline_Label(MenuKind kind, int selection)
     if (kind == MENU_KIND_MAIN && selection == SEL_MAIN_ONLINE) {
         return "Online Mode";
     }
+    if (kind == MENU_KIND_SETTINGS && selection == SEL_SETTINGS_PLACE) {
+        return "Place Stage";
+    }
     if (kind == MENU_KIND_ONLINE && selection >= 0 &&
         selection < (int) ARRAY_SIZE(online_labels))
     {
@@ -90,6 +93,9 @@ const char* mnOnline_Description(MenuKind kind, int selection)
 {
     if (kind == MENU_KIND_MAIN && selection == SEL_MAIN_ONLINE) {
         return "Play against other players over the network.";
+    }
+    if (kind == MENU_KIND_SETTINGS && selection == SEL_SETTINGS_PLACE) {
+        return slippi_in_descriptions[row_place];
     }
     if (kind == MENU_KIND_ONLINE && selection >= 0 &&
         selection < (int) ARRAY_SIZE(online_descriptions))
@@ -123,17 +129,24 @@ static void enterOnline(OnlineKind kind)
     gm_801A4B60();
 }
 
-/* The first Unranked, Direct or LAN of a launch with a headset presenting
- * and no stage spot places the stage first (src/pc/xr_place.h), then goes
- * on to the mode. */
+/* Unranked, Direct or LAN with a headset presenting places the stage first
+ * if Place Stage hasn't run this launch, even with a stage spot found in the
+ * room: online there is no hold before each fight, so this is the player's
+ * only chance (src/pc/xr_place.h). Then it goes on to the mode. */
 static void enterAfterPlacing(OnlineKind kind)
 {
-    if (pc_xr_place_needed()) {
+    if (pc_xr_place_needed_online()) {
         gmOnline_SetKindAfterPlace(kind);
         enterOnline(ONLINE_KIND_PLACE);
         return;
     }
     enterOnline(kind);
+}
+
+void mnOnline_PlaceFromOptions(void)
+{
+    gmOnline_SetPlaceFromOptions(true);
+    enterOnline(ONLINE_KIND_PLACE);
 }
 
 /* Up/Down wrap over `count` entries. */

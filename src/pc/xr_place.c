@@ -181,6 +181,10 @@ bool pc_xr_place_needed(void) {
     return pc_xr_place_available() && !s_decided && !aurora_xr_stage_adopted();
 }
 
+bool pc_xr_place_needed_online(void) {
+    return pc_xr_place_available() && !s_decided;
+}
+
 void pc_xr_place_dummy_start(void) {
     s_dummy = true;
     s_dummy_result = 0;

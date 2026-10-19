@@ -5,6 +5,7 @@
 #include <math.h>
 #ifdef TARGET_PC
 #include "pc/pc.h"
+#include "pc/xr_place.h"
 #endif
 
 #include "forward.h"
@@ -345,8 +346,8 @@ static AnimLoopSettings mn_803EB48C[] = {
 static AnimLoopSettings mn_OnlinePreview[2] = {
     { 700, 749, 720 }, { 700, 749, 720 },
 };
-static AnimLoopSettings mn_OnlineSlippiPreview[3] = {
-    { 700, 749, 720 }, { 700, 749, 720 }, { 700, 749, 720 },
+static AnimLoopSettings mn_OnlineSlippiPreview[4] = {
+    { 700, 749, 720 }, { 700, 749, 720 }, { 700, 749, 720 }, { 700, 749, 720 },
 };
 #endif
 
@@ -360,6 +361,9 @@ static AnimLoopSettings mn_803EB4C8[] = {
 static AnimLoopSettings mn_803EB4F8[] = {
     { 1300, 1349, 1320 }, { 1350, 1399, 1370 }, { 1400, 1449, 1420 },
     { 1450, 1499, 1470 }, { 1500, 1549, 1520 }, { 1550, 1599, 1570 },
+#ifdef TARGET_PC
+    { 1400, 1449, 1420 }, /* Place Stage (XR): Screen Display's preview */
+#endif
 };
 
 static AnimLoopSettings mn_803EB540[] = {
@@ -400,7 +404,12 @@ static u16 mn_803EB660[] = { 0x81, 0x82, 0x83, 0x84, 0x85, 0x00 };
 #endif
 static u16 mn_803EB66C[] = { 0x86, 0x87, 0x88, 0x89, 0x8A, 0x00 };
 static u16 mn_803EB678[] = { 0x8E, 0x8F, 0x90, 0x91, 0x92, 0x00 };
+#ifdef TARGET_PC
+/* + Place Stage, whose description is literal (mnOnline_Description) */
+static u16 mn_803EB684[] = { 0x9A, 0x9B, 0x9C, 0x9D, 0x9D, 0x9E, 0x9E };
+#else
 static u16 mn_803EB684[] = { 0x9A, 0x9B, 0x9C, 0x9D, 0x9D, 0x9E };
+#endif
 static u16 mn_803EB690[] = { 0x9F, 0xA0, 0xA1, 0xA2, 0xA3, 0x00 };
 
 static u16 mn_803EB69C[] = {
@@ -869,6 +878,11 @@ bool mn_80229938(MenuKind menu_kind, s32 selection)
     if (menu_kind == MENU_KIND_SETTINGS && selection == SEL_SETTINGS_3) {
         return false;
     }
+#ifdef TARGET_PC
+    if (menu_kind == MENU_KIND_SETTINGS && selection == SEL_SETTINGS_PLACE) {
+        return pc_xr_place_available();
+    }
+#endif
     if (menu_kind == MENU_KIND_1P && selection == SEL_1P_2) {
         return false;
     }
@@ -1015,6 +1029,21 @@ static void mn_PcLabelLean(void* gobj_)
     GXLoadPosMtxImm(out, 0);
 }
 
+/* The selection shown in row `row` (rows skip hidden selections, as
+ * Options' SEL_SETTINGS_3), or -1. */
+static int mn_PcRowSelection(MenuKind kind, int row)
+{
+    int count = mn_803EB6B0[kind].selection_count & 0xFF;
+    int sel;
+
+    for (sel = 0; sel < count; sel++) {
+        if (mn_80229938(kind, sel) && mn_80229A04(kind, sel) == row) {
+            return sel;
+        }
+    }
+    return -1;
+}
+
 /* ponytail: PC-only entries (mnonline.h) have no label texture. mn_8022B3A0
  * hides their slot's matanim label and this draws SIS text over the slot
  * every frame (the tree animates). Freed with the description on slide-out. */
@@ -1033,8 +1062,10 @@ static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
             HSD_SisLib_803A70A0(data->description, 0, "%s", notice);
         }
     }
+    /* i is the row (the slot the text sits on), sel the selection in it. */
     for (i = 0; i < (int) ARRAY_SIZE(data->pc_label); i++) {
-        const char* label = alive ? mnOnline_Label(data->menu_kind, i) : NULL;
+        const int sel = mn_PcRowSelection(data->menu_kind, i);
+        const char* label = alive && sel >= 0 ? mnOnline_Label(data->menu_kind, sel) : NULL;
         HSD_Text* text = data->pc_label[i];
         Vec3 pos;
 
@@ -1064,7 +1095,7 @@ static void mn_UpdatePcLabels(MainMenuData* data, bool alive)
         text->pos_y = -pos.y - 16.0f * label_size;
         text->pos_z = pos.z;
         HSD_SisLib_803A74F0(text, 0,
-                            (GXColor*) (mn_804A04F0.hovered_selection == i
+                            (GXColor*) (mn_804A04F0.hovered_selection == sel
                                             ? &hovered
                                             : &idle));
     }
@@ -1817,6 +1848,11 @@ HSD_GObj* mn_8022B3A0(u8 state)
         /* Login alone signed out; Unranked, Direct and Logout signed in. */
         mn_803EB6B0[MENU_KIND_ONLINE_SLIPPI].selection_count = (u8) mnOnline_SlippiCount();
         mnOnline_SlippiBuilt();
+    }
+    if (cur_menu == MENU_KIND_SETTINGS) {
+        /* Place Stage, last, while a headset is presenting. */
+        mn_803EB6B0[MENU_KIND_SETTINGS].selection_count =
+            pc_xr_place_available() ? SEL_SETTINGS_PLACE + 1 : SEL_SETTINGS_ERASE + 1;
     }
 #endif
     /// @todo Idiomatic spellings put the pointer in a named local, not a temp.
@@ -2788,6 +2824,11 @@ void mn_8022D104(HSD_GObj* gp)
             mnDataDel_80250170();
             HSD_GObjFree(gp);
             break;
+#ifdef TARGET_PC
+        case SEL_SETTINGS_PLACE:
+            mnOnline_PlaceFromOptions();
+            break;
+#endif
         }
     } else if (buttons & MenuInput_Back) {
         sfxBack();

@@ -31,6 +31,10 @@ void gmOnline_SetKindAfterPlace(OnlineKind kind);
 /* XR: the stage-placement scene, then on to game mode `mode` (a
  * GameModeKind: the menu's fight mode that asked for it). */
 void gmOnline_SetModeAfterPlace(int mode);
+/* The placement scene was opened from Options: the menu goes back there.
+ * Taken (and cleared) by the menu as it comes back. */
+void gmOnline_SetPlaceFromOptions(bool from_options);
+bool gmOnline_TakePlaceFromOptions(void);
 
 /* The online CSS's status text (src/melee/mn/mnonlinecss.c), drawn by the
  * Slippi flow's state in gmonlinemode.c. */

@@ -864,6 +864,20 @@ void gmOnline_SetModeAfterPlace(int mode)
     mode_after_place = mode;
 }
 
+static bool place_from_options;
+
+void gmOnline_SetPlaceFromOptions(bool from_options)
+{
+    place_from_options = from_options;
+}
+
+bool gmOnline_TakePlaceFromOptions(void)
+{
+    const bool r = place_from_options;
+    place_from_options = false;
+    return r;
+}
+
 void onEnterPlace(GameModeState* state)
 {
     pc_log_line("online: stage placement scene");
@@ -890,6 +904,11 @@ void onExitPlace(UNUSED GameModeState* state)
 #else
 void onEnterPlace(UNUSED GameModeState* state) {}
 void onExitPlace(UNUSED GameModeState* state) {}
+void gmOnline_SetPlaceFromOptions(UNUSED bool from_options) {}
+bool gmOnline_TakePlaceFromOptions(void)
+{
+    return false;
+}
 #endif
 
 void onEnterIntro(GameModeState* state)

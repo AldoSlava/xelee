@@ -24,5 +24,7 @@ const char* mnOnline_Description(MenuKind, int selection);
 
 /* One-shot description override set by the think proc (A on a stub). */
 const char* mnOnline_TakeNotice(void);
+/* Options > Place Stage (XR): the placement scene, then back to Options. */
+void mnOnline_PlaceFromOptions(void);
 
 #endif

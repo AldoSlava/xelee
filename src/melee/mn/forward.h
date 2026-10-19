@@ -216,6 +216,9 @@ typedef enum SettingsMenuSelection {
     SEL_SETTINGS_3 = 3, ///< hidden
     SEL_SETTINGS_LANG = 4,
     SEL_SETTINGS_ERASE = 5,
+#ifdef TARGET_PC
+    SEL_SETTINGS_PLACE = 6, ///< XR only: the stage-placement scene
+#endif
 } SettingsMenuSelection;
 
 typedef enum DataMenuSelection {

@@ -206,6 +206,11 @@ void onEnter(GameModeState* scene)
             data->hovered_selection = 0;
             break;
         case ONLINE_KIND_PLACE:
+            if (gmOnline_TakePlaceFromOptions()) {
+                data->menu_kind = MENU_KIND_SETTINGS;
+                data->hovered_selection = SEL_SETTINGS_PLACE;
+                break;
+            }
             data->menu_kind = MENU_KIND_ONLINE_SLIPPI;
             data->hovered_selection = SEL_SLIPPI_PLACE;
             break;

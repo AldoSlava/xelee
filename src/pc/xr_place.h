@@ -44,6 +44,10 @@ bool pc_xr_place_available(void);
  * is presenting and there's no stage spot yet (none placed this launch,
  * none found in the room). */
 bool pc_xr_place_needed(void);
+/* Unranked, Direct or LAN should place the stage first: a headset is
+ * presenting and Place Stage hasn't run this launch (a stage spot found in
+ * the room doesn't count: online there is no hold before each fight). */
+bool pc_xr_place_needed_online(void);
 /* The launcher's "Before each fight": true holds every fight for placing;
  * false starts it right away once a stage spot is set (this launch, or
  * found in the room), holding only while there's none. */
@@ -59,6 +63,7 @@ static inline int pc_xr_place_dummy_result(void) { return 0; }
 static inline bool pc_xr_place_decided(void) { return true; }
 static inline bool pc_xr_place_available(void) { return false; }
 static inline bool pc_xr_place_needed(void) { return false; }
+static inline bool pc_xr_place_needed_online(void) { return false; }
 static inline bool pc_xr_place_hold(void) { return false; }
 static inline bool pc_xr_place_holding(void) { return false; }
 static inline void pc_xr_place_stage_ready(int grkind) { (void)grkind; }
