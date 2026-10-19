@@ -81,6 +81,23 @@ static void logf_(const char* fmt, ...) {
     fflush(stdout);
 }
 
+/* This machine's address on the LAN: the source of its route outward (a UDP
+ * connect sends nothing). Left alone if there is no route. */
+static void self_lan_ip(char* out, size_t cap) {
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) {
+        return;
+    }
+    struct sockaddr_in to = {.sin_family = AF_INET, .sin_port = htons(53)};
+    struct sockaddr_in me;
+    socklen_t len = sizeof me;
+    inet_pton(AF_INET, "8.8.8.8", &to.sin_addr);
+    if (connect(s, (struct sockaddr*)&to, sizeof to) == 0 && getsockname(s, (struct sockaddr*)&me, &len) == 0) {
+        inet_ntop(AF_INET, &me.sin_addr, out, (socklen_t)cap);
+    }
+    close(s);
+}
+
 static void send_json(ENetPeer* peer, const char* body) {
     ENetPacket* p = enet_packet_create(body, strlen(body), ENET_PACKET_FLAG_RELIABLE);
     enet_peer_send(peer, 0, p);
@@ -261,6 +278,12 @@ static void handle_message(ENetPeer* peer, const char* text, size_t len) {
     pc_slippi_json_string(pc_slippi_json_get(root, "ipAddressLan"), t.lan, sizeof t.lan);
     enet_address_get_host_ip(&peer->address, t.ip, sizeof t.ip);
     const char* colon = strrchr(t.lan, ':');
+    /* A client on this machine reaches us over loopback (mm.slippi.gg mapped
+     * to 127.0.0.1), which a player elsewhere on the LAN (a headset) cannot
+     * dial back: give out this machine's LAN address instead. */
+    if (strncmp(t.ip, "127.", 4) == 0 && relay_base == 0) {
+        self_lan_ip(t.ip, sizeof t.ip);
+    }
     t.game_port = colon != NULL ? (unsigned)atoi(colon + 1) : 0;
     char app[32];
     pc_slippi_json_string(pc_slippi_json_get(root, "appVersion"), app, sizeof app);
