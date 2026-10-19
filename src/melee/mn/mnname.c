@@ -8,6 +8,10 @@
 #include "mnmainrule.h"
 #include "mnnamenew.h"
 #include "types.h"
+#ifdef TARGET_PC
+#include "pc/xr_pointer.h"
+#include <math.h>
+#endif
 #include <dolphin/gx/GXStruct.h>
 #include <dolphin/mtx.h>
 #include <melee/gm/gmmain_lib.h>
@@ -38,6 +42,42 @@ typedef struct {
 
 /// Name-entry menu animation loop windows (.data block owned by this
 /// translation unit; see symbols.txt 0x803ED538..0x803ED62F).
+#ifdef TARGET_PC
+/* One object, laid out as on the disc: the code reads mnName_803ED538 past
+ * its four entries (base[4..9]: the windows after it, the last one
+ * mnName_803ED5A4's first three floats). As separate objects the compiler
+ * places them anywhere, base[5] read garbage, and the list's NEW / LIST /
+ * ERASE plates never slid away behind the Name Entry keyboard. */
+static struct {
+    AnimLoopSettings a538[4];
+    AnimLoopSettings a568, a574, a580, a58C, a598;
+    f32 a5A4[23];
+} mnName_803ED538_block = {
+    {
+        { 0.0F, 0.0F, -0.1F },
+        { 0.0F, 0.0F, -0.1F },
+        { 0.0F, 0.0F, -0.1F },
+        { 0.0F, 0.0F, -0.1F },
+    },
+    { 50.0F, 59.0F, -0.1F },
+    { 40.0F, 49.0F, -0.1F },
+    { 30.0F, 39.0F, -0.1F },
+    { 10.0F, 19.0F, -0.1F },
+    { 20.0F, 29.0F, -0.1F },
+    {
+        0.0F, 9.0F, -0.1F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
+        1.0F, 0.0F, 0.0F,  2.0F, 3.0F, 4.0F, 0.0F, 5.0F, 6.0F, 7.0F, 8.0F,
+    },
+};
+STATIC_ASSERT(sizeof(AnimLoopSettings) == 12);
+#define mnName_803ED538 (mnName_803ED538_block.a538)
+#define mnName_803ED568 (mnName_803ED538_block.a568)
+#define mnName_803ED574 (mnName_803ED538_block.a574)
+#define mnName_803ED580 (mnName_803ED538_block.a580)
+#define mnName_803ED58C (mnName_803ED538_block.a58C)
+#define mnName_803ED598 (mnName_803ED538_block.a598)
+#define mnName_803ED5A4 (mnName_803ED538_block.a5A4)
+#else
 /* 3ED538 */ AnimLoopSettings mnName_803ED538[4] = {
     { 0.0F, 0.0F, -0.1F },
     { 0.0F, 0.0F, -0.1F },
@@ -53,6 +93,7 @@ typedef struct {
     0.0F, 9.0F, -0.1F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
     1.0F, 0.0F, 0.0F,  2.0F, 3.0F, 4.0F, 0.0F, 5.0F, 6.0F, 7.0F, 8.0F,
 };
+#endif
 /* 3ED600 */ f32 mnName_803ED600[6] = {
     0.0F, 9.0F, -0.1F, 20.0F, 29.0F, -0.1F,
 };
@@ -618,6 +659,98 @@ static inline u8 mnName_CountValid(void)
     return count;
 }
 
+#ifdef TARGET_PC
+/* The pointer (a headset laser, or the mouse when testing) over the name
+ * list and its Erase? box: what it is over becomes the highlighted one, and
+ * its click is A, as on the Name Entry keyboard (mnnamenew.c). It reaches
+ * what the pad does: NEW, LIST and ERASE, or the names once ERASE has been
+ * picked (A on a name asks to erase it). */
+static bool pc_name_project(HSD_CObj* cobj, HSD_JObj* j, float* x, float* y)
+{
+    Vec3 w;
+    if (j == NULL) {
+        return false;
+    }
+    lb_8000B1CC(j, NULL, &w);
+    return pc_xr_pointer_project(cobj, &w.x, x, y);
+}
+
+static void pc_name_pointer(MnName_GObj* data)
+{
+    HSD_CObj* cobj = mn_PcMenuCamera();
+    const bool erasing = mn_804A04F0.hovered_selection < 0x18U;
+    float px, py, x0, y0, x1, y1, x6, y6, dx, dy, x, y, rx, ry;
+    bool leads;
+    int i, best = -1;
+
+    if (cobj == NULL || !pc_xr_pointer_at(&px, &py, &leads)) {
+        return;
+    }
+    pc_xr_pointer_target(false);
+    if (!pc_name_project(cobj, mnName_802388D4(data, 0), &x0, &y0) ||
+        !pc_name_project(cobj, mnName_802388D4(data, 1), &x1, &y1) ||
+        !pc_name_project(cobj, mnName_802388D4(data, 6), &x6, &y6))
+    {
+        return;
+    }
+    dx = fabsf(x6 - x0); /* a column */
+    dy = fabsf(y1 - y0); /* a row */
+    for (i = erasing ? 0 : 0x18; i < (erasing ? 0x18 : 0x1B); i++) {
+        if (!pc_name_project(cobj, mnName_802388D4(data, (u8) i), &x, &y)) {
+            continue;
+        }
+        rx = i < 0x18 ? dx * 0.5f : dx * 0.55f;
+        ry = i < 0x18 ? dy * 0.5f : dy * 0.9f;
+        if (fabsf(px - x) < rx && fabsf(py - y) < ry) {
+            best = i;
+            break;
+        }
+    }
+    if (best < 0) {
+        return;
+    }
+    pc_xr_pointer_target(true);
+    if (leads && mn_804A04F0.hovered_selection != best) {
+        mn_804A04F0.hovered_selection = (u16) best;
+        sfxMove();
+    }
+}
+
+/* The Erase? box's YES (joint 6, confirmed_selection 1) and NO (7, 0). */
+static void pc_name_confirm_pointer(HSD_JObj* box)
+{
+    HSD_CObj* cobj = mn_PcMenuCamera();
+    HSD_JObj* yes;
+    HSD_JObj* no;
+    float px, py, yx, yy, nx, ny, half;
+    bool leads;
+    int over;
+
+    if (cobj == NULL || !pc_xr_pointer_at(&px, &py, &leads)) {
+        return;
+    }
+    pc_xr_pointer_target(false);
+    lb_80011E24(box, &yes, 6, -1);
+    lb_80011E24(box, &no, 7, -1);
+    if (!pc_name_project(cobj, yes, &yx, &yy) || !pc_name_project(cobj, no, &nx, &ny)) {
+        return;
+    }
+    half = fabsf(nx - yx) * 0.45f;
+    if (fabsf(px - yx) < half && fabsf(py - yy) < half * 0.5f) {
+        over = 1;
+    } else if (fabsf(px - nx) < half && fabsf(py - ny) < half * 0.5f) {
+        over = 0;
+    } else {
+        return;
+    }
+    pc_xr_pointer_target(true);
+    if (leads && mn_804A04F0.confirmed_selection != over) {
+        mn_804A04F0.confirmed_selection = (u8) over;
+        sfxMove();
+    }
+}
+#endif
+
 void mnName_MainInput(HSD_GObj* arg0)
 {
     MnName_GObj* gobj2 = (MnName_GObj*) mnName_804D6BF8->user_data;
@@ -625,6 +758,9 @@ void mnName_MainInput(HSD_GObj* arg0)
     s32 isFull;
     PAD_STACK(0x18);
     mn_804A04F0.buttons = buttons;
+#ifdef TARGET_PC
+    pc_name_pointer(gobj2);
+#endif
 
     if (buttons & 0x20) {
         sfxBack();
@@ -1420,6 +1556,9 @@ void fn_8023A0BC(HSD_GObj* gobj)
         HSD_GObjFree(gobj);
         return;
     }
+#ifdef TARGET_PC
+    pc_name_confirm_pointer(jobj);
+#endif
 
     frame = mn_8022F298(sp2C);
     if (mnName_803ED600[0] <= frame) {
