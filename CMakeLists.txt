@@ -45,6 +45,27 @@ if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/aurora/CMakeLists.txt)
         "run `git submodule update --init`")
 endif ()
 add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
+# Slippi's in-app login (src/pc/slippi/slp_user.c): its Firebase API key and
+# GraphQL endpoint, compiled in from the configure environment (CI: repository
+# secrets). Unset, the build has no in-app login unless the runtime
+# environment supplies them.
+set(_slippi_login_defs)
+if (NOT "$ENV{MELEE_SLIPPI_FIREBASE_KEY}" STREQUAL "")
+    list(APPEND _slippi_login_defs "PC_SLIPPI_FIREBASE_KEY_BUILTIN=\"$ENV{MELEE_SLIPPI_FIREBASE_KEY}\"")
+endif ()
+if (NOT "$ENV{MELEE_SLIPPI_GRAPHQL_ENDPOINT}" STREQUAL "")
+    list(APPEND _slippi_login_defs "PC_SLIPPI_GRAPHQL_ENDPOINT_BUILTIN=\"$ENV{MELEE_SLIPPI_GRAPHQL_ENDPOINT}\"")
+endif ()
+if (_slippi_login_defs)
+    set_source_files_properties(src/pc/slippi/slp_user.c PROPERTIES COMPILE_DEFINITIONS "${_slippi_login_defs}")
+endif ()
+list(LENGTH _slippi_login_defs _slippi_login_n)
+if (_slippi_login_n EQUAL 2)
+    message(STATUS "melee: Slippi in-app login compiled in")
+else ()
+    message(STATUS "melee: Slippi in-app login not compiled in (set MELEE_SLIPPI_FIREBASE_KEY and MELEE_SLIPPI_GRAPHQL_ENDPOINT)")
+endif ()
+
 # The version the app reports and the updater compares: the release tag CI
 # builds from (MELEE_VERSION, read at configure time), else version.cpp's.
 if (NOT "$ENV{MELEE_VERSION}" STREQUAL "")

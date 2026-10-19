@@ -566,9 +566,24 @@ void pc_slippi_account_refresh_async(const PcSlippiAccount* a) {
     "fbUid displayName connectCode { code } private { playKey } } getLatestDolphin { "        \
     "version } }\",\"variables\":{\"fbUid\":\"%s\"}}"
 
+/* Release builds compile these in (CMakeLists.txt: from the configure
+ * environment, CI's repository secrets); the environment still overrides, for
+ * testing. Empty: no in-app login. */
+#ifndef PC_SLIPPI_FIREBASE_KEY_BUILTIN
+#define PC_SLIPPI_FIREBASE_KEY_BUILTIN ""
+#endif
+#ifndef PC_SLIPPI_GRAPHQL_ENDPOINT_BUILTIN
+#define PC_SLIPPI_GRAPHQL_ENDPOINT_BUILTIN ""
+#endif
+
+static const char* login_setting(const char* name, const char* builtin) {
+    const char* v = getenv(name);
+    return v != NULL && v[0] != '\0' ? v : builtin;
+}
+
 bool pc_slippi_account_login_available(void) {
-    const char* key = getenv("MELEE_SLIPPI_FIREBASE_KEY");
-    const char* gql = getenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT");
+    const char* key = login_setting("MELEE_SLIPPI_FIREBASE_KEY", PC_SLIPPI_FIREBASE_KEY_BUILTIN);
+    const char* gql = login_setting("MELEE_SLIPPI_GRAPHQL_ENDPOINT", PC_SLIPPI_GRAPHQL_ENDPOINT_BUILTIN);
     return key != NULL && key[0] != '\0' && gql != NULL && gql[0] != '\0';
 }
 
@@ -613,8 +628,8 @@ bool pc_slippi_account_login(const char* email, const char* password, PcSlippiAc
     if (err != NULL && err_cap > 0) {
         err[0] = '\0';
     }
-    const char* key = getenv("MELEE_SLIPPI_FIREBASE_KEY");
-    const char* gql = getenv("MELEE_SLIPPI_GRAPHQL_ENDPOINT");
+    const char* key = login_setting("MELEE_SLIPPI_FIREBASE_KEY", PC_SLIPPI_FIREBASE_KEY_BUILTIN);
+    const char* gql = login_setting("MELEE_SLIPPI_GRAPHQL_ENDPOINT", PC_SLIPPI_GRAPHQL_ENDPOINT_BUILTIN);
     if (key == NULL || key[0] == '\0' || gql == NULL || gql[0] == '\0') {
         if (err != NULL && err_cap > 0) {
             snprintf(err, err_cap, "Online login is not configured in this build");
