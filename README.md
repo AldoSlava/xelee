@@ -16,9 +16,8 @@ is GPL-3.0-or-later. Details under [License](#license).
 - **Touch controller support**, with rumble
 - **External gamepad support**, with rumble 
 - **Hand tracking** for placing, turning and scaling the stage
-- **Room-aware stage placement**: a quick room survey picks a
-  starting spot that maximizes use of available space. Every stage can be hand-placed
-  relative to the baseline.
+- **Stage placement**: place the stage once with **Place Stage** and every
+  stage starts there; any stage can be adjusted before its fight.
 - **Laser pointer menus**: point and click through Melee's menus with the Touch controllers or hand tracking 
 - **Asynchronous SpaceWarp (ASW)** boosts the base framerate of 60FPS to an apparent 120FPS
 - **Dynamic resolution** to keep performance at a stable lock, ranging from 80% to 130% display resolution.
@@ -53,12 +52,13 @@ is GPL-3.0-or-later. Details under [License](#license).
 
 The app opens as a flat panel in your home environment. Choose your disc with
 the system file picker, let it verify, and press **Play**: the game starts in
-your room on a floating screen. The first time through, the headset builds its
-shaders as you go, so expect some stutter in the first menus and fights.
+your room on a floating screen. On the first launch (and after an update) the
+launcher builds the game's shaders, which takes a few minutes; let it finish
+for smooth first fights, or press **Play** to skip it.
 
-Your room is surveyed when the game starts, to pick a sensible spot and size
-for the stage. Before each fight the stage waits for you to place it (see
-below); you can turn that off with **Before each fight** in the launcher.
+Stages start small, a little below eye level and an arm's length ahead. Before
+each fight the stage waits for you to place it (see below); you can turn that
+off with **Before each fight** in the launcher.
 
 ## Placing the stage
 
