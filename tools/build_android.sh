@@ -63,7 +63,10 @@ fi
 if [[ "${MELEE_XR}" == 1 ]]; then
     ndk_major() { sed -n 's/^Pkg.Revision *= *\([0-9]*\).*/\1/p' "$1/source.properties" 2>/dev/null; }
     if (( $(ndk_major "${ANDROID_NDK_HOME}") < 28 )); then
-        NEWEST_NDK="$(find "${ANDROID_HOME}/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)"
+        # MELEE_XR_NDK_HOME pins it (CI: r29, as local builds use; a runner's
+        # preinstalled r30 rejects the unversioned target triple nod's Rust
+        # crates compile their C with).
+        NEWEST_NDK="${MELEE_XR_NDK_HOME:-$(find "${ANDROID_HOME}/ndk" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -V | tail -1)}"
         if [[ -n "${NEWEST_NDK}" ]] && (( $(ndk_major "${NEWEST_NDK}") >= 28 )); then
             echo "MELEE_XR: using ${NEWEST_NDK} (Dawn needs NDK r28+, ${ANDROID_NDK_HOME} is older)"
             # The game is compiled by GCC, which rejects r28+ headers'

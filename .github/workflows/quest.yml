@@ -82,6 +82,7 @@ jobs:
           MELEE_KEY_PASSWORD: ${{ secrets.MELEE_KEY_PASSWORD }}
         run: |
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/26.3.11579264"
+          export MELEE_XR_NDK_HOME="${ANDROID_HOME}/ndk/29.0.14206865"
           ccache --zero-stats
           tools/build_android.sh
           ccache --show-stats
