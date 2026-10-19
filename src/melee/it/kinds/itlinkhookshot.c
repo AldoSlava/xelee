@@ -884,6 +884,29 @@ float it_802A3C98(Vec3* arg0, Vec3* arg1, Vec3* arg2)
     return len;
 }
 
+/* it_802A3C98 as mwcc inlined it into this file's callers (0x802A4530):
+ * the difference in registers, so its squared length fuses. Ness's yo-yo,
+ * Samus's grapple and the rest call the function, which does not. */
+static inline float it_802A3C98_inline(Vec3* arg0, Vec3* arg1, Vec3* arg2)
+{
+    f32 inv;
+    f32 len;
+    f32 x = arg0->x - arg1->x;
+    f32 y = arg0->y - arg1->y;
+    f32 z = arg0->z - arg1->z;
+
+    len = sqrtf(gk_fmadds(z, z, gk_fmadds(x, x, y * y)));
+    if (len == (f64) 0.0F) {
+        inv = (f64) 0.0F;
+    } else {
+        inv = (f64) 1.0F / len;
+    }
+    arg2->x = x * inv;
+    arg2->y = y * inv;
+    arg2->z = z * inv;
+    return len;
+}
+
 s32 it_802A3D90(ItemLink* item_link)
 {
     CollData* coll;
@@ -1107,11 +1130,11 @@ void it_802A44CC(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
 
     link_1 = link_0->prev;
 
-    it_802A3C98(&link_0->pos, arg1, &vec);
+    it_802A3C98_inline(&link_0->pos, arg1, &vec);
 
-    link_0->pos.x = (vec.x * arg8) + arg1->x;
-    link_0->pos.y = (vec.y * arg8) + arg1->y;
-    link_0->pos.z = (vec.z * arg8) + arg1->z;
+    link_0->pos.x = gk_fmadds(vec.x, arg8, arg1->x);
+    link_0->pos.y = gk_fmadds(vec.y, arg8, arg1->y);
+    link_0->pos.z = gk_fmadds(vec.z, arg8, arg1->z);
 
     while (link_1 != NULL) {
         link_1->vel.y -= arg2->x3C;
@@ -1120,11 +1143,11 @@ void it_802A44CC(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
         link_1->pos.z += link_1->vel.z;
         it_802A40D0(link_1, arg2->x30);
 
-        len = it_802A3C98(&link_1->pos, &link_0->pos, &vec);
+        len = it_802A3C98_inline(&link_1->pos, &link_0->pos, &vec);
         if (len > arg2->x30) {
-            link_1->pos.x = (vec.x * arg2->x30) + link_0->pos.x;
-            link_1->pos.y = (vec.y * arg2->x30) + link_0->pos.y;
-            link_1->pos.z = (vec.z * arg2->x30) + link_0->pos.z;
+            link_1->pos.x = gk_fmadds(vec.x, arg2->x30, link_0->pos.x);
+            link_1->pos.y = gk_fmadds(vec.y, arg2->x30, link_0->pos.y);
+            link_1->pos.z = gk_fmadds(vec.z, arg2->x30, link_0->pos.z);
         }
         link_0 = link_1;
         link_1 = link_1->prev;
@@ -1134,9 +1157,9 @@ void it_802A44CC(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
 static inline void test_comp(Vec3* vec0, Vec3* vec1, Vec3* vec2,
                              const f32* arg2)
 {
-    vec0->x = (vec2->x * *arg2) + vec1->x;
-    vec0->y = (vec2->y * *arg2) + vec1->y;
-    vec0->z = (vec2->z * *arg2) + vec1->z;
+    vec0->x = gk_fmadds(vec2->x, *arg2, vec1->x);
+    vec0->y = gk_fmadds(vec2->y, *arg2, vec1->y);
+    vec0->z = gk_fmadds(vec2->z, *arg2, vec1->z);
 }
 
 static inline Vec3* it_802A4758_permuterslop(ItemLink* link_0)
@@ -1153,7 +1176,7 @@ void it_802A4758(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
     u8 _padA[8];
     ItemLink* link_1 = link_0->prev;
 
-    len = it_802A3C98(&link_0->pos, arg1, &vec);
+    len = it_802A3C98_inline(&link_0->pos, arg1, &vec);
     test_comp(it_802A4758_permuterslop(link_0), arg1, &vec, &arg8);
 
     while (link_1 != NULL) {
@@ -1161,7 +1184,7 @@ void it_802A4758(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
         it_802A4420(link_1);
         it_802A43EC(link_1);
 
-        len = it_802A3C98(&link_1->pos, &link_0->pos, &vec);
+        len = it_802A3C98_inline(&link_1->pos, &link_0->pos, &vec);
 
         if (len > arg2->x30) {
             f32 x30 = arg2->x30;
@@ -1184,20 +1207,20 @@ void it_802A49B0(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
 
     link_1 = link_0->prev;
 
-    it_802A3C98(&link_0->pos, arg1, &vec);
+    it_802A3C98_inline(&link_0->pos, arg1, &vec);
 
-    link_0->pos.x = (vec.x * arg8) + arg1->x;
-    link_0->pos.y = (vec.y * arg8) + arg1->y;
-    link_0->pos.z = (vec.z * arg8) + arg1->z;
+    link_0->pos.x = gk_fmadds(vec.x, arg8, arg1->x);
+    link_0->pos.y = gk_fmadds(vec.y, arg8, arg1->y);
+    link_0->pos.z = gk_fmadds(vec.z, arg8, arg1->z);
 
     while (link_1 != NULL) {
         it_802A40D0(link_1, arg2->x30);
 
-        len = it_802A3C98(&link_1->pos, &link_0->pos, &vec);
+        len = it_802A3C98_inline(&link_1->pos, &link_0->pos, &vec);
         if (len > arg2->x30) {
-            link_1->pos.x = (vec.x * arg2->x30) + link_0->pos.x;
-            link_1->pos.y = (vec.y * arg2->x30) + link_0->pos.y;
-            link_1->pos.z = (vec.z * arg2->x30) + link_0->pos.z;
+            link_1->pos.x = gk_fmadds(vec.x, arg2->x30, link_0->pos.x);
+            link_1->pos.y = gk_fmadds(vec.y, arg2->x30, link_0->pos.y);
+            link_1->pos.z = gk_fmadds(vec.z, arg2->x30, link_0->pos.z);
         }
         link_0 = link_1;
         link_1 = link_1->prev;
@@ -1386,20 +1409,20 @@ s32 it_802A5320(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* attr,
             } else {
                 it_802A40D0(link_1, attr->x30);
             }
-            len = it_802A3C98(&link_1->pos, &cur->pos, &vec);
+            len = it_802A3C98_inline(&link_1->pos, &cur->pos, &vec);
             if (len > attr->x30) {
-                link_1->pos.x = (vec.x * attr->x30) + cur->pos.x;
-                link_1->pos.y = (vec.y * attr->x30) + cur->pos.y;
-                link_1->pos.z = (vec.z * attr->x30) + cur->pos.z;
+                link_1->pos.x = gk_fmadds(vec.x, attr->x30, cur->pos.x);
+                link_1->pos.y = gk_fmadds(vec.y, attr->x30, cur->pos.y);
+                link_1->pos.z = gk_fmadds(vec.z, attr->x30, cur->pos.z);
             }
             link_1->coll_data.last_pos = link_1->coll_data.cur_pos;
             link_1->coll_data.cur_pos = link_1->pos;
         } else {
-            len = it_802A3C98(arg1, &cur->pos, &vec);
+            len = it_802A3C98_inline(arg1, &cur->pos, &vec);
             if (len > attr->x30) {
-                link_1->pos.x = (vec.x * attr->x30) + cur->pos.x;
-                link_1->pos.y = (vec.y * attr->x30) + cur->pos.y;
-                link_1->pos.z = (vec.z * attr->x30) + cur->pos.z;
+                link_1->pos.x = gk_fmadds(vec.x, attr->x30, cur->pos.x);
+                link_1->pos.y = gk_fmadds(vec.y, attr->x30, cur->pos.y);
+                link_1->pos.z = gk_fmadds(vec.z, attr->x30, cur->pos.z);
                 link_1->x2C_b0 = 1;
                 link_1->coll_data.cur_pos = link_1->pos;
                 link_1->coll_data.last_pos = link_1->coll_data.cur_pos;
@@ -1460,11 +1483,11 @@ void it_802A5770(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
     cur->pos.z += cur->vel.z;
     it_802A40D0(cur, attr->x30);
 
-    len = it_802A3C98(&cur->pos, anchor, &vec);
+    len = it_802A3C98_inline(&cur->pos, anchor, &vec);
     if (len > attr->x30) {
-        cur->pos.x = (vec.x * attr->x30) + anchor->x;
-        cur->pos.y = (vec.y * attr->x30) + anchor->y;
-        cur->pos.z = (vec.z * attr->x30) + anchor->z;
+        cur->pos.x = gk_fmadds(vec.x, attr->x30, anchor->x);
+        cur->pos.y = gk_fmadds(vec.y, attr->x30, anchor->y);
+        cur->pos.z = gk_fmadds(vec.z, attr->x30, anchor->z);
     }
 
     var_r29 = 0;
@@ -1476,12 +1499,12 @@ void it_802A5770(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
 
         it_802A5770_inline(link_1, attr, fp, var_r29);
 
-        len = it_802A3C98(&link_1->pos, &cur->pos, &vec);
+        len = it_802A3C98_inline(&link_1->pos, &cur->pos, &vec);
         if (len > attr->x30) {
-            link_1->pos.x = (vec.x * attr->x30) + cur->pos.x;
-            link_1->pos.y = (vec.y * attr->x30) + cur->pos.y;
+            link_1->pos.x = gk_fmadds(vec.x, attr->x30, cur->pos.x);
+            link_1->pos.y = gk_fmadds(vec.y, attr->x30, cur->pos.y);
             {
-                f32 z = (vec.z * attr->x30) + cur->pos.z; // permuterslop
+                f32 z = gk_fmadds(vec.z, attr->x30, cur->pos.z); // permuterslop
                 (void) z;
                 link_1->pos.z = z;
             }
@@ -1529,18 +1552,18 @@ s32 it_802A5AE0(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2)
             link_1->pos.z += link_1->vel.z;
             it_802A40D0(link_1, arg2->x30);
 
-            len = it_802A3C98(&link_1->pos, &cur->pos, &vec);
+            len = it_802A3C98_inline(&link_1->pos, &cur->pos, &vec);
             if (len > arg2->x30) {
-                link_1->pos.x = (vec.x * arg2->x30) + cur->pos.x;
-                link_1->pos.y = (vec.y * arg2->x30) + cur->pos.y;
-                link_1->pos.z = (vec.z * arg2->x30) + cur->pos.z;
+                link_1->pos.x = gk_fmadds(vec.x, arg2->x30, cur->pos.x);
+                link_1->pos.y = gk_fmadds(vec.y, arg2->x30, cur->pos.y);
+                link_1->pos.z = gk_fmadds(vec.z, arg2->x30, cur->pos.z);
             }
         } else {
-            len = it_802A3C98(arg1, &cur->pos, &vec);
+            len = it_802A3C98_inline(arg1, &cur->pos, &vec);
             if (len > arg2->x30) {
-                link_1->pos.x = (vec.x * arg2->x30) + cur->pos.x;
-                link_1->pos.y = (vec.y * arg2->x30) + cur->pos.y;
-                link_1->pos.z = (vec.z * arg2->x30) + cur->pos.z;
+                link_1->pos.x = gk_fmadds(vec.x, arg2->x30, cur->pos.x);
+                link_1->pos.y = gk_fmadds(vec.y, arg2->x30, cur->pos.y);
+                link_1->pos.z = gk_fmadds(vec.z, arg2->x30, cur->pos.z);
                 link_1->x2C_b0 = 1;
                 link_1->coll_data.cur_pos = link_1->pos;
                 link_1->coll_data.last_pos = link_1->coll_data.cur_pos;
@@ -1571,11 +1594,11 @@ s32 it_802A5E28(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
         link_1 = link_0->prev;
     }
 
-    len = it_802A3C98(&link_0->pos, arg1, &vec);
+    len = it_802A3C98_inline(&link_0->pos, arg1, &vec);
 
     while ((link_1 != NULL) && (arg8 > len)) {
         link_0->x2C_b0 = 0;
-        len = it_802A3C98(&link_1->pos, arg1, &vec);
+        len = it_802A3C98_inline(&link_1->pos, arg1, &vec);
         link_0 = link_1;
         link_1 = link_1->prev;
     }
@@ -1626,11 +1649,11 @@ s32 it_802A5FE0(ItemLink* link_0, ItemLink* link_0_2, Vec3* arg2,
 
     link_0_2->pos = vec2;
 
-    len = it_802A3C98(&link_0->pos, arg2, &vec);
+    len = it_802A3C98_inline(&link_0->pos, arg2, &vec);
 
     while ((link_1 != NULL) && (arg8 > len)) {
         link_0->x2C_b0 = 0;
-        len = it_802A3C98(&link_1->pos, arg2, &vec);
+        len = it_802A3C98_inline(&link_1->pos, arg2, &vec);
         link_0 = link_1;
         link_1 = link_1->prev;
     }
@@ -1645,20 +1668,20 @@ s32 it_802A5FE0(ItemLink* link_0, ItemLink* link_0_2, Vec3* arg2,
     link_1 = link_2->next;
     while ((link_1 != NULL) && link_1->x2C_b0) {
         var_r31 += 1;
-        len = it_802A3C98(&link_1->pos, &link_2->pos, &vec);
+        len = it_802A3C98_inline(&link_1->pos, &link_2->pos, &vec);
         if (len > arg3->x30) {
-            link_1->pos.x = (vec.x * arg3->x30) + link_2->pos.x;
-            link_1->pos.y = (vec.y * arg3->x30) + link_2->pos.y;
-            link_1->pos.z = (vec.z * arg3->x30) + link_2->pos.z;
+            link_1->pos.x = gk_fmadds(vec.x, arg3->x30, link_2->pos.x);
+            link_1->pos.y = gk_fmadds(vec.y, arg3->x30, link_2->pos.y);
+            link_1->pos.z = gk_fmadds(vec.z, arg3->x30, link_2->pos.z);
         }
         link_2 = link_1;
         link_1 = link_1->next;
     }
-    len = it_802A3C98(arg2, &link_2->pos, &vec);
+    len = it_802A3C98_inline(arg2, &link_2->pos, &vec);
     if (len > arg3->x30) {
-        arg2->x = (vec.x * arg3->x30) + link_2->pos.x;
-        arg2->y = (vec.y * arg3->x30) + link_2->pos.y;
-        arg2->z = (vec.z * arg3->x30) + link_2->pos.z;
+        arg2->x = gk_fmadds(vec.x, arg3->x30, link_2->pos.x);
+        arg2->y = gk_fmadds(vec.y, arg3->x30, link_2->pos.y);
+        arg2->z = gk_fmadds(vec.z, arg3->x30, link_2->pos.z);
     }
     if (var_r31 != 0) {
         return 0;
@@ -1745,11 +1768,11 @@ s32 it_802A678C(ItemLink* link_0, Vec3* arg1, itLinkHookshotAttributes* arg2,
         link_1 = link_0->prev;
     }
 
-    len = it_802A3C98(&link_0->pos, arg1, &vec);
+    len = it_802A3C98_inline(&link_0->pos, arg1, &vec);
 
     while (link_1 != NULL && (arg8 > len)) {
         link_0->x2C_b0 = 0;
-        len = it_802A3C98(&link_1->pos, arg1, &vec);
+        len = it_802A3C98_inline(&link_1->pos, arg1, &vec);
         link_0 = link_1;
         link_1 = link_1->prev;
     }
