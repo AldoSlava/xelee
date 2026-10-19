@@ -1297,9 +1297,16 @@ static void pc_pointer(NameNewEntry* data)
         if (!pc_xr_pointer_project(cobj, &w.x, &bx, &by)) {
             continue;
         }
-        /* The confirm bar is wide; the icons about a key. */
-        rx = sel == 0x38 ? dx * 4.5f : dx * 0.6f;
-        ry = sel == 0x38 ? dy * 0.7f : dy * 0.6f;
+        /* The confirm bar runs under the keys from the first column to its
+         * joint, the arrow at its right end; the icons are about a key. */
+        if (sel == 0x38) {
+            if (px > kx[0] - dx * 0.6f && px < bx + dx * 1.5f && fabsf(py - by) < dy * 0.7f) {
+                best = sel;
+            }
+            continue;
+        }
+        rx = dx * 0.6f;
+        ry = dy * 0.6f;
         if (fabsf(px - bx) < rx && fabsf(py - by) < ry) {
             best = sel;
         }
