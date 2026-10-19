@@ -206,7 +206,9 @@ static bool c_raw(float x, float y, uint32_t dir, int snap, s8* rx, s8* ry) {
  * moved the fighter: at hitlag's end ASDI (ftCo_Damage_OnExitHitlag) moves
  * it by the C-stick times x4BC, between the frame's post-frame position
  * before and its pre-frame one; snapped, by exactly x4BC along the axis.
- * The raw that agrees goes to the whole hold: a held stick does not move. */
+ * The stick is the one that frame before held (a5 001d1f12: -0.9875 held
+ * through hitlag, -0.975 the frame after). The raw that agrees goes to the
+ * whole hold: a held stick does not move. */
 /* Popo's C-stick as Nana gets it (ftCo_800B0918, ftCo_GetCpuCStickY): the
  * fighter's stick after UCF, as an s8, then back to a float. */
 static float nana_axis(float c) {
@@ -301,15 +303,16 @@ static void c_snaps_from_asdi(void) {
         for (int32_t i = 1; i < P.count; i++) {
             PlayFrame* fr = &P.frames[i];
             const PlayFrame* pv = &P.frames[i - 1];
-            if (!fr->have[port] || !pv->have_post[port] || !(pv->hitlag[port] > 0.0f && pv->hitlag[port] <= 1.0f)) {
+            if (!fr->have[port] || !pv->have[port] || !pv->have_post[port] ||
+                !(pv->hitlag[port] > 0.0f && pv->hitlag[port] <= 1.0f)) {
                 continue;
             }
-            const float cx = fr->c[port][0], cy = fr->c[port][1];
+            const float cx = pv->c[port][0], cy = pv->c[port][1];
             if (cx * cx + cy * cy < min * min) {
                 continue;
             }
             const int axis = fabsf(cx) >= fabsf(cy) ? 0 : 1;
-            const float c = fr->c[port][axis];
+            const float c = pv->c[port][axis];
             if (fabsf(c) == 1.0f) {
                 continue;
             }
@@ -320,16 +323,16 @@ static void c_snaps_from_asdi(void) {
             }
             const int snap = off_snap < off_plain;
             s8 rx, ry;
-            if (!c_raw(cx, cy, fr->cdir[port], snap, &rx, &ry)) {
+            if (!c_raw(cx, cy, pv->cdir[port], snap, &rx, &ry)) {
                 continue;
             }
-            int32_t a = i, b = i;
+            int32_t a = i - 1, b = i - 1;
             while (a > 0 && P.frames[a - 1].have[port] && P.frames[a - 1].c[port][0] == cx &&
-                   P.frames[a - 1].c[port][1] == cy && P.frames[a - 1].cdir[port] == fr->cdir[port]) {
+                   P.frames[a - 1].c[port][1] == cy && P.frames[a - 1].cdir[port] == pv->cdir[port]) {
                 a--;
             }
             while (b + 1 < P.count && P.frames[b + 1].have[port] && P.frames[b + 1].c[port][0] == cx &&
-                   P.frames[b + 1].c[port][1] == cy && P.frames[b + 1].cdir[port] == fr->cdir[port]) {
+                   P.frames[b + 1].c[port][1] == cy && P.frames[b + 1].cdir[port] == pv->cdir[port]) {
                 b++;
             }
             for (int32_t j = a; j <= b; j++) {
