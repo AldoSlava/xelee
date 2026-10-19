@@ -29,8 +29,9 @@
 /* The stage to offer next pass (-1: none) and the one held (-1: none). */
 static int s_pending = -1;
 static int s_holding = -1;
-/* The how-to cards are showing (they open with every hold; Y toggles). */
-static bool s_cards;
+/* The how-to cards are showing. Y toggles them, and the choice carries to
+ * every later hold until the app restarts. */
+static bool s_cards = true;
 /* Buttons down in the newest pad sample last pass, and the ones that went
  * down during the hold (a release only counts for a press seen here). */
 static uint32_t s_prev;
@@ -259,7 +260,6 @@ bool pc_xr_place_hold(void) {
             }
         }
         s_holding = grkind;
-        s_cards = true;
         s_prev = newest_buttons(); /* held coming in: not a press */
         s_down = 0;
         aurora_xr_set_placing(s_cards ? 2 : 1);
