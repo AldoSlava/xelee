@@ -10,7 +10,7 @@
 
 static inline float lbVector_Len(Vec3* vec)
 {
-    return sqrtf(gk_fmadds(vec->z, vec->z, gk_fmadds(vec->x, vec->x, vec->y * vec->y)));
+    return sqrtf(vec->x * vec->x + vec->y * vec->y + vec->z * vec->z);
 }
 
 static inline float lbVector_Len_xy(Vec3* vec)

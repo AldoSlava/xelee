@@ -1415,7 +1415,7 @@ static int fn_801D8134(HSD_GObj* arg0, HSD_GObj* arg1)
         {
             rand_val = HSD_Randf();
             diff = yakumono_param->unk24 - yakumono_param->unk20;
-            gp->u.kongo3.xCA = (s16) (diff * rand_val + yakumono_param->unk20);
+            gp->u.kongo3.xCA = (s16) (gk_fmadds(diff, rand_val, yakumono_param->unk20));
             gp->u.kongo.u.taru.keep = arg1;
             gp->u.kongo3.xC6 = 1;
             Ground_801C5440(gp, 0, 0x129U);

@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "lbshadow.h"
 
 #include "lbvector.h"
@@ -26,18 +27,14 @@ static void splGetCardinalTangent(Vec3* p, DiscVec3* cp, f32 tension, f32 u)
     f32 u2 = u * u;
     f32 car0, car1, car2, car3;
 
-    car0 = tension * (((-3.0F * u2) + (4.0F * u)) - 1.0F);
-    car1 = (3.0F * (2.0F - tension) * u2) + (2.0F * (tension - 3.0F) * u);
-    car2 = tension + ((3.0F * (tension - 2.0F) * u2) +
-                      (2.0F * -((2.0F * tension) - 3.0F) * u));
-    car3 = tension * ((3.0F * u2) - (2.0F * u));
+    car0 = tension * ((gk_fmadds(-3.0F, u2, (4.0F * u))) - 1.0F);
+    car1 = gk_fmadds(3.0F * (2.0F - tension), u2, (2.0F * (tension - 3.0F) * u));
+    car2 = tension + (gk_fmadds(3.0F * (tension - 2.0F), u2, (2.0F * -(gk_fmsubs(2.0F, tension, 3.0F)) * u)));
+    car3 = tension * (gk_fmsubs(3.0F, u2, (2.0F * u)));
 
-    p->x = (cp[0].x * car0) + (cp[1].x * car1) + (cp[2].x * car2) +
-           (cp[3].x * car3);
-    p->y = (cp[0].y * car0) + (cp[1].y * car1) + (cp[2].y * car2) +
-           (cp[3].y * car3);
-    p->z = (cp[0].z * car0) + (cp[1].z * car1) + (cp[2].z * car2) +
-           (cp[3].z * car3);
+    p->x = gk_fmadds(cp[3].x, car3, gk_fmadds(cp[2].x, car2, gk_fmadds(cp[0].x, car0, (cp[1].x * car1))));
+    p->y = gk_fmadds(cp[3].y, car3, gk_fmadds(cp[2].y, car2, gk_fmadds(cp[0].y, car0, (cp[1].y * car1))));
+    p->z = gk_fmadds(cp[3].z, car3, gk_fmadds(cp[2].z, car2, gk_fmadds(cp[0].z, car0, (cp[1].z * car1))));
 }
 
 static void splGetBSplineTangent(Vec3* p, DiscVec3* cp, f32 u)
@@ -46,13 +43,13 @@ static void splGetBSplineTangent(Vec3* p, DiscVec3* cp, f32 u)
     f32 u_1 = 1.0F - u;
     f32 half = 0.5F;
     f32 b0 = u_1 * (-half * u_1);
-    f32 b1 = half * ((3.0F * u2) - (4.0F * u));
-    f32 b2 = half * (1.0F + ((-3.0F * u2) + (2.0F * u)));
+    f32 b1 = half * (gk_fmsubs(3.0F, u2, (4.0F * u)));
+    f32 b2 = half * (1.0F + (gk_fmadds(-3.0F, u2, (2.0F * u))));
     f32 b3 = half * u2;
 
-    p->x = (cp[0].x * b0) + (cp[1].x * b1) + (cp[2].x * b2) + (cp[3].x * b3);
-    p->y = (cp[0].y * b0) + (cp[1].y * b1) + (cp[2].y * b2) + (cp[3].y * b3);
-    p->z = (cp[0].z * b0) + (cp[1].z * b1) + (cp[2].z * b2) + (cp[3].z * b3);
+    p->x = gk_fmadds(cp[3].x, b3, gk_fmadds(cp[2].x, b2, gk_fmadds(cp[0].x, b0, (cp[1].x * b1))));
+    p->y = gk_fmadds(cp[3].y, b3, gk_fmadds(cp[2].y, b2, gk_fmadds(cp[0].y, b0, (cp[1].y * b1))));
+    p->z = gk_fmadds(cp[3].z, b3, gk_fmadds(cp[2].z, b2, gk_fmadds(cp[0].z, b0, (cp[1].z * b1))));
 }
 
 static void splGetBezierTangent(Vec3* p, DiscVec3* cp, f32 u)
@@ -60,16 +57,13 @@ static void splGetBezierTangent(Vec3* p, DiscVec3* cp, f32 u)
     f32 u_1 = u - 1.0F;
     f32 u2 = u * u;
     f32 bez0 = -3.0F * u_1 * u_1;
-    f32 bez1 = 3.0F * ((1.0F - (4.0F * u)) + (3.0F * u2));
-    f32 bez2 = 3.0F * ((2.0F * u) - (3.0F * u2));
+    f32 bez1 = 3.0F * ((gk_fnmsubs(4.0F, u, 1.0F)) + (3.0F * u2));
+    f32 bez2 = 3.0F * (gk_fmsubs(2.0F, u, (3.0F * u2)));
     f32 bez3 = 3.0F * u2;
 
-    p->x = (cp[0].x * bez0) + (cp[1].x * bez1) + (cp[2].x * bez2) +
-           (cp[3].x * bez3);
-    p->y = (cp[0].y * bez0) + (cp[1].y * bez1) + (cp[2].y * bez2) +
-           (cp[3].y * bez3);
-    p->z = (cp[0].z * bez0) + (cp[1].z * bez1) + (cp[2].z * bez2) +
-           (cp[3].z * bez3);
+    p->x = gk_fmadds(cp[3].x, bez3, gk_fmadds(cp[2].x, bez2, gk_fmadds(cp[0].x, bez0, (cp[1].x * bez1))));
+    p->y = gk_fmadds(cp[3].y, bez3, gk_fmadds(cp[2].y, bez2, gk_fmadds(cp[0].y, bez0, (cp[1].y * bez1))));
+    p->z = gk_fmadds(cp[3].z, bez3, gk_fmadds(cp[2].z, bez2, gk_fmadds(cp[0].z, bez0, (cp[1].z * bez1))));
 }
 
 void lbShadow_8000E9F0(Vec3* p, HSD_Spline* spline, f32 u)
@@ -428,11 +422,11 @@ void lbShadow_8000F38C(s32 arg0)
                 lbVector_Diff(&lightDir, &lightPos, &normDir);
                 if (lbVector_Normalize(&normDir) < lbShadow_804D7B90) {
                     lightPos.x =
-                        -((lbShadow_804D7B90 * normDir.x) - lightDir.x);
+                        -(gk_fmsubs(lbShadow_804D7B90, normDir.x, lightDir.x));
                     lightPos.y =
-                        -((lbShadow_804D7B90 * normDir.y) - lightDir.y);
+                        -(gk_fmsubs(lbShadow_804D7B90, normDir.y, lightDir.y));
                     lightPos.z =
-                        -((lbShadow_804D7B90 * normDir.z) - lightDir.z);
+                        -(gk_fmsubs(lbShadow_804D7B90, normDir.z, lightDir.z));
                 }
                 lbVector_CrossprodNormalized(&upVec, &normDir, &rightVec);
                 lbVector_CrossprodNormalized(&normDir, &rightVec, &upVec);

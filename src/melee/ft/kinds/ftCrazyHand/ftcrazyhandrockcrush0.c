@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftcrazyhandrockcrush0.h"
 
 #include <Runtime/platform.h>
@@ -26,9 +27,9 @@ static inline float my_sqrtf(float x)
 
     if (x > 0) {
         double guess = __frsqrte((double) x);
-        guess = .5 * guess * (3.0 - guess * guess * x);
-        guess = .5 * guess * (3.0 - guess * guess * x);
-        guess = .5 * guess * (3.0 - guess * guess * x);
+        guess = .5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = .5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = .5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
         y = (float) (x * guess);
         return y;
     }

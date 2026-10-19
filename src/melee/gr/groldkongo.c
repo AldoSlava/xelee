@@ -549,7 +549,7 @@ bool grOldKongo_80210454(Ground_GObj* ground_gobj, Fighter_GObj* keep)
     diff = yakumono_param->rframe_barrel_shoot_b -
            yakumono_param->rframe_barrel_shoot_a;
     gp->u.taru.xCA =
-        (s16) (diff * rand_val + yakumono_param->rframe_barrel_shoot_a);
+        (s16) (gk_fmadds(diff, rand_val, yakumono_param->rframe_barrel_shoot_a));
     gp->u.taru.keep = keep;
     gp->u.taru.xC6 = 1;
     Ground_801C5440(gp, 0, 0x129U);

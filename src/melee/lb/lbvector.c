@@ -89,7 +89,7 @@ float lbVector_Angle(Vec3* a, Vec3* b)
     float lena_lenb = lbVector_Len(a) * lbVector_Len(b);
 
     if (lena_lenb > 0.0000000001f) {
-        float cosine = (a->x * b->x + a->y * b->y + a->z * b->z) / lena_lenb;
+        float cosine = (gk_fmadds(a->z, b->z, gk_fmadds(a->x, b->x, a->y * b->y))) / lena_lenb;
         if (cosine > 1.0f) {
             cosine = 1.0f;
         }
@@ -175,8 +175,8 @@ void lbVector_RotateAboutUnitAxis(Vec3* v, Vec3* axis, float angle)
         unit_axis_yz_z = axis->y / len_axis_yz;
 
         x = v->x;
-        y = v->y * unit_axis_yz_y - v->z * unit_axis_yz_z;
-        z = v->y * unit_axis_yz_z + v->z * unit_axis_yz_y;
+        y = gk_fmsubs(v->y, unit_axis_yz_y, v->z * unit_axis_yz_z);
+        z = gk_fmadds(v->y, unit_axis_yz_z, v->z * unit_axis_yz_y);
     } else {
         x = v->x;
         y = v->y;
@@ -185,26 +185,26 @@ void lbVector_RotateAboutUnitAxis(Vec3* v, Vec3* axis, float angle)
 
     // rotation (2) about the y-axis: rotate everything such that the rotation
     // axis aligns with the z-axis new v is then (x2,y2,z2)
-    x2 = x * len_axis_yz - z * axis->x;
+    x2 = gk_fmsubs(x, len_axis_yz, z * axis->x);
     // y2 = y
-    z2 = x * axis->x + z * len_axis_yz;
+    z2 = gk_fmadds(x, axis->x, z * len_axis_yz);
 
     // rotate by 'angle' about the z axis, which now aligns with the rotation
     // axis
-    x3 = x2 * c - y * s; // remember that y2=y
-    y3 = x2 * s + y * c;
+    x3 = gk_fmsubs(x2, c, y * s); // remember that y2=y
+    y3 = gk_fmadds(x2, s, y * c);
     // z3 = z2
 
     // opposite of rotation (2). We overwrite (x,y,z) with the resulting new v.
-    x = x3 * len_axis_yz + z2 * axis->x; // remember that z3=z2
+    x = gk_fmadds(x3, len_axis_yz, z2 * axis->x); // remember that z3=z2
     y = y3;
-    z = -x3 * axis->x + z2 * len_axis_yz;
+    z = gk_fmadds(-x3, axis->x, z2 * len_axis_yz);
 
     // opposite of rotation (1)
     if (len_axis_yz > 0.0000000001f) {
         v->x = x;
-        v->y = y * unit_axis_yz_y + z * unit_axis_yz_z;
-        v->z = -y * unit_axis_yz_z + z * unit_axis_yz_y;
+        v->y = gk_fmadds(y, unit_axis_yz_y, z * unit_axis_yz_z);
+        v->z = gk_fmadds(-y, unit_axis_yz_z, z * unit_axis_yz_y);
     } else {
         v->x = x;
         v->y = y;
@@ -264,7 +264,7 @@ void lbVector_Mirror(Vec3* a, Vec3* unit_mirror_axis)
 /// a and b.
 float lbVector_CosAngle(Vec3* a, Vec3* b)
 {
-    return (a->x * b->x + a->y * b->y) / (sqrtf(a->x * a->x + a->y * a->y) *
+    return (gk_fmadds(a->x, b->x, a->y * b->y)) / (sqrtf(a->x * a->x + a->y * a->y) *
                                           sqrtf(b->x * b->x + b->y * b->y));
 }
 
@@ -497,6 +497,13 @@ void lbVector_CreateEulerMatrix(Mtx m, Quaternion* angles)
 /// direction u with the plane that contains c and is perpendicular to u. Write
 /// the result to d. If u is numerically too small, set d=a instead. Return the
 /// length of c-d.
+/* lbVector_Len of a vector in registers, which the DOL fuses
+ * (0x8000E838); one read from memory it does not (lbVector_Normalize). */
+static inline float lbVector_Len_fused(Vec3* vec)
+{
+    return sqrtf(gk_fmadds(vec->z, vec->z, gk_fmadds(vec->x, vec->x, vec->y * vec->y)));
+}
+
 float lbVector_8000E838(Vec3* a, Vec3* b, Vec3* c, Vec3* d)
 {
     Vec3 b_a;
@@ -516,7 +523,7 @@ float lbVector_8000E838(Vec3* a, Vec3* b, Vec3* c, Vec3* d)
     }
     if (tooSmall) {
         *d = *a;
-        return lbVector_Len(&c_a);
+        return lbVector_Len_fused(&c_a);
     } else {
         Vec3 v3;
         float f1 =
@@ -526,6 +533,6 @@ float lbVector_8000E838(Vec3* a, Vec3* b, Vec3* c, Vec3* d)
         d->y = gk_fmadds(b_a.y, f1, a->y);
         d->z = gk_fmadds(b_a.z, f1, a->z);
         lbVector_Diff(c, d, &v3);
-        return lbVector_Len(&v3);
+        return lbVector_Len_fused(&v3);
     }
 }

@@ -1,6 +1,7 @@
 /// @file
 /// @brief Creates trailing "afterimages" for swords in motion
 
+#include <pc/gekko_fp.h>
 #include "ftafterimage.h"
 
 #include <placeholder.h>
@@ -152,9 +153,9 @@ void ftCo_800C2600(Fighter_GObj* gobj, u32 arg1)
             for (i = fp->x2100 - 1; i >= 0; i--) {
                 struct Fighter_x20B0_t* entry = &fp->x20B0[curIdx];
 
-                delta.x = entry->xC.x * x20FC + entry->x0.x - prevPos.x;
-                delta.y = entry->xC.y * x20FC + entry->x0.y - prevPos.y;
-                delta.z = entry->xC.z * x20FC + entry->x0.z - prevPos.z;
+                delta.x = gk_fmadds(entry->xC.x, x20FC, entry->x0.x) - prevPos.x;
+                delta.y = gk_fmadds(entry->xC.y, x20FC, entry->x0.y) - prevPos.y;
+                delta.z = gk_fmadds(entry->xC.z, x20FC, entry->x0.z) - prevPos.z;
 
                 if (i != fp->x2100 - 1) {
                     d2 = delta.z * delta.z +
@@ -192,9 +193,9 @@ void ftCo_800C2600(Fighter_GObj* gobj, u32 arg1)
 
             scaleDiff = x20FC - x20F8;
             idx2 = fp->x2101_bits_0to6;
-            blendedInner = params->x0 * scaleDiff + x20F8;
+            blendedInner = gk_fmadds(params->x0, scaleDiff, x20F8);
             vp = vtx_buf;
-            blendedOuter = params->x4 * scaleDiff + x20F8;
+            blendedOuter = gk_fmadds(params->x4, scaleDiff, x20F8);
             numVerts = 0;
 
             if (idx2 != 0) {
@@ -216,25 +217,24 @@ void ftCo_800C2600(Fighter_GObj* gobj, u32 arg1)
                 s32 numSubdiv;
 
                 curEntry = &fp->x20B0[curIdx2];
-                outerScale = interpFactor * outerDiff + blendedOuter;
-                innerScale = interpFactor * innerDiff + blendedInner;
+                outerScale = gk_fmadds(interpFactor, outerDiff, blendedOuter);
+                innerScale = gk_fmadds(interpFactor, innerDiff, blendedInner);
                 numVerts += 2;
                 distIdx++;
 
-                alpha = (s32) (interpFactor * (f32) (params->x8 - params->x9) +
-                               (f32) params->x9);
+                alpha = (s32) (gk_fmadds(interpFactor, (f32) (params->x8 - params->x9), (f32) params->x9));
 
-                vp->x = curEntry->xC.x * innerScale + curEntry->x0.x;
-                vp->y = curEntry->xC.y * innerScale + curEntry->x0.y;
-                vp->z = curEntry->xC.z * innerScale + curEntry->x0.z;
+                vp->x = gk_fmadds(curEntry->xC.x, innerScale, curEntry->x0.x);
+                vp->y = gk_fmadds(curEntry->xC.y, innerScale, curEntry->x0.y);
+                vp->z = gk_fmadds(curEntry->xC.z, innerScale, curEntry->x0.z);
                 vp->r = params->xA;
                 vp->g = params->xB;
                 vp->b = params->xC;
                 vp->a = alpha;
 
-                vp[1].x = curEntry->xC.x * outerScale + curEntry->x0.x;
-                vp[1].y = curEntry->xC.y * outerScale + curEntry->x0.y;
-                vp[1].z = curEntry->xC.z * outerScale + curEntry->x0.z;
+                vp[1].x = gk_fmadds(curEntry->xC.x, outerScale, curEntry->x0.x);
+                vp[1].y = gk_fmadds(curEntry->xC.y, outerScale, curEntry->x0.y);
+                vp[1].z = gk_fmadds(curEntry->xC.z, outerScale, curEntry->x0.z);
                 vp[1].r = params->xE;
                 vp[1].g = params->xF;
                 vp[1].b = params->x10;
@@ -277,7 +277,7 @@ void ftCo_800C2600(Fighter_GObj* gobj, u32 arg1)
                             tempDir = curEntry->xC;
                             interpInner2 =
                                 frac *
-                                ((interpFactor * innerDiff + blendedInner) -
+                                ((gk_fmadds(interpFactor, innerDiff, blendedInner)) -
                                  innerScale);
                             basePosX = curEntry->x0.x;
                             basePosY = curEntry->x0.y;
@@ -289,14 +289,12 @@ void ftCo_800C2600(Fighter_GObj* gobj, u32 arg1)
 
                             alphaStep =
                                 (s32) (frac *
-                                       ((interpFactor *
-                                             (f32) (params->x8 - params->x9) +
-                                         (f32) params->x9) -
+                                       ((gk_fmadds(interpFactor, (f32) (params->x8 - params->x9), (f32) params->x9)) -
                                         (f32) alpha));
 
                             interpOuter2 =
                                 frac *
-                                ((interpFactor * outerDiff + blendedOuter) -
+                                ((gk_fmadds(interpFactor, outerDiff, blendedOuter)) -
                                  outerScale);
 
                             for (j = 0; j < numSubdiv; j++) {
@@ -313,16 +311,16 @@ void ftCo_800C2600(Fighter_GObj* gobj, u32 arg1)
                                     &tempDir, &crossProd, cumAngle);
 
                                 numVerts += 2;
-                                vp->x = tempDir.x * innerScale + basePosX;
-                                vp->y = tempDir.y * innerScale + basePosY;
-                                vp->z = tempDir.z * innerScale + basePosZ;
+                                vp->x = gk_fmadds(tempDir.x, innerScale, basePosX);
+                                vp->y = gk_fmadds(tempDir.y, innerScale, basePosY);
+                                vp->z = gk_fmadds(tempDir.z, innerScale, basePosZ);
                                 vp->r = params->xA;
                                 vp->g = params->xB;
                                 vp->b = params->xC;
                                 vp->a = alpha;
-                                vp[1].x = tempDir.x * outerScale + basePosX;
-                                vp[1].y = tempDir.y * outerScale + basePosY;
-                                vp[1].z = tempDir.z * outerScale + basePosZ;
+                                vp[1].x = gk_fmadds(tempDir.x, outerScale, basePosX);
+                                vp[1].y = gk_fmadds(tempDir.y, outerScale, basePosY);
+                                vp[1].z = gk_fmadds(tempDir.z, outerScale, basePosZ);
                                 vp[1].r = params->xE;
                                 vp[1].g = params->xF;
                                 vp[1].b = params->x10;

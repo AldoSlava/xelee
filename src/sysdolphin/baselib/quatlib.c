@@ -155,7 +155,7 @@ s32 HSD_QuatLib_8037EF28(Quaternion* p, Quaternion* q, Quaternion* out, f32 t)
     f32 sp;
     f32 sq;
 
-    cosom = p->x * q->x + p->y * q->y + p->z * q->z + p->w * q->w;
+    cosom = gk_fmadds(p->w, q->w, gk_fmadds(p->z, q->z, gk_fmadds(p->x, q->x, p->y * q->y)));
 
     if ((1.0F + cosom) > 1e-10F) {
         if ((1.0F - cosom) > 1e-10F) {
@@ -167,10 +167,10 @@ s32 HSD_QuatLib_8037EF28(Quaternion* p, Quaternion* q, Quaternion* out, f32 t)
             sq = t;
             sp = (f32) (1.0 - (f64) t);
         }
-        out->x = sp * p->x + sq * q->x;
-        out->y = sp * p->y + sq * q->y;
-        out->z = sp * p->z + sq * q->z;
-        out->w = sp * p->w + sq * q->w;
+        out->x = gk_fmadds(sp, p->x, sq * q->x);
+        out->y = gk_fmadds(sp, p->y, sq * q->y);
+        out->z = gk_fmadds(sp, p->z, sq * q->z);
+        out->w = gk_fmadds(sp, p->w, sq * q->w);
     } else {
         out->x = -p->y;
         out->y = p->x;
@@ -180,19 +180,19 @@ s32 HSD_QuatLib_8037EF28(Quaternion* p, Quaternion* q, Quaternion* out, f32 t)
         if (t < 0.5F) {
             sp = sinf((f32) (M_PI_2 * (1.0F - (2.0F * t))));
             sq = sinf((f32) (M_PI_2 * (2.0F * t)));
-            out->x = sp * p->x + sq * q->x;
-            out->y = sp * p->y + sq * q->y;
-            out->z = sp * p->z + sq * q->z;
-            out->w = sp * p->w + sq * q->w;
+            out->x = gk_fmadds(sp, p->x, sq * q->x);
+            out->y = gk_fmadds(sp, p->y, sq * q->y);
+            out->z = gk_fmadds(sp, p->z, sq * q->z);
+            out->w = gk_fmadds(sp, p->w, sq * q->w);
         } else {
             t -= 0.5F;
             t2 = 2.0F * t;
             sp = sinf((f32) (M_PI_2 * (1.0F - t2)));
             sq = sinf((f32) (M_PI_2 * t2));
-            out->x = sp * p->x + sq * q->x;
-            out->y = sp * p->y + sq * q->y;
-            out->z = sp * p->z + sq * q->z;
-            out->w = sp * p->w + sq * q->w;
+            out->x = gk_fmadds(sp, p->x, sq * q->x);
+            out->y = gk_fmadds(sp, p->y, sq * q->y);
+            out->z = gk_fmadds(sp, p->z, sq * q->z);
+            out->w = gk_fmadds(sp, p->w, sq * q->w);
         }
     }
 

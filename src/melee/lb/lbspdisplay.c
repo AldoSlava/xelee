@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "lbspdisplay.h"
 
 #include <Runtime/platform.h>
@@ -283,7 +284,7 @@ void lb_800122F0(HSD_ImageDesc* img, GXTexObj* tex, f32 factor)
 {
     GXColor color0, color1, color2;
 
-    color0.r = (u8) (s8) (255.0f - (179.0f * factor));
+    color0.r = (u8) (s8) (gk_fnmsubs(179.0f, factor, 255.0f));
     color0.g = (u8) (s8) (68.4f * factor);
     color0.b = (u8) (s8) (60.8f * factor);
 
@@ -293,7 +294,7 @@ void lb_800122F0(HSD_ImageDesc* img, GXTexObj* tex, f32 factor)
 
     color2.r = (u8) (s8) (29.0f * factor);
     color2.g = (u8) (s8) (26.099998f * factor);
-    color2.b = (u8) (s8) (255.0f - (231.8f * factor));
+    color2.b = (u8) (s8) (gk_fnmsubs(231.8f, factor, 255.0f));
 
     GXInitTexObj(tex, DP(void, img->image_ptr), img->width, img->height,
                  img->format, GX_CLAMP, GX_CLAMP, (u8) img->mipmap);

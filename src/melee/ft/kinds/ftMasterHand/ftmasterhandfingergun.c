@@ -1,3 +1,4 @@
+#include <pc/gekko_fp.h>
 #include "ftmasterhandfingergun.h"
 
 #include <Runtime/platform.h>
@@ -106,9 +107,9 @@ static inline float my_sqrtf(float x)
     volatile float y;
     if (x > 0) {
         double guess = __frsqrte((double) x);
-        guess = _half * guess * (_three - guess * guess * x);
-        guess = _half * guess * (_three - guess * guess * x);
-        guess = _half * guess * (_three - guess * guess * x);
+        guess = _half * guess * (gk_fnmsub(guess * guess, x, _three));
+        guess = _half * guess * (gk_fnmsub(guess * guess, x, _three));
+        guess = _half * guess * (gk_fnmsub(guess * guess, x, _three));
         y = (float) (x * guess);
         return y;
     }

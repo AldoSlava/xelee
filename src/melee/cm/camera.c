@@ -1774,8 +1774,7 @@ void Camera_8002BAA8(f32 zoom_amt)
     }
 
     game_camera.pause_eye_distance =
-        ((zoom_amt * ((offset_len * cm_803BCCA0.x9C) + cm_803BCCA0.xA0)) +
-         game_camera.pause_eye_distance);
+        (gk_fmadds(zoom_amt, (gk_fmadds(offset_len, cm_803BCCA0.x9C, cm_803BCCA0.xA0)), game_camera.pause_eye_distance));
 
     if (pc_is_free_camera_enabled()) {
         if (game_camera.pause_eye_distance < 0.5f) {

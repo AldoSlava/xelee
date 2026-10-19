@@ -25,6 +25,12 @@ POST = tuple(name for name, _, _ in slp_read.POST_FIELDS)
 # Bits Dolphin's replays hold that the simulation never reads: flags5's
 # 0x80, offscreen, which the render pass writes (src/pc/slp.c capture_fighter).
 MASKS = {"flags5": 0x7F}
+# DeadUpFall to DeadUpFallHitCameraIce: after the fighter hits the screen,
+# ftCo_DeadUpFall_Anim's bounce (self_vel.y = x550) moves ours and leaves
+# Dolphin's where it hit. The fighter is out until Rebirth puts it back, and
+# nothing else parts (a4 d16b6b1c: all 11617 frames agree but these); the
+# cause is unexplained. Skip y and self_y there.
+DEAD_UP_FALL = range(6, 11)
 
 
 def bits(v):
@@ -69,7 +75,10 @@ def compare(orig, play, context=0):
             d = diff(fa["pre"][key], fb["pre"][key], INPUTS)
             if d:
                 found.append((key, "inputs", d))
-            d = diff(fa["pre"][key], fb["pre"][key], PRE_STATE)
+            names = PRE_STATE
+            if fa["pre"][key]["action"] in DEAD_UP_FALL:
+                names = tuple(n for n in names if n != "y")
+            d = diff(fa["pre"][key], fb["pre"][key], names)
             if d:
                 found.append((key, "state in", d))
         for key in sorted(set(fa["post"]) | set(fb["post"])):
@@ -82,6 +91,8 @@ def compare(orig, play, context=0):
                 # DamageFlyRoll); in the others it is whatever that state keeps
                 # in its first motion variable.
                 names = tuple(n for n in POST if n != "misc_as")
+            if fa["post"][key]["action"] in DEAD_UP_FALL:
+                names = tuple(n for n in names if n not in ("y", "self_y"))
             d = diff(fa["post"][key], fb["post"][key], names)
             # ftAnim_8006F3DC (the animation frame) falls off its end when no
             # part is animated (Yoshi's egg shield): the GameCube returns

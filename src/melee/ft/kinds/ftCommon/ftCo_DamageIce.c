@@ -449,8 +449,7 @@ void ftCo_DamageIce_Collide(Fighter_GObj* gobj, Vec3* normal, Vec3* vec)
         if ((coll_data->env_flags & Collide_RightWallHug) != 0 ||
             (coll_data->env_flags & Collide_RightWallHug) != 0)
         {
-            fp->cur_pos.x = -((fp->x68C_transNPos.z * -fp->facing_dir) -
-                              (fp->cur_pos.x + vec->x));
+            fp->cur_pos.x = -(gk_fmsubs(fp->x68C_transNPos.z, -fp->facing_dir, (fp->cur_pos.x + vec->x)));
         } else {
             fp->cur_pos.y = fp->cur_pos.y + vec->y + fp->x68C_transNPos.y;
         }

@@ -19,15 +19,22 @@ build/linux/compile_commands.json. Without --apply it only reports.
 
 The rewrite follows what the DOL shows mwcc doing:
   a*b + c, c + a*b    fmadds(a, b, c)
-  a*b + c*d           fmadds(a, b, c*d)    the first product fused, when a and b
-                                           are plain variables (not members, elements)
+  a*b + c*d           fmadds(a, b, c*d)    the first product fused -- but not
+                                           x*x + y*y of values read from memory
+                                           (members, elements, a local struct whose
+                                           address is taken), nor a third square
+                                           added on to them
   a*b - c             fmsubs(a, b, c)      (a*b - c*d likewise)
   c - a*b             fnmsubs(a, b, c)
   -(a*b) + c          fnmsubs(a, b, c)     (c + -(a*b) likewise)
   -(a*b + c)          fnmadds(a, b, c)
   x += a*b            x = fmadds(a, b, x)
   x -= a*b            x = fnmsubs(a, b, x)
-in float (the s forms) or double, never across a change of precision.
+in float (the s forms) or double, never across a change of precision. A
+product written twice with nothing it reads changed in between (2.0F * t)
+mwcc computes once and does not fuse.
+
+FUSE_SHOW=<function> lists that function's sites (and its inlined helpers').
 """
 import argparse
 import collections
@@ -192,6 +199,61 @@ def _locals_only(m):
     return True
 
 
+def _local_member(k, src):
+    """s.x of a local struct (not through a pointer): mwcc keeps those in
+    registers (d1 in lbColl_80005C44, 0x80005DDC)."""
+    if k.kind != ci.CursorKind.MEMBER_REF_EXPR or "->" in src[k.extent.start.offset:k.extent.end.offset]:
+        return False
+    base = [strip(c) for c in k.get_children()]
+    if not (len(base) == 1 and base[0].kind == ci.CursorKind.DECL_REF_EXPR and
+            base[0].referenced is not None and base[0].referenced.kind == ci.CursorKind.VAR_DECL and
+            base[0].referenced.semantic_parent.kind == ci.CursorKind.FUNCTION_DECL):
+        return False
+    # used whole anywhere (&s, s = *p, passed by value): it lives on the stack
+    var = base[0].referenced
+    fn = var.semantic_parent
+    key = (fn.hash, var.hash)
+    if key not in _whole_use:
+        whole = False
+
+        def walk(n, parent):
+            nonlocal whole
+            if n.kind == ci.CursorKind.DECL_REF_EXPR and n.referenced is not None and \
+                    n.referenced.hash == var.hash and (parent is None or parent.kind != ci.CursorKind.MEMBER_REF_EXPR):
+                whole = True
+            if n.kind == ci.CursorKind.VAR_DECL and n.hash == var.hash and \
+                    any(c.kind != ci.CursorKind.TYPE_REF for c in n.get_children()):
+                whole = True  # initialised whole
+            for ch in n.get_children():
+                walk(ch, n if n.kind != ci.CursorKind.UNEXPOSED_EXPR else parent)
+        walk(fn, None)
+        _whole_use[key] = whole
+    return not _whole_use[key]
+
+
+_whole_use = {}
+
+
+def _mem_square(m, src):
+    """x*x of a value read from memory (a member, element or call)."""
+    if _locals_only(m):
+        return False
+    if all(_local_member(strip(k), src) for k in strip(m).get_children()):
+        return False
+    a, c = [strip(k) for k in strip(m).get_children()]
+    text = lambda k: re.sub(r"\s", "", src[k.extent.start.offset:k.extent.end.offset])
+    return text(a) == text(c)
+
+
+def _sum_of_products(n, src, prec):
+    """a*b + c*d (the left of a longer sum of products)."""
+    n = strip(n)
+    if n.kind != ci.CursorKind.BINARY_OPERATOR or op_of(n, src) not in ("+", "-"):
+        return False
+    l, r = list(n.get_children())
+    return is_mul(l, src, prec) and is_mul(r, src, prec)
+
+
 def _overlap(a, b):
     return a.extent.end.offset > b.extent.start.offset
 
@@ -233,8 +295,64 @@ def neg_mul(n, src, prec):
     return kids[0] if is_mul(kids[0], src, prec) else None
 
 
+def _shared_products(fn, src):
+    """Offsets of the products mwcc computes once for two uses: the same
+    text twice, none of its variables assigned in between (2.0F * t in
+    HSD_QuatLib_8037EF28, 0x8037F080)."""
+    norm = lambda n: re.sub(r"\s", "", src[n.extent.start.offset:n.extent.end.offset])
+    prods = collections.defaultdict(list)  # text -> [(offset, names, reads memory)]
+    writes = []  # (offset, name)
+    calls = []  # offsets: a call may change what memory holds
+
+    def reads_memory(n):
+        for k in n.walk_preorder():
+            if k.kind in (ci.CursorKind.MEMBER_REF_EXPR, ci.CursorKind.ARRAY_SUBSCRIPT_EXPR) or \
+                    (k.kind == ci.CursorKind.UNARY_OPERATOR and unop_of(k, src) == "*"):
+                return True
+            if k.kind == ci.CursorKind.DECL_REF_EXPR and k.referenced is not None and \
+                    k.referenced.kind == ci.CursorKind.VAR_DECL and \
+                    k.referenced.semantic_parent.kind != ci.CursorKind.FUNCTION_DECL:
+                return True  # a global
+        return False
+
+    def names(n):
+        out = set()
+
+        def w(k):
+            if k.kind == ci.CursorKind.DECL_REF_EXPR:
+                out.add(k.spelling)
+            for ch in k.get_children():
+                w(ch)
+        w(n)
+        return out
+
+    def walk(n):
+        if n.kind == ci.CursorKind.BINARY_OPERATOR and op_of(n, src) == "*" and fp(n):
+            prods[norm(n)].append((n.extent.start.offset, names(n), reads_memory(n)))
+        elif n.kind == ci.CursorKind.CALL_EXPR:
+            calls.append(n.extent.start.offset)
+        elif (n.kind == ci.CursorKind.BINARY_OPERATOR and op_of(n, src) == "=") or \
+                n.kind == ci.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
+            for nm in names(list(n.get_children())[0]):
+                writes.append((n.extent.start.offset, nm))
+        elif n.kind == ci.CursorKind.UNARY_OPERATOR and unop_of(n, src) in ("++", "--"):
+            for nm in names(n):
+                writes.append((n.extent.start.offset, nm))
+        for ch in n.get_children():
+            walk(ch)
+    walk(fn)
+    shared = set()
+    for occ in prods.values():
+        for (a, na, mem), (b, _, _) in zip(occ, occ[1:]):
+            if not any(a < o < b and nm in na for o, nm in writes) and \
+                    not (mem and any(a < o < b for o in calls)):
+                shared.update((a, b))
+    return shared
+
+
 def find_sites(fn, src, path):
     sites = []
+    shared = _shared_products(fn, src)
 
     def in_file(n):
         return n.extent.start.file is not None and n.extent.start.file.name == path
@@ -246,6 +364,10 @@ def find_sites(fn, src, path):
         k = n.kind
 
         def add(node, kind, mul, b, assign=None):
+            if strip(mul).extent.start.offset in shared:
+                # computed once for its uses (2.0F * t, 0x8037F080): the DOL
+                # adds or subtracts the product it kept
+                return
             ops = mul_operands(mul, src)
             # the sum's own operands overlap where a macro wrote it
             hidden = ops is None or (len(list(node.get_children())) == 2 and
@@ -263,15 +385,23 @@ def find_sites(fn, src, path):
             # -(a*b + c): the negation is fused too
             neg = parent is not None and parent.kind == ci.CursorKind.UNARY_OPERATOR and \
                 unop_of(parent, src) == "-"
-            if is_mul(l, src, prec) and is_mul(r, src, prec) and not _locals_only(l):
-                # a*b + c*d: the DOL fuses the first product where its operands
-                # are values in registers (x*x + y*y of two locals, 0x800B0FB8)
-                # and not where they come from memory (the C-stick's squared
-                # length, 0x800DF614; the camera's orbit, 0x8002F1CC)
+            if is_mul(l, src, prec) and is_mul(r, src, prec) and _mem_square(l, src):
+                # x*x + y*y: the DOL fuses the first square where x is a value
+                # in a register (two locals, 0x800B0FB8) and not where it comes
+                # from memory (the C-stick's squared length, 0x800DF614; the
+                # camera's orbit, 0x8002F1CC). A dot product of members it does
+                # fuse (lbVector_Angle, 0x8000D748).
+                pass
+            elif is_mul(l, src, prec) and _mem_square(l, src) and _sum_of_products(r, src, prec):
+                # z*z + (x*x + y*y) from memory, the same (lb_8001044C, 0x80010B60)
                 pass
             elif is_mul(l, src, prec):
                 kind = ("nmadd" if neg else "madd") if op == "+" else "msub"
                 add(parent if neg and op == "+" else n, kind, l, r)
+            elif is_mul(r, src, prec) and _mem_square(r, src) and _sum_of_products(l, src, prec):
+                # (x*x + y*y) + z*z read from memory: the DOL adds the last
+                # product on too (fadds), as it does the first two
+                pass
             elif is_mul(r, src, prec):
                 add(n, "madd" if op == "+" else "nmsub", r, l)
             elif op == "+" and neg_mul(l, src, prec):
@@ -347,6 +477,11 @@ def main():
     totals = collections.Counter()
     texts = {}
     pending = collections.defaultdict(dict)  # file -> {(start, end): text}
+    # An inline helper's sites are written only if every function that
+    # inlines it matched: mwcc fuses per call site, so a helper rewritten for
+    # one caller computes the others' wrong.
+    helper_edits = collections.defaultdict(list)  # helper usr -> [(file, span, text)]
+    veto = set()
 
     def text(f):
         if f not in texts:
@@ -424,13 +559,29 @@ def main():
                 print(f"  {fn.spelling}: DOL {want['single']}+{want['double']}d, C {have['single']}+{have['double']}d"
                       f"{' (with ' + str(len(set(used)) - 1) + ' inlined)' if len(set(used)) > 1 else ''}"
                       f" {'ok' if ok else 'IN A MACRO' if counts and hidden else 'MISMATCH'}")
-            if ok:
+            if os.environ.get("FUSE_SHOW") == fn.spelling:
+                for u in used:
+                    for st in own_sites(u):
+                        print(f"    {defs[u].spelling}:{st.node.extent.start.line} {st.kind} {st.prec}")
+            if not ok:
+                veto.update(u for u in used if u != usr)
+            else:
                 for u in set(used):
                     f = own[u][0]
                     for span, txt in site_edits(own_sites(u), text(f)):
-                        if span not in pending[f]:
+                        if u != usr:
+                            helper_edits[u].append((f, span, txt))
+                        elif span not in pending[f]:
                             pending[f][span] = txt
                             totals["sites"] += 1
+    for u, edits in helper_edits.items():
+        if u in veto:
+            totals["helper sites held back"] += len(edits)
+            continue
+        for f, span, txt in edits:
+            if span not in pending[f]:
+                pending[f][span] = txt
+                totals["sites"] += 1
     if args.apply:
         for f, edits in pending.items():
             if not edits:

@@ -324,8 +324,8 @@ bool lbColl_80005C44(const Vec3* arg0, const Vec3* arg1, const Vec3* arg2,
     d2_z = sp38.z - sp2C.z;
 
     {
-        float d1_dot_d1 = d1.x * d1.x + d1.y * d1.y + d1.z * d1.z;
-        float d1_dot_d2 = d1.x * d2_x + d1.y * d2_y + d1.z * d2_z;
+        float d1_dot_d1 = gk_fmadds(d1.z, d1.z, gk_fmadds(d1.x, d1.x, d1.y * d1.y));
+        float d1_dot_d2 = gk_fmadds(d1.z, d2_z, gk_fmadds(d1.x, d2_x, d1.y * d2_y));
         float scale;
 
         if (approximatelyZero(d1_dot_d1)) {
@@ -339,16 +339,16 @@ bool lbColl_80005C44(const Vec3* arg0, const Vec3* arg1, const Vec3* arg2,
             }
         }
 
-        arg3->x = d1.x * scale + sp38.x;
-        arg3->y = d1.y * scale + sp38.y;
-        arg3->z = d1.z * scale + sp38.z;
+        arg3->x = gk_fmadds(d1.x, scale, sp38.x);
+        arg3->y = gk_fmadds(d1.y, scale, sp38.y);
+        arg3->z = gk_fmadds(d1.z, scale, sp38.z);
     }
 
     d2_x = arg3->x - sp2C.x;
     d2_y = arg3->y - sp2C.y;
     d2_z = arg3->z - sp2C.z;
 
-    if (SQ(temp_f2) < SQ(d2_x) + SQ(d2_y) + SQ(d2_z)) {
+    if (SQ(temp_f2) < gk_fmadds((d2_z), (d2_z), gk_fmadds((d2_x), (d2_x), SQ(d2_y)))) {
         return false;
     } else {
         return true;
@@ -1423,9 +1423,9 @@ static inline float sqrtf_store(float x, volatile float* y)
 {
     if (x > 0.0f) {
         double guess = __frsqrte((double) x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
-        guess = 0.5 * guess * (3.0 - guess * guess * x);
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
+        guess = 0.5 * guess * (gk_fnmsub(guess * guess, x, 3.0));
         *y = (float) (x * guess);
         return *y;
     }
