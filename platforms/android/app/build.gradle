@@ -15,6 +15,12 @@ def meleeXr = (project.findProperty('melee.xr') ?: 'false').toString().toBoolean
 // ASan runtime the build stages next to it (src/asan/jniLibs, untracked).
 def meleeAsan = (project.findProperty('melee.asan') ?: 'false').toString().toBoolean()
 
+def meleeVersion = (System.getenv('MELEE_VERSION') ?: '0.1.0-beta').replaceFirst(/^v/, '')
+def meleeVersionCode = {
+    def m = (meleeVersion =~ /^(\d+)\.(\d+)\.(\d+)/)
+    m.find() ? m.group(1).toInteger() * 1000000 + m.group(2).toInteger() * 1000 + m.group(3).toInteger() + 100 : 100
+}()
+
 android {
     namespace 'dev.melee.game'
     compileSdk 34
@@ -23,8 +29,11 @@ android {
         applicationId 'dev.melee.game'
         minSdk 26
         targetSdk 34
-        versionCode 12
-        versionName System.getenv('MELEE_VERSION') ?: '0.2.2'
+        // From the release tag (MELEE_VERSION, v0.1.0-beta): an update must
+        // not have a lower code than what it replaces. major.minor.patch as
+        // MMmmmppp, plus 100 to stay above melee-pc's fixed 12.
+        versionCode meleeVersionCode
+        versionName meleeVersion
 
         ndk {
             abiFilters 'arm64-v8a'

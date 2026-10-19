@@ -29,12 +29,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
+#if defined(__ANDROID__)
+#include "android_hooks.h"
+/* No libcurl on Android: the release list comes through java.net over JNI
+ * (slp_http_android.cpp), the APK through the activity (android_compat.cpp). */
+extern "C" bool pc_slippi_http_android(const char* url, const char* body, const char* bearer, bool post,
+                                      char* out, size_t cap, int* status);
+#endif
 
 namespace pc::updater {
 namespace {
 
 std::mutex g_updater_mutex;
 UpdateState g_updater_state;
+#if defined(__ANDROID__)
+std::string g_android_download_path; /* the APK being downloaded; under g_updater_mutex */
+#endif
 std::atomic_bool g_cancel{false};
 
 struct WorkerThreadManager {
@@ -319,8 +329,14 @@ std::vector<Release> parse_github_releases(std::string_view json) {
     return releases;
 }
 
+/* Xelee's releases: the fork's, never upstream melee-pc's, whose builds
+ * would replace this one. */
+#define XELEE_RELEASES_REPO "rhythmerc/melee-pc"
+
 constexpr std::string_view current_platform() {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
+    return "Quest";
+#elif defined(__ANDROID__)
     return "Android";
 #elif defined(_WIN32)
     return "Windows";
@@ -362,6 +378,8 @@ std::string select_best_asset(const std::vector<Asset>& assets, std::string& out
         names = {"Melee-" + linux_arch + ".AppImage", "melee-linux-" + linux_arch + ".tar.gz"};
     } else if (platform == "Windows" || platform == "macOS") {
         names = {"Melee-" + std::string(platform) + "-" + arch + ".zip"};
+    } else if (platform == "Quest") {
+        names = {"Xelee-Quest-" + arch + ".apk"};
     } else if (platform == "Android") {
         names = {"Melee-Android-" + arch + ".apk"};
     } else if (platform == "iOS") {
@@ -382,6 +400,14 @@ std::string select_best_asset(const std::vector<Asset>& assets, std::string& out
 std::filesystem::path get_target_download_path(
     const std::string& asset_name, bool& out_restart_supported) {
     out_restart_supported = false;
+#if defined(__ANDROID__)
+    /* The app's cache, which the installer reads through a session; the
+     * launcher's "Install" hands it over (apply_update_and_restart). */
+    if (const char* cache = SDL_GetAndroidCachePath()) {
+        out_restart_supported = true;
+        return std::filesystem::path(cache) / asset_name;
+    }
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
     const char* appimage_env = std::getenv("APPIMAGE");
     if (appimage_env && asset_name.find(".AppImage") != std::string::npos) {
@@ -414,7 +440,7 @@ std::filesystem::path get_target_download_path(
 
 bool http_get_string_winhttp(const std::wstring& host, const std::wstring& path,
     std::string& out_body, std::string& out_error) {
-    HINTERNET hSession = WinHttpOpen(L"Melee-PC-Updater", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    HINTERNET hSession = WinHttpOpen(L"Xelee-Updater", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) {
         out_error = "WinHttpOpen failed: " + std::to_string(GetLastError());
@@ -439,7 +465,7 @@ bool http_get_string_winhttp(const std::wstring& host, const std::wstring& path,
         return false;
     }
 
-    LPCWSTR headers = L"User-Agent: Melee-PC-Updater\r\nAccept: application/vnd.github.v3+json\r\n";
+    LPCWSTR headers = L"User-Agent: Xelee-Updater\r\nAccept: application/vnd.github.v3+json\r\n";
     BOOL bResults =
         WinHttpSendRequest(hRequest, headers, (DWORD)-1L, WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     if (bResults) {
@@ -549,7 +575,7 @@ bool http_get_string_curl(const std::string& url, std::string& out_body, std::st
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Melee-PC-Updater");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Xelee-Updater");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_string_cb);
@@ -589,7 +615,7 @@ bool http_download_file_curl(
     ctx.cancel = &g_cancel;
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Melee-PC-Updater");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Xelee-Updater");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_file_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
@@ -649,10 +675,23 @@ void check_for_updates_async(bool include_prereleases) {
 
 #if defined(_WIN32)
         ok = http_get_string_winhttp(
-            L"api.github.com", L"/repos/999sian/melee-pc/releases", body, error);
+            L"api.github.com", L"/repos/" XELEE_RELEASES_REPO L"/releases", body, error);
 #elif defined(MELEE_USE_CURL)
         ok = http_get_string_curl(
-            "https://api.github.com/repos/999sian/melee-pc/releases", body, error);
+            "https://api.github.com/repos/" XELEE_RELEASES_REPO "/releases", body, error);
+#elif defined(__ANDROID__)
+        {
+            std::string buf(1 << 20, '\0');
+            int status = 0;
+            ok = pc_slippi_http_android("https://api.github.com/repos/" XELEE_RELEASES_REPO "/releases?per_page=20",
+                                        nullptr, nullptr, false, buf.data(), buf.size(), &status) &&
+                 status == 200;
+            if (ok) {
+                body.assign(buf.c_str());
+            } else {
+                error = status != 0 ? "HTTP " + std::to_string(status) : "no connection";
+            }
+        }
 #else
         error = "Networking unsupported on this platform";
 #endif
@@ -673,7 +712,7 @@ void check_for_updates_async(bool include_prereleases) {
         auto releases = parse_github_releases(body);
         if (releases.empty()) {
             g_updater_state.status = Status::UpToDate;
-            g_updater_state.message = "Melee-PC is up to date.";
+            g_updater_state.message = "Xelee is up to date.";
             return;
         }
 
@@ -695,7 +734,7 @@ void check_for_updates_async(bool include_prereleases) {
 
         if (!best_release) {
             g_updater_state.status = Status::UpToDate;
-            g_updater_state.message = "Melee-PC is up to date.";
+            g_updater_state.message = "Xelee is up to date.";
             return;
         }
 
@@ -708,7 +747,7 @@ void check_for_updates_async(bool include_prereleases) {
             g_updater_state.message = "Update available: " + best_release->tag_name;
         } else {
             g_updater_state.status = Status::UpToDate;
-            g_updater_state.message = "Melee-PC is up to date (" + current_ver + ").";
+            g_updater_state.message = "Xelee is up to date (" + current_ver + ").";
         }
     });
 }
@@ -775,6 +814,24 @@ void start_download_async() {
         if (ok) {
             chmod(dest_path.c_str(), 0755);
         }
+#elif defined(__ANDROID__)
+        {
+            std::lock_guard lock(g_updater_mutex);
+            g_android_download_path = dest_path.string();
+        }
+        ok = pc_android_download(download_url.c_str(), dest_path.c_str());
+        if (ok && total_bytes > 0) {
+            std::error_code ec;
+            auto got = std::filesystem::file_size(dest_path, ec);
+            if (ec || got != total_bytes) {
+                std::filesystem::remove(dest_path, ec);
+                error = "Incomplete download (" + std::to_string(ec ? 0 : got) + " of " +
+                        std::to_string(total_bytes) + " bytes)";
+                ok = false;
+            }
+        } else if (!ok) {
+            error = "the download stopped";
+        }
 #else
         error = "Direct downloading unsupported on this platform";
 #endif
@@ -808,6 +865,19 @@ void cancel() {
 
 UpdateState get_state() {
     std::lock_guard lock(g_updater_mutex);
+#if defined(__ANDROID__)
+    /* The activity downloads with no callback: progress is the file's size. */
+    if (g_updater_state.status == Status::Downloading && !g_android_download_path.empty()) {
+        std::error_code ec;
+        const auto got = std::filesystem::file_size(g_android_download_path, ec);
+        if (!ec) {
+            g_updater_state.download_current_bytes = got;
+            if (g_updater_state.download_total_bytes > 0)
+                g_updater_state.download_progress =
+                    float(got) / float(g_updater_state.download_total_bytes);
+        }
+    }
+#endif
     return g_updater_state;
 }
 
@@ -818,7 +888,7 @@ void open_release_in_browser() {
         url = g_updater_state.latest_release.html_url;
     }
     if (url.empty()) {
-        url = "https://github.com/999sian/melee-pc/releases";
+        url = "https://github.com/" XELEE_RELEASES_REPO "/releases";
     }
     SDL_OpenURL(url.c_str());
 }
@@ -850,6 +920,15 @@ bool apply_update_and_restart(std::string& error) {
         restartable = g_updater_state.restart_supported;
     }
 
+#if defined(__ANDROID__)
+    /* The system installer asks the player to confirm (and, the first time,
+     * to allow installs from this app); the app restarts updated. */
+    if (new_path.empty() || !pc_android_install_apk(new_path.c_str())) {
+        error = "Couldn't open the installer";
+        return false;
+    }
+    return true;
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
     const char* appimage = std::getenv("APPIMAGE");
     if (restartable && appimage && !new_path.empty()) {

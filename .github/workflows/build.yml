@@ -1,9 +1,11 @@
 name: Build
 
+# melee-pc's desktop, phone and iOS builds: still built as a check, but no
+# longer published. Xelee releases only the Quest build (quest.yml), so a v*
+# tag doesn't run this and there is no release job.
 on:
   push:
     branches: ['**']
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -318,34 +320,3 @@ jobs:
           name: ios-arm64
           path: dist/Melee-iOS-arm64.ipa
           if-no-files-found: error
-
-  release:
-    name: Publish release
-    needs: [lint, tests, linux, windows, android, ios, macos]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ls -lh artifacts
-          # A tag containing a hyphen (v0.1.0-beta) is a prerelease.
-          prerelease=""
-          [[ "${GITHUB_REF_NAME}" == *-* ]] && prerelease="--prerelease"
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes-file .github/RELEASE_NOTES.md \
-            ${prerelease} \
-            artifacts/*

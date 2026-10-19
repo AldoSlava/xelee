@@ -44,7 +44,7 @@ if [[ "${MELEE_XR}" == 1 ]]; then
         "-DFETCHCONTENT_SOURCE_DIR_DAWN=${MELEE_DAWN_SOURCE}" -DDAWN_SUPPORTS_CXX_MODULES=OFF
         -DDAWN_BUILD_PROTOBUF=OFF -DTINT_BUILD_IR_BINARY=OFF)
     XR_GRADLE_ARGS=(-Pmelee.xr=true)
-    APK_NAME=Melee-Quest-XR-arm64.apk
+    APK_NAME=Xelee-Quest-arm64.apk  # the release asset the Quest updater looks for
     DEFAULT_BUILD_DIR="${ROOT_DIR}/build/android-arm64-xr"
 fi
 BUILD_DIR="${BUILD_DIR:-${DEFAULT_BUILD_DIR}}"

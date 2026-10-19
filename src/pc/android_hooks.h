@@ -53,6 +53,12 @@ void pc_android_set_launcher_active(bool active);
 bool pc_android_is_xr_activity(void);
 bool pc_android_launch_xr(const char* disc);
 void pc_android_launch_panel(void);
+/* The updater (updater.cpp). pc_android_download: fetch url into path,
+ * blocking (call from a worker thread); true when it all arrived.
+ * pc_android_install_apk: hand the APK at path to the system installer,
+ * which asks the player to confirm; false if it could not be asked. */
+bool pc_android_download(const char* url, const char* path);
+bool pc_android_install_apk(const char* path);
 
 #ifdef __cplusplus
 }

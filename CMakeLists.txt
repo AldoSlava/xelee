@@ -45,6 +45,16 @@ if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/aurora/CMakeLists.txt)
         "run `git submodule update --init`")
 endif ()
 add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
+# The version the app reports and the updater compares: the release tag CI
+# builds from (MELEE_VERSION, read at configure time), else version.cpp's.
+if (NOT "$ENV{MELEE_VERSION}" STREQUAL "")
+    set(MELEE_APP_VERSION "$ENV{MELEE_VERSION}")
+    if (NOT MELEE_APP_VERSION MATCHES "^v")
+        set(MELEE_APP_VERSION "v${MELEE_APP_VERSION}")
+    endif ()
+    set_source_files_properties(src/pc/version.cpp PROPERTIES
+        COMPILE_DEFINITIONS "MELEE_APP_VERSION=\"${MELEE_APP_VERSION}\"")
+endif ()
 # FP determinism for netplay: no fused multiply-add anywhere game logic can
 # reach (AArch64 emits fmadd by default), no platform trig (see
 # src/pc/libm/pc_trig.h). aurora_mtx is C and used by collision, so it gets

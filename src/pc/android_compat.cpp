@@ -287,6 +287,37 @@ void pc_android_launch_panel(void) {
     call_activity("launchPanel", "()V", nullptr);
 }
 
+bool pc_android_download(const char* url, const char* path) {
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    jobject activity = env != nullptr ? (jobject)SDL_GetAndroidActivity() : nullptr;
+    if (env == nullptr || activity == nullptr || url == nullptr || path == nullptr) {
+        return false;
+    }
+    bool ok = false;
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID method =
+        cls != nullptr ? env->GetMethodID(cls, "downloadFile", "(Ljava/lang/String;Ljava/lang/String;)Z") : nullptr;
+    if (method != nullptr) {
+        jstring jurl = env->NewStringUTF(url);
+        jstring jpath = env->NewStringUTF(path);
+        ok = env->CallBooleanMethod(activity, method, jurl, jpath) == JNI_TRUE;
+        ok = ok && !threw(env, "downloadFile");
+        env->DeleteLocalRef(jurl);
+        env->DeleteLocalRef(jpath);
+    } else {
+        env->ExceptionClear();
+    }
+    if (cls != nullptr) {
+        env->DeleteLocalRef(cls);
+    }
+    env->DeleteLocalRef(activity);
+    return ok;
+}
+
+bool pc_android_install_apk(const char* path) {
+    return path != nullptr && path[0] != '\0' && call_activity("installApk", "(Ljava/lang/String;)V", path);
+}
+
 const char* pc_android_device_name(void) {
     static char s_label[64];
     static bool s_done;
@@ -329,6 +360,17 @@ bool pc_android_launch_xr(const char* disc) {
 }
 
 void pc_android_launch_panel(void) {}
+
+bool pc_android_download(const char* url, const char* path) {
+    (void)url;
+    (void)path;
+    return false;
+}
+
+bool pc_android_install_apk(const char* path) {
+    (void)path;
+    return false;
+}
 
 const char* pc_android_device_name(void) {
     return nullptr;

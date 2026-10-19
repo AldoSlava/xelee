@@ -332,13 +332,13 @@ static uint32_t pending_pipelines() {
  * none of the flat-screen settings (window, sync, backend, resolution,
  * aspect, HUD layout, post-processing, FPS counter, pause camera); its eyes
  * take their samples from AURORA_XR_MSAA rather than the anti-aliasing
- * preference; and the updater knows only the phone APK, which would replace
- * the Quest build. pc_launcher_configure pins those to their defaults. Its
+ * preference. pc_launcher_configure pins those to their defaults. The
+ * updater takes the Quest's own APK (Xelee-Quest-arm64.apk). Its
  * own rows (.quest-only) are the eyes' resolution and SpaceWarp, which
  * pc_launcher_configure hands the immersive game's XR session. */
 #if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
 constexpr const char* platform_class = "quest";
-constexpr bool has_updater = false;
+constexpr bool has_updater = true;
 #elif defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 constexpr const char* platform_class = "mobile";
 constexpr bool has_updater = true;
@@ -1486,11 +1486,16 @@ public:
                     } else if (ustate.status == pc::updater::Status::Downloaded) {
                         card->SetProperty("display", "block");
                         text("update-title", "Update Ready!");
+#if defined(__ANDROID__)
+                        text("update-desc", "Downloaded. Install it, then confirm in the system's dialog.");
+                        text("update-action", "Install");
+#else
                         text("update-desc", ustate.restart_supported ?
                                                 "Downloaded successfully. Click Restart to apply." :
                                                 ("Saved to: " + ustate.downloaded_path));
                         text("update-action",
                             ustate.restart_supported ? "Restart to apply" : "Open folder");
+#endif
                         enabled("update-action", true);
                         if (auto* prog = element("update-progress-row"))
                             prog->SetProperty("display", "none");
@@ -1563,7 +1568,6 @@ extern "C" void pc_launcher_configure(AuroraConfig* config) {
     prefs.filter_mode = defaults.filter_mode;
     prefs.fps = defaults.fps;
     prefs.free_camera = defaults.free_camera;
-    prefs.check_updates = false;
 #endif
     pc_net_set_input_delay(prefs.net_delay);
     if (prefs.install_id == 0) {

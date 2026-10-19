@@ -1438,7 +1438,7 @@ and shows the newest finished frame.
 ## Build and run
 
 ```sh
-MELEE_XR=1 tools/build_android.sh            # release: dist/Melee-Quest-XR-arm64.apk
+MELEE_XR=1 tools/build_android.sh            # release: dist/Xelee-Quest-arm64.apk
 ```
 
 For a debug build without the release key, run the native step, then

@@ -38,6 +38,7 @@ int main(int argc, char**) {
         {"Melee-macOS-x86_64.zip", "mac-x86", 60},
         {"Melee-Android-arm64.apk", "android", 70},
         {"Melee-iOS-arm64.ipa", "ios", 80},
+        {"Xelee-Quest-arm64.apk", "quest", 100},
         {"melee-linux-x86_64.tar.gz", "tar", 90},
     };
     struct Case {
@@ -50,7 +51,7 @@ int main(int argc, char**) {
              {"Windows", "arm64", "windows-arm", 20}, {"macOS", "arm64", "mac-arm", 30},
              {"Linux", "x86_64", "linux-x86", 40}, {"Windows", "x86_64", "windows-x86", 50},
              {"macOS", "x86_64", "mac-x86", 60}, {"Android", "arm64", "android", 70},
-             {"iOS", "arm64", "ios", 80}})
+             {"iOS", "arm64", "ios", 80}, {"Quest", "arm64", "quest", 100}})
     {
         assert(!select_best_asset(releases, url, size, c.platform, c.arch).empty());
         assert(url == c.url && size == c.size);

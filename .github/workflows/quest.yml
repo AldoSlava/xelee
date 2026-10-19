@@ -1,0 +1,122 @@
+name: Quest
+
+# Xelee's builds: the Meta Quest mixed-reality APK. A push to main builds and
+# keeps it as an artifact; a v* tag on main also publishes it as a GitHub
+# release, which the Quest launcher's updater installs from
+# (src/pc/updater.cpp looks for Xelee-Quest-arm64.apk).
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  quest:
+    name: Quest APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 3G
+      # Dawn and the other C/C++ targets; the decomp keeps its own launcher
+      # (tools/gcc_launcher.py, the aarch64 GCC).
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          # The decomp needs scalar_storage_order, which the NDK's Clang does
+          # not implement, so tools/gcc_launcher.py routes melee_game through
+          # this cross compiler with the NDK sysroot.
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build cmake ccache gcc-aarch64-linux-gnu
+          # nod has no Android prebuilt, so aurora builds it from Rust source.
+          rustup target add aarch64-linux-android
+          # r26 for the game (newer NDK libc++ has no std::jthread), r29 for
+          # Dawn, which tools/build_android.sh picks up by itself.
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install \
+            'ndk;26.3.11579264' 'ndk;29.0.14206865' > /dev/null
+
+      - name: Dawn's pinned commit
+        id: dawn
+        run: echo "ref=$(sed -n 's/.*MELEE_DAWN_REF:-\([0-9a-f]*\)}.*/\1/p' tools/build_android.sh)" >> "$GITHUB_OUTPUT"
+
+      # Dawn from source (the melee-xr fork) with its dependencies: fetched
+      # once per pinned commit.
+      - uses: actions/cache@v4
+        with:
+          path: build/dawn-src
+          key: dawn-src-${{ steps.dawn.outputs.ref }}
+
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: quest-ccache-${{ steps.dawn.outputs.ref }}-${{ github.sha }}
+          restore-keys: quest-ccache-${{ steps.dawn.outputs.ref }}-
+
+      - name: Build APK
+        env:
+          MELEE_XR: '1'
+          MELEE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          MELEE_KEYSTORE_BASE64: ${{ secrets.MELEE_KEYSTORE_BASE64 }}
+          MELEE_KEYSTORE_PASSWORD: ${{ secrets.MELEE_KEYSTORE_PASSWORD }}
+          MELEE_KEY_ALIAS: ${{ secrets.MELEE_KEY_ALIAS }}
+          MELEE_KEY_PASSWORD: ${{ secrets.MELEE_KEY_PASSWORD }}
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/26.3.11579264"
+          ccache --zero-stats
+          tools/build_android.sh
+          ccache --show-stats
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xelee-quest
+          path: dist/Xelee-Quest-arm64.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: quest
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: xelee-quest
+          path: artifacts
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A tag containing a hyphen (v0.1.0-beta) is a prerelease.
+          prerelease=""
+          [[ "${GITHUB_REF_NAME}" == *-* ]] && prerelease="--prerelease"
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Xelee ${GITHUB_REF_NAME}" \
+            --notes-file .github/QUEST_RELEASE_NOTES.md \
+            --generate-notes \
+            ${prerelease} \
+            artifacts/Xelee-Quest-arm64.apk

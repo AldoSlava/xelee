@@ -175,6 +175,116 @@ public class MeleeActivity extends SDLActivity {
         });
     }
 
+    /* The updater (src/pc/updater.cpp): a release's APK into the app's cache.
+     * Blocking, on the updater's worker thread (never the UI thread); true
+     * when the whole body arrived. GitHub's asset URL redirects to its CDN,
+     * which HttpURLConnection follows (https to https). */
+    public boolean downloadFile(final String url, final String path) {
+        java.net.HttpURLConnection conn = null;
+        java.io.File file = new java.io.File(path);
+        try {
+            conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setRequestProperty("User-Agent", "Xelee-Updater");
+            conn.setInstanceFollowRedirects(true);
+            if (conn.getResponseCode() != 200) {
+                return false;
+            }
+            try (java.io.InputStream in = conn.getInputStream();
+                 java.io.OutputStream out = new java.io.FileOutputStream(file)) {
+                byte[] buf = new byte[1 << 16];
+                for (int n; (n = in.read(buf)) > 0; ) {
+                    out.write(buf, 0, n);
+                }
+            }
+            return true;
+        } catch (Exception e) {
+            android.util.Log.e("melee", "update download failed", e);
+            file.delete();
+            return false;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    private static final String INSTALL_STATUS = "dev.melee.game.INSTALL_STATUS";
+    private android.content.BroadcastReceiver mInstallStatus;
+
+    /* Hand a downloaded APK to the system installer through a PackageInstaller
+     * session (no FileProvider, so no androidx). The first time, Android asks
+     * the player to allow installs from this app; after that it shows its own
+     * "update this app?" confirmation, and the app restarts updated. */
+    public void installApk(final String path) {
+        runOnUiThread(() -> {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O
+                    && !getPackageManager().canRequestPackageInstalls()) {
+                try {
+                    startActivity(new android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            android.net.Uri.parse("package:" + getPackageName())));
+                } catch (Exception e) {
+                    android.util.Log.e("melee", "no unknown-sources settings page", e);
+                }
+                return;
+            }
+            if (mInstallStatus == null) {
+                mInstallStatus = new android.content.BroadcastReceiver() {
+                    @Override
+                    public void onReceive(android.content.Context context, android.content.Intent intent) {
+                        int status = intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -1);
+                        if (status == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                            android.content.Intent confirm = intent.getParcelableExtra(android.content.Intent.EXTRA_INTENT);
+                            if (confirm != null) {
+                                confirm.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                                startActivity(confirm);
+                            }
+                        } else if (status != android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+                            android.util.Log.e("melee", "update install: status " + status + " "
+                                    + intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE));
+                        }
+                    }
+                };
+                android.content.IntentFilter filter = new android.content.IntentFilter(INSTALL_STATUS);
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(mInstallStatus, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+                } else {
+                    registerReceiver(mInstallStatus, filter);
+                }
+            }
+            new Thread(() -> {
+                try {
+                    android.content.pm.PackageInstaller installer = getPackageManager().getPackageInstaller();
+                    android.content.pm.PackageInstaller.SessionParams params =
+                            new android.content.pm.PackageInstaller.SessionParams(
+                                    android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+                    params.setAppPackageName(getPackageName());
+                    int id = installer.createSession(params);
+                    java.io.File file = new java.io.File(path);
+                    try (android.content.pm.PackageInstaller.Session session = installer.openSession(id)) {
+                        try (java.io.InputStream in = new java.io.FileInputStream(file);
+                             java.io.OutputStream out = session.openWrite("update.apk", 0, file.length())) {
+                            byte[] buf = new byte[1 << 16];
+                            for (int n; (n = in.read(buf)) > 0; ) {
+                                out.write(buf, 0, n);
+                            }
+                            session.fsync(out);
+                        }
+                        android.content.Intent status = new android.content.Intent(INSTALL_STATUS).setPackage(getPackageName());
+                        int flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                                | (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+                                        ? android.app.PendingIntent.FLAG_MUTABLE : 0);
+                        session.commit(android.app.PendingIntent.getBroadcast(this, id, status, flags).getIntentSender());
+                    }
+                } catch (Exception e) {
+                    android.util.Log.e("melee", "update install failed", e);
+                }
+            }, "update-install").start();
+        });
+    }
+
     /* The reverse, for an immersive activity that has nothing to show (started
      * without a disc): reopen the launcher panel in the Home environment,
      * the way Meta's hybrid-app guide does it. */

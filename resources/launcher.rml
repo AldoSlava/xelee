@@ -125,8 +125,8 @@
         <div id="page-launcher" class="page">
           <div class="row" data-desc="The size of these menus."><span class="name">Interface size</span>
             <div class="slider-control"><input type="range" class="range" id="scale" min="75" max="150" step="25" value="100" /><span id="scale-val" class="slider-value">100%</span></div></div>
-          <div class="row no-quest" data-desc="Look for a new release on GitHub at each start."><span class="name">Check for updates</span><button id="check-updates" class="value">On</button></div>
-          <div class="row no-quest" id="check-row" data-desc="Look for a new release now."><span class="name">Updates <span id="check-status" class="detail">Xelee is up to date.</span></span><button id="check-now" class="value action">Check now</button></div>
+          <div class="row" data-desc="Look for a new release on GitHub at each start."><span class="name">Check for updates</span><button id="check-updates" class="value">On</button></div>
+          <div class="row" id="check-row" data-desc="Look for a new release now."><span class="name">Updates <span id="check-status" class="detail">Xelee is up to date.</span></span><button id="check-now" class="value action">Check now</button></div>
           <div class="row" data-desc="Put the settings on this page back to how a new install has them."><span class="name">Defaults</span><button id="defaults-launcher" class="value action">Restore</button></div>
         </div>
         <p id="settings-status" style="display: none;"></p>
