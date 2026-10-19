@@ -25,8 +25,7 @@ is GPL-3.0-or-later. Details under [License](#license).
 - **2xMSAA** anti-aliasing
 - **UCF 0.84** as Slippi plays it (dashback, shield drop, SDI, shield SDI, tumble,
   DBOOC fix, 1.0 cardinals), Slippi's no-wobbling, neutral spawn and
-  freeze-glitch rules, on by default offline (two toggles on the Gameplay page),
-  and a raw 1000 Hz read path for the official GameCube controller adapter.
+  freeze-glitch rules, on by default offline (two toggles on the Gameplay page)
 - **C-Stick in 1P**: the C-stick attacks in Classic, Adventure, Training and the
   other 1P modes, as in VS (on by default; a Gameplay toggle)
 
