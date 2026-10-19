@@ -94,7 +94,7 @@ union ftNess_MotionVars {
         /// 0x2344 - Unused turnaround timer
         s32 turnFrames;
         /// 0x2348 - Check if Ness is no longer holding B
-        bool isRelease;
+        int isRelease;
         /// 0x234C - Number of frames to pass before gravity takes effect
         s32 gravityDelay;
         s32 x10;

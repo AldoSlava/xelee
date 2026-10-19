@@ -80,7 +80,7 @@ DISC_ASSERT_SIZE(struct itChainSegment, 0x54);
 union ftSeak_MotionVars {
     struct ftSeak_SpecialNVars {
         enum_t x0;
-        bool x4;
+        int x4;
         s32 x8;
         s32 xC;
         s32 x10;

@@ -148,7 +148,7 @@ union ftYoshi_MotionVars {
     struct ftYoshi_GuardVars {
         /* fp+2340 */ f32 x0;
         /* fp+2344 */ u8 _pad[8];
-        /* fp+234C */ bool xC;
+        /* fp+234C */ int xC;
         /* fp+2350 */ f32 x10;
         /* fp+2354 */ f32 x14;
         /* fp+2358 */ f32 x18;

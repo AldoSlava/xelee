@@ -3004,12 +3004,12 @@ bool mpLib_800511A4_RightWall(float ax, float ay, float bx, float by, float cx,
                     vdx = x0 - x;
                     vdy = y0 - y;
 
-                    if (SQ(vdx) + SQ(vdy) > 0.001F) {
+                    if (gk_fmadds(vdx, vdx, SQ(vdy)) > 0.001F) {
                         if (mpLineIntersection(cx, cy, dx, dy, x, y, x0, y0,
                                                &int_x, &int_y))
                         {
                             dist2 = SQ(int_x - x1) + SQ(int_y - y1);
-                            if ((vdx * (int_x - x1)) + (vdy * (int_y - y1)) <
+                            if (gk_fmadds(vdx, (int_x - x1), vdy * (int_y - y1)) <
                                 0.0F)
                             {
                                 dist2 = -dist2;
@@ -3036,12 +3036,12 @@ bool mpLib_800511A4_RightWall(float ax, float ay, float bx, float by, float cx,
                     vdx = x0 - x;
                     vdy = y0 - y;
 
-                    if (SQ(vdx) + SQ(vdy) > 0.001F) {
+                    if (gk_fmadds(vdx, vdx, SQ(vdy)) > 0.001F) {
                         if (mpLineIntersection(cx, cy, dx, dy, x, y, x0, y0,
                                                &int_x, &int_y))
                         {
                             dist2 = SQ(int_x - x1) + SQ(int_y - y1);
-                            if ((vdx * (int_x - x1)) + (vdy * (int_y - y1)) <
+                            if (gk_fmadds(vdx, (int_x - x1), vdy * (int_y - y1)) <
                                 0.0F)
                             {
                                 dist2 = -dist2;
@@ -3149,12 +3149,12 @@ bool mpLib_800515A0_LeftWall(float a0x, float a0y, float a1x, float a1y,
                     vdx = x0 - x;
                     vdy = y0 - y;
 
-                    if (SQ(vdx) + SQ(vdy) > 0.001F) {
+                    if (gk_fmadds(vdx, vdx, SQ(vdy)) > 0.001F) {
                         if (mpLineIntersection(b0x, b0y, b1x, b1y, x, y, x0,
                                                y0, &int_x, &int_y))
                         {
                             dist2 = SQ(int_x - x1) + SQ(int_y - y1);
-                            if ((vdx * (int_x - x1)) + (vdy * (int_y - y1)) <
+                            if (gk_fmadds(vdx, (int_x - x1), vdy * (int_y - y1)) <
                                 0.0F)
                             {
                                 dist2 = -dist2;
@@ -3182,12 +3182,12 @@ bool mpLib_800515A0_LeftWall(float a0x, float a0y, float a1x, float a1y,
                     vdx = x0 - x;
                     vdy = y0 - y;
 
-                    if (SQ(vdx) + SQ(vdy) > 0.001F) {
+                    if (gk_fmadds(vdx, vdx, SQ(vdy)) > 0.001F) {
                         if (mpLineIntersection(b0x, b0y, b1x, b1y, x, y, x0,
                                                y0, &int_x, &int_y))
                         {
                             dist2 = SQ(int_x - x1) + SQ(int_y - y1);
-                            if ((vdx * (int_x - x1)) + (vdy * (int_y - y1)) <
+                            if (gk_fmadds(vdx, (int_x - x1), vdy * (int_y - y1)) <
                                 0.0F)
                             {
                                 dist2 = -dist2;

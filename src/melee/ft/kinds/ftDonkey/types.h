@@ -24,7 +24,7 @@ union ftDonkey_MotionVars {
 
     /// @todo Rename to correct state.
     struct ftDonkey_State5Vars {
-        bool x0;
+        int x0;
         s32 x4;
         float x8;
     } unk5;

@@ -115,19 +115,19 @@ DISC_ASSERT_SIZE(ftGameWatchAttributes, 0x94);
 typedef union ftGameWatch_MotionVars {
     struct ftGameWatch_Attack11Vars {
         /// 0x2340 - Set to 0 but never used?
-        bool unk;
+        int unk;
     } Attack11;
 
     struct ftGameWatch_SpecialNVars {
         /// 0x2340
-        bool isChefLoopDisable;
+        int isChefLoopDisable;
         /// 0x2344 - Maximum number of sausages able to be spawned per Chef use
         s32 maxSausage;
     } SpecialN;
 
     struct ftGameWatch_SpecialLwVars {
         /// 0x2340 - bool to check if Mr. Game & Watch is no longer holding B
-        bool isRelease;
+        int isRelease;
         /// 0x2344 - Number of frames it takes Mr. Game & Watch to turn around
         /// on command
         s32 turnFrames;

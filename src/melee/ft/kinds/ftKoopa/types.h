@@ -14,16 +14,16 @@ union ftKoopa_MotionVars {
     /// @todo Proper state name.
     struct ftKoopa_State1Vars {
         u32 x0;
-        bool x4;
+        int x4;
         u32 x8;
-        bool xC;
+        int xC;
     } unk1;
     /// @todo Possibly #ftKoopa_State1Vars.
     struct ftKoopa_SpecialSVars {
-        /* fp+2340 */ bool b_held;
-        /* fp+2344 */ bool x4;
+        /* fp+2340 */ int b_held;
+        /* fp+2344 */ int x4;
         /* fp+2348 */ int facing_dir;
-        /* fp+2348 */ bool xC;
+        /* fp+2348 */ int xC;
         /* fp+234C */ s32 x10;
         /* fp+2350 */ s32 x14;
         /* fp+2354 */ s32 x18;

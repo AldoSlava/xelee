@@ -64,7 +64,7 @@ DISC_ASSERT_SIZE(MarsAttributes, 0x98);
 
 union ftMars_MotionVars {
     struct ftMars_Unk0MotionVars {
-        bool x0;
+        int x0;
     } unk0;
 
     struct ftMars_SpecialNVars {

@@ -83,6 +83,11 @@ def compare(orig, play, context=0):
                 # in its first motion variable.
                 names = tuple(n for n in POST if n != "misc_as")
             d = diff(fa["post"][key], fb["post"][key], names)
+            # ftAnim_8006F3DC (the animation frame) falls off its end when no
+            # part is animated (Yoshi's egg shield): the GameCube returns
+            # whatever the animation code left in f1, ours a defined 0.
+            # Nothing the simulation reads differs; skip it there.
+            d = [x for x in d if not (x[0] == "action_frame" and x[2] == 0.0 and x[1] != 0.0)]
             if d:
                 found.append((key, "state out", d))
         if found:

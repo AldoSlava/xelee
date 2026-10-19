@@ -68,10 +68,10 @@ DISC_ASSERT_SIZE(ftPe_DatAttrs, 0xC0);
 
 union ftPe_MotionVars {
     struct ftPe_FloatAttackVars {
-        /* fp+2340 */ bool x0;
+        /* fp+2340 */ int x0;
     } floatattack;
     struct ftPe_SpecialSVars {
-        /* fp+2340 */ bool x0;
+        /* fp+2340 */ int x0;
     } specials;
     struct ftPe_SpecialHiVars {
         /* fp+2340 */ ItemKind kind;
