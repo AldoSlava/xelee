@@ -446,8 +446,10 @@ static void capture_fighter(Staged* s, int i, HSD_GObj* g) {
     SlpPreFrame* pre = &s->pre[s->nf];
     SlpPostFrame* po = &s->post[s->nf];
     /* A fighter whose input read did not run this tick (a stamina KO holds
-     * it) still gets its pre-frame, as it stands after the tick. */
-    if (s_begin.gobj[i] == g && s_begin.have_pre[i]) {
+     * it) still gets its pre-frame, as it stands after the tick. One that
+     * changed gobj during it (Zelda and Sheik's transformation) keeps the
+     * one its input read took, as Slippi's hook does (a5 84d05cdd). */
+    if (s_begin.have_pre[i]) {
         *pre = s_begin.pre[i];
     } else {
         fill_pre(pre, i, fp);
