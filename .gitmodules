@@ -1,0 +1,4 @@
+[submodule "extern/aurora"]
+	path = extern/aurora
+	url = https://github.com/rhythmerc/aurora.git
+	branch = exact-math

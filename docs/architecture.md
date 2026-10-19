@@ -17,7 +17,7 @@ src/pc                        platform layer: main, OS/VI/GX glue, keyboard,
                               touch, launcher + F1 overlay (RmlUi), updater
         │
         ▼
-extern/aurora (vendored)      GX command processor -> WebGPU (Dawn: Vulkan,
+extern/aurora (submodule)     GX command processor -> WebGPU (Dawn: Vulkan,
                               D3D12, Metal), Dolphin SDK services (OS, PAD,
                               DVD via nod, CARD, ARAM, MTX, THP), SDL3 window
                               and input, RmlUi, pipeline cache (SQLite)
@@ -39,7 +39,8 @@ The boundary rule and the per-layer coding conventions are in
   `textures.cpp` (Dolphin-format texture packs), `widescreen.c`,
   `launcher.cpp` / `launcher_data.cpp` (RmlUi launcher, F1 overlay,
   `launcher.cfg`), `updater.cpp`, `version.cpp`.
-- `extern/aurora` - vendored aurora with local changes; editable in-tree.
+- `extern/aurora` - a submodule: rhythmerc/aurora's `exact-math` branch, which
+  is its `xr` branch (XR, perf) plus the SDK math computed as the disc does.
   Dawn, SDL3 and nod arrive as prebuilts or are built from source per platform
   ([building.md](building.md)).
 
@@ -89,7 +90,7 @@ that atomicity.
 ## Aurora
 
 `extern/aurora` is the [encounter/aurora](https://github.com/encounter/aurora)
-compatibility layer, vendored with local changes. It provides the Dolphin SDK
+compatibility layer, from our fork's `exact-math` branch (a submodule). It provides the Dolphin SDK
 surface the decomp calls (GX, OS, PAD, DVD, CARD, AR, MTX, THP, VI, SI) and
 implements GX by recording the FIFO into a command processor that compiles TEV
 and vertex state into WebGPU pipelines (`extern/aurora/lib/gx`), rendered by

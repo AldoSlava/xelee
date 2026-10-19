@@ -5,6 +5,14 @@ only GCC implements), CMake 3.25+, Ninja, and a Vulkan driver. Aurora fetches
 its own Dawn/SDL3/nod prebuilts. `python3 tools/preflight.py` checks all of it
 and prints the fix for anything missing.
 
+Aurora (the GameCube SDK and renderer) is a submodule,
+[rhythmerc/aurora](https://github.com/rhythmerc/aurora)'s `exact-math` branch,
+so clone with `--recursive`, or fetch it into an existing checkout:
+
+```sh
+git submodule update --init
+```
+
 ```sh
 cmake -B build -G Ninja
 ninja -C build

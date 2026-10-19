@@ -40,6 +40,10 @@ if (IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(PNG_STATIC ON CACHE BOOL "" FORCE)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif ()
+if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/aurora/CMakeLists.txt)
+    message(FATAL_ERROR "extern/aurora is a git submodule that is not checked out: "
+        "run `git submodule update --init`")
+endif ()
 add_subdirectory(extern/aurora EXCLUDE_FROM_ALL)
 # FP determinism for netplay: no fused multiply-add anywhere game logic can
 # reach (AArch64 emits fmadd by default), no platform trig (see
