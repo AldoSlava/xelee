@@ -2195,20 +2195,39 @@ static inline void spawnHitEffect(Fighter_GObj* gobj, int effect, Vec3* pos,
     }
 }
 
+/* What ftColl_8007A06C writes over fp->dmg.facing_dir_1..x186c (the damage
+ * log) and fp->dmg.x1870..x1898 (the tip log). */
+struct DmgResult {
+    /* 0x00 */ float dir;
+    /* 0x04 */ int angle;
+    /* 0x08 */ int hurt_height;
+    /* 0x0C */ float kb;
+    /* 0x10 */ Vec3 pos;
+    /* 0x1C */ u32 element;
+    /* 0x20 */ int sfx_severity;
+    /* 0x24 */ HSD_GObj* source;
+    /* 0x28 */ float damage;
+};
+
+#define DMG_RESULT_AT(base, field, member)                                    \
+    STATIC_ASSERT(offsetof(Fighter, dmg.field) - offsetof(Fighter, dmg.base) == \
+                  offsetof(struct DmgResult, member))
+DMG_RESULT_AT(facing_dir_1, kb_applied, kb);
+DMG_RESULT_AT(facing_dir_1, x1854_collpos, pos);
+DMG_RESULT_AT(facing_dir_1, x1864, sfx_severity);
+DMG_RESULT_AT(facing_dir_1, x1868_source, source);
+DMG_RESULT_AT(facing_dir_1, x186c, damage);
+DMG_RESULT_AT(x1870, x1874, angle);
+DMG_RESULT_AT(x1870, x187c, kb);
+DMG_RESULT_AT(x1870, x1880, pos);
+DMG_RESULT_AT(x1870, x188c, element);
+DMG_RESULT_AT(x1870, x1890, sfx_severity);
+DMG_RESULT_AT(x1870, x1894, source);
+DMG_RESULT_AT(x1870, x1898, damage);
+
 void ftColl_8007A06C(Fighter_GObj* gobj, void* dmg_ptr, void* log, size_t idx,
                      int arg4)
 {
-    struct DmgResult {
-        /* 0x00 */ float dir;
-        /* 0x04 */ int angle;
-        /* 0x08 */ int hurt_height;
-        /* 0x0C */ float kb;
-        /* 0x10 */ Vec3 pos;
-        /* 0x1C */ u32 element;
-        /* 0x20 */ int sfx_severity;
-        /* 0x24 */ HSD_GObj* source;
-        /* 0x28 */ float damage;
-    };
 
     float angle;
     float dir;

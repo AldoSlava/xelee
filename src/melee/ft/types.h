@@ -1537,7 +1537,14 @@ struct Fighter {
         /* fp+1864 */ int x1864;
         /* fp+1868 */ HSD_GObj* x1868_source;
         /* fp+186C */ int x186c;
-        /* fp+1870 */ struct DmgLogEntry* x1870;
+#ifdef TARGET_PC
+        /* ftColl_8007A06C writes x1870..x1898 through its result struct
+         * (ftColl_DmgResult), as it does facing_dir_1..x186c: 8-aligned like
+         * that struct, for its source pointer. */
+        /* fp+1870 */ float x1870 __attribute__((aligned(8)));
+#else
+        /* fp+1870 */ float x1870;
+#endif
         /* fp+1874 */ int x1874;
         /* fp+1878 */ int x1878;
         /* fp+187C */ float x187c;
