@@ -19,5 +19,21 @@ public class MeleeXrActivity extends MeleeActivity {
             android.util.Log.e("melee", "setenv failed", e);
         }
         super.onCreate(savedInstanceState);
+        if (!mBrokenLibraries) {
+            mRoomCapture = new RoomCapture(this);
+            mRoomCapture.start();
+        }
+    }
+
+    /* The room's light, captured for XR room lighting (RoomCapture). */
+    private RoomCapture mRoomCapture;
+
+    @Override
+    protected void onDestroy() {
+        if (mRoomCapture != null) {
+            mRoomCapture.stop();
+            mRoomCapture = null;
+        }
+        super.onDestroy();
     }
 }

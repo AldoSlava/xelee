@@ -341,6 +341,42 @@ const char* pc_android_device_name(void) {
     return s_label[0] != '\0' ? s_label : nullptr;
 }
 
+#ifdef AURORA_ENABLE_OPENXR
+#include <aurora/xr.h>
+
+/* dev.melee.RoomCapture (the Quest build's room capture, in the immersive
+ * game's process): whether a capture runs, the camera's calibration, and
+ * each frame's grid of mean colour, for XR room lighting
+ * (aurora_xr_room_capture_*). */
+extern "C" JNIEXPORT jint JNICALL Java_dev_melee_RoomCapture_nativeWanted(JNIEnv*, jclass) {
+    return aurora_xr_room_capture_wanted();
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_melee_RoomCapture_nativeCamera(JNIEnv* env, jclass, jfloatArray rotation,
+    jfloatArray translation, jfloatArray intrinsics, jint sensor_w, jint sensor_h, jint width, jint height) {
+    float q[4] = {0.f, 0.f, 0.f, 1.f}, t[3] = {0.f, 0.f, 0.f}, k[5] = {0.f, 0.f, 0.f, 0.f, 0.f};
+    if (env->GetArrayLength(rotation) >= 4)
+        env->GetFloatArrayRegion(rotation, 0, 4, q);
+    if (env->GetArrayLength(translation) >= 3)
+        env->GetFloatArrayRegion(translation, 0, 3, t);
+    if (env->GetArrayLength(intrinsics) >= 4)
+        env->GetFloatArrayRegion(intrinsics, 0, 4, k);
+    aurora_xr_room_capture_camera(q, t, k, sensor_w, sensor_h, width, height);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_dev_melee_RoomCapture_nativeFrame(JNIEnv* env, jclass, jfloatArray rgb,
+    jint cols, jint rows, jfloat exposure_ms, jfloat iso) {
+    const jsize n = env->GetArrayLength(rgb);
+    if (cols <= 0 || rows <= 0 || n < cols * rows * 3)
+        return;
+    jfloat* p = env->GetFloatArrayElements(rgb, nullptr);
+    if (p == nullptr)
+        return;
+    aurora_xr_room_capture_frame(p, cols, rows, exposure_ms, iso);
+    env->ReleaseFloatArrayElements(rgb, p, JNI_ABORT);
+}
+#endif
+
 #else
 
 void pc_android_multicast_lock_acquire(void) {}

@@ -160,10 +160,12 @@ def hand_back():
 # Runtime permissions the game asks for in the launcher panel, which an
 # unattended run never shows: granted up front, so no dialog waits on anyone
 # and the features behind them run as they would for a player who allowed
-# them. USE_SCENE (both names): the stage's shadow on the surface under it.
+# them. USE_SCENE (both names): the stage's shadow on the surface under it;
+# HEADSET_CAMERA: room capture, for XR room lighting.
 PERMISSIONS = [
     "horizonos.permission.USE_SCENE",
     "com.oculus.permission.USE_SCENE",
+    "horizonos.permission.HEADSET_CAMERA",
 ]
 
 

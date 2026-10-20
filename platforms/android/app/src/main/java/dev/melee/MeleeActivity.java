@@ -97,7 +97,9 @@ public class MeleeActivity extends SDLActivity {
 
     /* Runtime permissions the Quest build's game uses when granted, and does
      * without otherwise: spatial data (USE_SCENE, both names; the stage's
-     * shadow on the real surface under it). Asked for here, in the launcher
+     * shadow on the real surface under it) and the passthrough cameras
+     * (HEADSET_CAMERA; the room's light, captured for XR room lighting,
+     * RoomCapture). Asked for here, in the launcher
      * panel, once the graphics device is up, never in the immersive game: a
      * grant is the package's, so it covers the game's process too. Only the
      * ones this build's manifest declares (none on phones), once a launch;
@@ -105,6 +107,7 @@ public class MeleeActivity extends SDLActivity {
     private static final String[] XR_PERMISSIONS = {
         "horizonos.permission.USE_SCENE",
         "com.oculus.permission.USE_SCENE",
+        "horizonos.permission.HEADSET_CAMERA",
     };
     private static final int XR_PERMISSIONS_REQUEST = 0x4d58; /* clear of SDL's own request codes */
     private boolean mXrPermissionsAsked;
