@@ -367,7 +367,7 @@ extern "C" JNIEXPORT void JNICALL Java_dev_melee_RoomCapture_nativeCamera(JNIEnv
 extern "C" JNIEXPORT void JNICALL Java_dev_melee_RoomCapture_nativeFrame(JNIEnv* env, jclass, jfloatArray rgb,
     jint cols, jint rows, jfloat exposure_ms, jfloat iso) {
     const jsize n = env->GetArrayLength(rgb);
-    if (cols <= 0 || rows <= 0 || n < cols * rows * 3)
+    if (cols <= 0 || rows <= 0 || n < cols * rows * 4)
         return;
     jfloat* p = env->GetFloatArrayElements(rgb, nullptr);
     if (p == nullptr)

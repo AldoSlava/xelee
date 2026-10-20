@@ -20,7 +20,9 @@ import android.util.Log;
  * tags) at 1280x1280, its square size (the whole sensor, scaled, so its
  * calibration applies as it is), at its lowest frame rate. Each frame
  * becomes a 32x32 grid of mean linear RGB (BT.601 full range, decoded from
- * sRGB) with its exposure and sensitivity, handed to the game, which turns
+ * sRGB) and the share of each cell that clipped (luma 250 or more: a lamp
+ * brighter than the frame's exposure can show), with its exposure and
+ * sensitivity, handed to the game, which turns
  * it into the room's light by where the head looked. The camera's lens pose
  * and intrinsics go once per capture. The camera shares passthrough's auto
  * exposure; its frames never leave this thread, only the grids do.
@@ -55,7 +57,7 @@ final class RoomCapture {
     private CameraCaptureSession mSession;
     private android.media.ImageReader mReader;
     private volatile CaptureResult mResult;
-    private final float[] mGrid = new float[GRID * GRID * 3];
+    private final float[] mGrid = new float[GRID * GRID * 4];
     private final float[] mLinear = new float[256];
     private int mFrames;
     private int mFailures; /* this capture's; it gives up at 3 */
@@ -310,8 +312,9 @@ final class RoomCapture {
         }
     }
 
-    /* The frame as GRID x GRID cells of mean linear RGB, each from every
-     * STEP-th pixel of it. Full-range YCbCr (BT.601, as camera YUV is). */
+    /* The frame as GRID x GRID cells of mean linear RGB and the share
+     * clipped, each from every STEP-th pixel of it. Full-range YCbCr
+     * (BT.601, as camera YUV is). */
     private void reduce(android.media.Image image) {
         android.media.Image.Plane[] p = image.getPlanes();
         java.nio.ByteBuffer y = p[0].getBuffer(), u = p[1].getBuffer(), v = p[2].getBuffer();
@@ -322,10 +325,13 @@ final class RoomCapture {
         for (int gy = 0; gy < GRID; gy++) {
             for (int gx = 0; gx < GRID; gx++) {
                 float sr = 0f, sg = 0f, sb = 0f;
-                int n = 0;
+                int n = 0, clipped = 0;
                 for (int row = gy * ch + STEP / 2; row < (gy + 1) * ch; row += STEP) {
                     for (int col = gx * cw + STEP / 2; col < (gx + 1) * cw; col += STEP) {
                         float l = y.get(row * yRow + col * yPix) & 0xff;
+                        if (l >= 250f) {
+                            clipped++;
+                        }
                         float cb = (u.get((row / 2) * uRow + (col / 2) * uPix) & 0xff) - 128f;
                         float cr = (v.get((row / 2) * vRow + (col / 2) * vPix) & 0xff) - 128f;
                         sr += mLinear[clamp(l + 1.402f * cr)];
@@ -334,10 +340,11 @@ final class RoomCapture {
                         n++;
                     }
                 }
-                int i = (gy * GRID + gx) * 3;
+                int i = (gy * GRID + gx) * 4;
                 mGrid[i] = n > 0 ? sr / n : 0f;
                 mGrid[i + 1] = n > 0 ? sg / n : 0f;
                 mGrid[i + 2] = n > 0 ? sb / n : 0f;
+                mGrid[i + 3] = n > 0 ? (float) clipped / n : 0f;
             }
         }
     }
