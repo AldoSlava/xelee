@@ -27,7 +27,9 @@ The game reads its knobs from melee-env.txt (src/pc/main.c,
 pc_env_file_bootstrap), which this rewrites on every run; the player's own
 is kept aside (melee-env.txt.player) and put back after each run and at
 hand-back. The disc comes from
-the launcher's own launcher.cfg (debug builds only: run-as), or MELEE_DISC.
+the launcher's own launcher.cfg (debug builds only: run-as), else the one the
+game last started with (files/last-disc.txt, written by MeleeActivity), or
+MELEE_DISC.
 With more than one adb device and no ANDROID_SERIAL, the first device listed
 by address is used: a wireless headset shows up under both its address and
 its mDNS name.
@@ -185,9 +187,14 @@ def disc_uri():
         return os.environ["MELEE_DISC"]
     cfg = adb("shell", "run-as", PKG, "cat", "files/launcher.cfg", check=False)
     m = re.search(r'^disc "(.*)"$', cfg, re.M)
-    if not m:
-        sys.exit("no disc in launcher.cfg; set MELEE_DISC")
-    return m.group(1)
+    if m:
+        return m.group(1)
+    # A release build (no run-as): the disc the game last started with
+    # (MeleeActivity.getArguments).
+    last = adb("shell", "cat", f"{FILES}/last-disc.txt", check=False).strip()
+    if last and "No such file" not in last:
+        return last
+    sys.exit("no disc in launcher.cfg or last-disc.txt (play once from the launcher); set MELEE_DISC")
 
 
 # VrApi's once-a-second line, e.g.

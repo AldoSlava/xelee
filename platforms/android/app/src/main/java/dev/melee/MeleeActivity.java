@@ -395,6 +395,15 @@ public class MeleeActivity extends SDLActivity {
             }
             String disc = intent.getStringExtra("disc");
             if (disc != null && !disc.isEmpty()) {
+                // For tools/quest_perf.py: a release build's launcher.cfg is
+                // out of adb's reach (no run-as), and the disc is a document
+                // URI only this app can open, so the last one played is kept
+                // where adb can read it.
+                try (java.io.FileWriter w = new java.io.FileWriter(
+                         new java.io.File(getExternalFilesDir(null), "last-disc.txt"))) {
+                    w.write(disc + "\n");
+                } catch (Exception ignored) {
+                }
                 return new String[] { "--dvd", disc };
             }
             android.net.Uri data = intent.getData();
