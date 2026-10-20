@@ -2,8 +2,12 @@ extern unsigned int aurora_draw_tag; /* aurora: which GX link is rendering */
 #include <stdio.h>
 #include <stdlib.h>
 void GXInsertDebugMarker(const char* label);
-/* AURORA_XR_LINK_STATS: the GX link being drawn goes through the FIFO, so
- * the XR replay can count and skip draws by link. */
+#ifdef AURORA_ENABLE_OPENXR
+#include <aurora/xr.h>
+#endif
+/* The GX link being drawn goes through the FIFO, so the XR replay can tell
+ * fighters from the stage (room lighting) and, with AURORA_XR_LINK_STATS,
+ * count and skip draws by link. Link 99 after a link's draws: none. */
 static void pc_mark_link(int link)
 {
     static int on = -1;
@@ -11,7 +15,11 @@ static void pc_mark_link(int link)
     if (on < 0) {
         on = getenv("AURORA_XR_LINK_STATS") != NULL;
     }
+#ifdef AURORA_ENABLE_OPENXR
+    if (on || aurora_xr_active()) {
+#else
     if (on) {
+#endif
         snprintf(buf, sizeof(buf), "L%d", link);
         GXInsertDebugMarker(buf);
     }
@@ -191,6 +199,7 @@ void HSD_GObj_80390ED0(HSD_GObj* gobj, u32 mask)
                      * reported as unattributed rather than inheriting the
                      * last link we happened to iterate. */
                     aurora_draw_tag = 0xFFFFu;
+                    pc_mark_link(99);
                 }
                 j++;
                 prios >>= 1;
