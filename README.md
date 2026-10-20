@@ -47,6 +47,10 @@ is GPL-3.0-or-later. Details under [License](#license).
    USB or with `adb push`).
 4. Open **Xelee** from your library (it's under *Unknown Sources*).
 
+## AI Disclosure
+
+Yes, Claude wrote every line of code. It also wrote sound effect generators, built the XR UI that I needed, ran sweeps for hiding stage pieces for MR play, did comparative analysis and fix work against Dolphin, ran extensive optimization rounds, and a million other things. I’m a software engineer by trade and I’ve made my peace with it. LLMs allowed me to develop this into a polished and optimized release that I’m incredibly proud of, and I hope the end result speaks for itself.
+
 ## First launch
 
 The app opens as a flat panel in your home environment. Choose your disc with
