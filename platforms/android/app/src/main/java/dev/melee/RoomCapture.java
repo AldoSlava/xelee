@@ -296,6 +296,9 @@ final class RoomCapture {
         }
         try {
             reduce(image);
+            if (mLog && (mFrames == 30 || mFrames == 150 || mFrames == 280)) {
+                dump(image, mFrames);
+            }
         } finally {
             image.close();
         }
@@ -346,6 +349,28 @@ final class RoomCapture {
                 mGrid[i + 2] = n > 0 ? sb / n : 0f;
                 mGrid[i + 3] = n > 0 ? (float) clipped / n : 0f;
             }
+        }
+    }
+
+    /* With the capture log: the frame's luma, halved, as a PGM in the
+     * app's files (room-frame-N.pgm), to check what the cells saw. */
+    private void dump(android.media.Image image, int frame) {
+        android.media.Image.Plane p = image.getPlanes()[0];
+        java.nio.ByteBuffer y = p.getBuffer();
+        int row = p.getRowStride(), pix = p.getPixelStride();
+        int w = image.getWidth() / 2, h = image.getHeight() / 2;
+        byte[] out = new byte[w * h];
+        for (int r = 0; r < h; r++) {
+            for (int c = 0; c < w; c++) {
+                out[r * w + c] = y.get(2 * r * row + 2 * c * pix);
+            }
+        }
+        java.io.File f = new java.io.File(mContext.getExternalFilesDir(null), "room-frame-" + frame + ".pgm");
+        try (java.io.FileOutputStream o = new java.io.FileOutputStream(f)) {
+            o.write(("P5\n" + w + " " + h + "\n255\n").getBytes());
+            o.write(out);
+        } catch (java.io.IOException e) {
+            Log.w(TAG, "frame dump: " + e);
         }
     }
 
