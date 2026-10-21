@@ -14,7 +14,9 @@ import android.util.Log;
  * only: MeleeXrActivity runs one in the immersive game's process.
  *
  * Four times a second it asks the game whether a capture is running
- * (aurora_xr_room_capture_wanted). While one is, with the passthrough camera
+ * (aurora_xr_room_capture_wanted: the 20 s after ROOM is chosen, or ambient
+ * while it's the source, in the menus and while the stage is placed, when
+ * only a frame each AMBIENT_MS is used). While one is, with the passthrough camera
  * permission (horizonos.permission.HEADSET_CAMERA, asked for in the launcher
  * panel), it streams one passthrough camera (the left one, by Meta's vendor
  * tags) at 1280x1280, its square size (the whole sensor, scaled, so its
@@ -34,6 +36,7 @@ final class RoomCapture {
     private static final long POLL_MS = 250;
     private static final int GRID = 32;
     private static final int STEP = 5; /* every 5th pixel of a cell, each way */
+    private static final long AMBIENT_MS = 200; /* xr.cpp's kCapAmbientMs */
 
     private static native int nativeWanted();
 
@@ -60,6 +63,8 @@ final class RoomCapture {
     private final float[] mGrid = new float[GRID * GRID * 4];
     private final float[] mLinear = new float[256];
     private int mFrames;
+    private volatile int mWanted; /* nativeWanted's last: 1 a capture, 2 ambient (a frame each AMBIENT_MS) */
+    private long mReducedAt;
     private int mFailures; /* this capture's; it gives up at 3 */
     private long mLoggedAt;
 
@@ -104,6 +109,7 @@ final class RoomCapture {
             Log.w(TAG, "no native room capture: " + e);
             return;
         }
+        mWanted = wanted;
         if (wanted > 0 && mDevice == null && mReader == null) {
             if (!mSetUp) {
                 mSetUp = true;
@@ -294,6 +300,12 @@ final class RoomCapture {
         if (image == null) {
             return;
         }
+        long at = android.os.SystemClock.elapsedRealtime();
+        if (mWanted == 2 && at - mReducedAt < AMBIENT_MS) {
+            image.close();
+            return;
+        }
+        mReducedAt = at;
         try {
             reduce(image);
             if (mLog && (mFrames == 30 || mFrames == 150 || mFrames == 280)) {
