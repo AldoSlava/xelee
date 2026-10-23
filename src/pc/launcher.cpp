@@ -334,7 +334,7 @@ static uint32_t pending_pipelines() {
  * take their samples from AURORA_XR_MSAA rather than the anti-aliasing
  * preference. pc_launcher_configure pins those to their defaults. The
  * updater takes the Quest's own APK (Xelee-Quest-arm64.apk). Its
- * own rows (.quest-only) are the eyes' resolution and SpaceWarp, which
+ * own rows (.quest-only) are the eyes' resolution, SpaceWarp and foveation, which
  * pc_launcher_configure hands the immersive game's XR session. */
 #if defined(__ANDROID__) && defined(AURORA_ENABLE_OPENXR)
 constexpr const char* platform_class = "quest";
@@ -447,7 +447,7 @@ class Launcher final : public Rml::EventListener {
     std::vector<std::string> page_focus() const {
         switch (tab) {
         case 0:
-            return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "xr-shadow", "xr-place", "aspect",
+            return {"display", "sync", "resolution", "xr-resolution", "spacewarp", "xr-foveation", "xr-shadow", "xr-place", "aspect",
                 "hud-mode", "aa", "filter-mode", "fps", "custom-textures", "backend",
                 "performance", "defaults-graphics"};
         case 1:
@@ -693,6 +693,10 @@ class Launcher final : public Rml::EventListener {
         const int value = std::clamp(int(std::lround(slider / 10.0f)) * 10, 80, 140);
         return value >= 140 ? 0 : value;
     }
+    static const char* foveation_name(int level) {
+        static constexpr const char* names[] = {"Off", "Low", "Medium", "High"};
+        return names[std::clamp(level, 0, 3)];
+    }
     static std::string xr_resolution_name(int pref) {
         return pref == 0 ? "Dynamic" : std::to_string(pref) + "%";
     }
@@ -713,6 +717,7 @@ class Launcher final : public Rml::EventListener {
         slider("xr-resolution", float(xr_resolution_slider(prefs.xr_resolution)));
         text("xr-resolution-val", xr_resolution_name(prefs.xr_resolution));
         text("spacewarp", prefs.xr_spacewarp ? "On" : "Off");
+        text("xr-foveation", foveation_name(prefs.xr_foveation));
         text("xr-shadow", prefs.xr_shadow ? "On" : "Off");
         text("xr-place", prefs.xr_place_hold ? "Place the stage" : "Start right away");
         text("aspect", prefs.widescreen == 0 ? "Original (73:60)" :
@@ -846,6 +851,7 @@ class Launcher final : public Rml::EventListener {
             prefs.backend = d.backend;
             prefs.xr_resolution = d.xr_resolution;
             prefs.xr_spacewarp = d.xr_spacewarp;
+            prefs.xr_foveation = d.xr_foveation;
             prefs.xr_shadow = d.xr_shadow;
             prefs.xr_place_hold = d.xr_place_hold;
             message = "Graphics settings are back to their defaults.";
@@ -1107,6 +1113,11 @@ class Launcher final : public Rml::EventListener {
             save();
             refresh_settings();
             element("spacewarp")->Focus();
+        } else if (id == "xr-foveation") {
+            prefs.xr_foveation = (prefs.xr_foveation + 1) % 4;
+            save();
+            refresh_settings();
+            element("xr-foveation")->Focus();
         } else if (id == "xr-shadow") {
             prefs.xr_shadow = !prefs.xr_shadow;
             save();
@@ -1635,6 +1646,7 @@ extern "C" void pc_launcher_configure(AuroraConfig* config) {
     config->msaa = prefs.msaa;
     config->xrEyeScale = prefs.xr_resolution / 100.0f;
     config->xrNoSpaceWarp = !prefs.xr_spacewarp;
+    config->xrFoveation = prefs.xr_foveation;
     config->xrNoStageShadow = !prefs.xr_shadow;
     config->maxTextureAnisotropy = prefs.anisotropy;
     if (!std::getenv("MELEE_VSYNC"))

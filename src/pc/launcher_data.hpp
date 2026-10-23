@@ -52,6 +52,9 @@ struct Preferences {
     // size (80-130), or 0 for dynamic resolution; and Application SpaceWarp.
     int xr_resolution = 0;
     bool xr_spacewarp = true;
+    // Quest: fixed foveated rendering, 0 (off) to 3 (high): the edges of each
+    // eye drawn at a lower density (AuroraConfig::xrFoveation).
+    int xr_foveation = 0;
     // Quest, mixed reality: the stage's contact shadow on the real surface.
     bool xr_shadow = true;
     bool xr_place_hold = true; // XR: the stage is placed before each fight (off: fights start right away)

@@ -408,6 +408,10 @@ Preferences load_preferences(const std::filesystem::path& path) {
                 else if (key == "xr_place_hold")
                     prefs.xr_place_hold = value;
             }
+        } else if (key == "xr_foveation") {
+            int value;
+            if (row >> value && value >= 0 && value <= 3)
+                prefs.xr_foveation = value;
         } else if (key == "xr_resolution") {
             int value;
             if (row >> value && (value == 0 || (value >= 80 && value <= 130 && value % 10 == 0)))
@@ -455,7 +459,8 @@ bool save_preferences(
     text << "slippi_fixes " << prefs.slippi_fixes << "\ncstick_1p " << prefs.cstick_1p << '\n';
     text << "spatial_audio " << prefs.spatial_audio << "\nstage_sounds " << prefs.stage_sounds
          << "\nxr_resolution " << prefs.xr_resolution
-         << "\nxr_spacewarp " << prefs.xr_spacewarp << "\nxr_shadow " << prefs.xr_shadow
+         << "\nxr_spacewarp " << prefs.xr_spacewarp << "\nxr_foveation " << prefs.xr_foveation
+         << "\nxr_shadow " << prefs.xr_shadow
          << "\nxr_place_hold " << prefs.xr_place_hold << '\n';
     auto data = text.str();
     size_t done = 0;

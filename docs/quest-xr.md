@@ -747,6 +747,28 @@ Stadium rock not even 1.0.
 `MELEE_DEBUG_VS=cpu2` is the two-CPU fixture, and
 `tools/quest_perf.py --players 2`.
 
+### Foveation
+
+The launcher's Foveation row (AuroraConfig::xrFoveation, Off/Low/Medium/High;
+`AURORA_XR_FOVEATION=0-3` overrides) gives the eyes' pass a fragment density
+map of ours (VK_EXT_fragment_density_map, enabled on Dawn's device in
+`hook_create_device`; the Dawn fork's `RenderPassMultiview::
+vkFragmentDensityMapView` and `RenderPipelineMultiview::fragmentDensityMap`).
+Around each lens' centre (the point straight ahead, from the eye's fov) the
+eyes draw at full density; past `r0` at `mid`, past `r1` at `out`
+(`kFoveation`, r in tangent space, 1 at the image's edge in each direction).
+A map is the whole image's size in 32-pixel density texels (the spec sizes
+texels by the render area, the Quest 3's driver by the image: a corner-sized
+map was read stretched right and down), and with dynamic resolution the eye
+is drawn in the image's corner, so there is one map per eye size: the XR thread makes them on its queue (`density_frame`, polled,
+never waited on) for every scale dynamic resolution can pick, as soon as the
+headset has views, and any other size the render worker asks for; the nearest
+ready one stands in meanwhile. The eyes' pipelines are made for a density map
+(`RenderTargetLayout::xrDensityMap`), so the setting is read at startup; Off
+leaves the pass and its pipelines exactly as before. Needs
+`fragmentDensityMapNonSubsampledImages` (Dawn's and the swapchain's images
+aren't subsampled).
+
 ### Fixed-latency presentation
 
 Under lock-step pacing, each game frame starts on a tick, and its images
@@ -1527,6 +1549,7 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_LOG_PERIOD` | 10 | Seconds between the GPU timing and dynamic resolution log lines |
 | `AURORA_XR_DYNRES_TARGET_MS` | deadline-derived | Pins dynamic resolution's frame GPU aim (Android) |
 | `AURORA_XR_DYNRES_MIN` / `_MAX` | 1.0 / 1.3 | Dynamic resolution's scale range |
+| `AURORA_XR_FOVEATION` | launcher (Off) | Fixed foveated rendering level for the eyes, 0-3 |
 | `AURORA_XR_DYNRES_MARGIN_MS` | 3 | Margin dynamic resolution keeps before the ideal latency's slot |
 | `AURORA_XR_DYNRES_HEADROOM_MS` | 1.2 | Margin left under the game frame's GPU share |
 | `AURORA_XR_DYNRES_BAND_MS` | 0.5 | How far past the aim a frame goes before the scale is cut |
