@@ -386,6 +386,15 @@ def run_phases(args):
         f.write(adb("logcat", "-d", "-v", "time"))
     if args.view_check:
         print(view_coverage(args.label))
+    # A replay over before a phase measures the fight the CPUs play on
+    # unscripted, different every run: every 240 s warmup on the 136 s
+    # bench-room.mrc did (2026-10-23; 30% swings within a run).
+    replay_over = False
+    if args.replay:
+        replay_over = "replay finished" in adb("shell", "cat", GAME_LOG, check=False)
+        if replay_over:
+            print("  WARNING: the replay was over before the first phase; the phases measure an unscripted fight "
+                  "(a shorter --warmup, or warm the pipeline cache with a run before)")
     for i, (mode, secs) in enumerate(phases):
         if i > 0:
             shell_write(CTL_FILE, mode + "\n")
@@ -402,6 +411,9 @@ def run_phases(args):
             with open(os.path.join(OUT_DIR, f"{args.label}-game.log"), "w") as f:
                 f.write(game_log)
             print(replay_status(game_log) or "  record/replay: no word from the game (not started?)")
+            if args.replay and not replay_over and "replay finished" in game_log:
+                replay_over = True
+                print(f"  WARNING: the replay ended during phase {i}; what came after is an unscripted fight")
 
 
 def main():
