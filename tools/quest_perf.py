@@ -334,6 +334,14 @@ def run_phases(args):
         # eyes, the stage at the bottom of the view (~2% of the eye: per-pixel
         # costs hidden; runs before 2026-10-23 were made so).
         "AURORA_XR_ARENA_AT_HEAD": "2" if args.placement == "view" else "1",
+        # A player looks down at the stage on a table: in the user's
+        # screenshots it fills ~10-15% of the view. Straight ahead and level,
+        # at the default scale (0.0035), Brinstar's thin front is ~1.5% of
+        # the eye, the per-pixel costs a player pays hidden (2026-10-23:
+        # per-pixel room light cost 3.6 ms scaled up, ~0.5 ms not). 0.01 is
+        # meant to stand in for a player's ~12% (provisional: calibrate by
+        # the view line); --arena-scale 0.0035 for runs before 2026-10-23.
+        "AURORA_XR_ARENA_SCALE": str(args.arena_scale),
     }
     if args.view_check:
         # One eye image during the warmup, after the fight starts and before
@@ -406,6 +414,8 @@ def main():
     r.add_argument("--warmup", type=int, default=50, help="seconds from launch to the first phase")
     r.add_argument("--settle", type=int, default=12, help="seconds after a mode switch before measuring")
     r.add_argument("--label", default="run")
+    r.add_argument("--arena-scale", type=float, default=0.01,
+                   help="the stage's scale (default 0.01, ~a player's coverage; 0.0035 the game's default)")
     r.add_argument("--placement", choices=["view", "below"], default="view",
                    help="the stage straight ahead (as a player sees it; default) or 25 cm under the eyes (runs "
                         "before 2026-10-23, ~2%% of the eye)")
