@@ -1828,6 +1828,11 @@ static bool kb_smoke(int idnum) {
     return false;
 }
 
+/* A stage particle's marker is out (pc_xr_particle_begin). */
+static bool s_ptcl_stage;
+extern unsigned int aurora_draw_tag;
+void GXInsertDebugMarker(const char* label);
+
 bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const float pos[3]) {
     if (s_category != AURORA_XR_WORLD || s_center_grkind <= 0) {
         return false;
@@ -1881,6 +1886,15 @@ bool pc_xr_particle_begin(int bank, int id, int tex_group, float size, const flo
         }
     }
     if (!pc_xr_mixed_reality() || !particle_rule(s_center_grkind, bank, id, tex_group)) {
+        /* The stage's own particles (bank 30, the stage's effect bank: its
+         * water, waterfalls, dust) draw in the effects' GX link, which the
+         * room light leaves out; marked as the stage's (link 2) they are lit
+         * by the room with the stage (Fountain of Dreams' water stayed lit
+         * in a dark room). */
+        if (bank == 30) {
+            GXInsertDebugMarker("L2");
+            s_ptcl_stage = true;
+        }
         return false;
     }
     aurora_xr_camera(AURORA_XR_HIDDEN, NULL);
@@ -1945,6 +1959,13 @@ void pc_xr_blast_clip_end(int began) {
 void pc_xr_particle_end(bool hidden) {
     if (hidden) {
         aurora_xr_camera(AURORA_XR_WORLD, NULL);
+    }
+    if (s_ptcl_stage) {
+        /* Back to the link drawing (gobj.c's marker). */
+        char buf[12];
+        snprintf(buf, sizeof(buf), "L%u", aurora_draw_tag < 0xF000u ? aurora_draw_tag : 99u);
+        GXInsertDebugMarker(buf);
+        s_ptcl_stage = false;
     }
 }
 
