@@ -30,7 +30,19 @@
 #include <sysdolphin/baselib/controller.h>
 #include <sysdolphin/baselib/random.h>
 #ifdef TARGET_PC
+#ifdef __EMSCRIPTEN__
+/* The browser build preprocesses game C without SDL's headers and has no
+ * online play: the sign-in thread never starts there ("Could not start the
+ * sign-in"). */
+typedef int SDL_AtomicInt;
+typedef void SDL_Thread;
+#define SDL_CreateThread(fn, name, data) ((void) (fn), (SDL_Thread*) NULL)
+#define SDL_WaitThread(thread, status) ((void) 0)
+#define SDL_SetAtomicInt(a, v) (*(a) = (v))
+#define SDL_GetAtomicInt(a) (*(a))
+#else
 #include <SDL3/SDL.h>
+#endif
 #include "pc/net.h"
 #include "pc/net_lan.h"
 #include "pc/net_identity.h"
