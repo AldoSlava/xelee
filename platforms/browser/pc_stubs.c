@@ -11,11 +11,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "pc/file_cache.h"
 #include "pc/pc.h"
 #include "pc/slp.h"
+#include "pc/slippi/slp_match.h"
+#include "pc/slippi/slp_user.h"
 
 /* Desktop launcher preferences; defaults match launcher_data.hpp. MELEE_UCF is
  * the one the launcher also reads from the environment (launcher.cpp). */
@@ -141,4 +145,96 @@ void pc_slp_play_feed(struct PADStatus* head) {
 void pc_slp_play_match_end(void) {}
 void pc_slp_play_tick_end(bool fight_frame) {
     (void)fight_frame;
+}
+/* Nor its L-cancel stats. */
+void pc_slp_l_cancel(struct HSD_GObj* gobj, bool in_window) {
+    (void)gobj;
+    (void)in_window;
+}
+
+/* Gameplay toggles from the launcher; both on by default there
+ * (launcher_data.hpp), with the same environment overrides. */
+bool pc_is_slippi_fixes_enabled(void) {
+    const char* env = getenv("MELEE_SLIPPI_FIXES");
+    return env == NULL || env[0] != '0';
+}
+bool pc_is_cstick_1p_enabled(void) {
+    const char* env = getenv("MELEE_CSTICK_1P");
+    return env == NULL || env[0] != '0';
+}
+
+/* Expanded stage sounds (stage_ambience.c, stage_mix.c) are compiled out. */
+void pc_stage_mix_begin(int rate) {
+    (void)rate;
+}
+void pc_ambience_frame(void) {}
+void pc_ambience_tick(uint64_t proc_mask) {
+    (void)proc_mask;
+}
+bool pc_ambience_kongo_jungle(void) {
+    return false;
+}
+void pc_ambience_set_duck(float gain) {
+    (void)gain;
+}
+
+/* Slippi accounts and matchmaking (slp_user.c, slp_match.c) need HTTPS and
+ * UDP: signed out, no login, and no search ever starts. */
+int pc_match_local_port(void) {
+    return 0;
+}
+const char* pc_slippi_user_dir(void) {
+    return "";
+}
+bool pc_slippi_account_load(PcSlippiAccount* out, bool rediscover) {
+    (void)rediscover;
+    memset(out, 0, sizeof *out);
+    return false;
+}
+void pc_slippi_account_forget(void) {}
+bool pc_slippi_account_login_available(void) {
+    return false;
+}
+bool pc_slippi_account_login(const char* email, const char* password, PcSlippiAccount* out,
+                             char* err, size_t err_cap) {
+    (void)email;
+    (void)password;
+    (void)out;
+    snprintf(err, err_cap, "Online login is not available in the browser");
+    return false;
+}
+bool pc_slippi_connect_code_valid(const char* code) {
+    (void)code;
+    return false;
+}
+bool pc_slippi_connect_code_normalize(const char* in, char* out, size_t cap) {
+    (void)in;
+    if (cap > 0) {
+        out[0] = '\0';
+    }
+    return false;
+}
+PcSlippiMatch* pc_slippi_match_start(const PcSlippiAccount* account, int mode,
+                                     const char* connect_code, uint16_t local_port) {
+    (void)account;
+    (void)mode;
+    (void)connect_code;
+    (void)local_port;
+    return NULL;
+}
+void pc_slippi_match_stop(PcSlippiMatch* m) {
+    (void)m;
+}
+PcSlippiMatchState pc_slippi_match_state(const PcSlippiMatch* m) {
+    (void)m;
+    return PC_SLIPPI_MATCH_ERROR;
+}
+const char* pc_slippi_match_error(const PcSlippiMatch* m) {
+    (void)m;
+    return "Online play is not available in the browser";
+}
+bool pc_slippi_match_result(const PcSlippiMatch* m, PcSlippiTicket* out) {
+    (void)m;
+    (void)out;
+    return false;
 }

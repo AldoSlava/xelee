@@ -23,6 +23,9 @@ PREPROCESS_FLAGS = [
     '-Iextern/aurora/include', '-Isrc', '-Isrc/sdk_include',
     '-include', 'dolphin/gx.h',
     '-include', 'src/pc/compat.h',
+    # placeholder.h names gk_sqrtf_accurate; natively compat.h brings it in
+    # under MELEE_GAME_TU, which this build does not define.
+    '-include', 'src/pc/gekko_fp.h',
     '-include', 'tools/browser/disc_access.h',
     '-Wno-everything', '-ferror-limit=5',
 ]
