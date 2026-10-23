@@ -71,6 +71,14 @@ and the investigation behind it are in docs/xr-3d-plan.md.
     `AURORA_XR_HUD_ON_TOP=1` keeps it on top in mixed reality too, and a
     stage can keep it there (`aurora_xr_set_hud_on_top`; the Underground
     Maze and the escape from Brinstar).
+  - **From behind the stage.** Once the head is behind the stage (past
+    its left-right line, with 15 degrees of hysteresis), the HUD turns
+    around to face the player over the stage's front edge, and every
+    pad's left and right swap: both sticks' X and the d-pad, in
+    PADRead, so netplay and recordings get the mirrored input and
+    replays are unaffected. Menus and the stage hold stay unmirrored.
+    `AURORA_XR_BEHIND=0` turns the mirroring off. Some stages have holes
+    in their backs.
   - **Off-screen fighters.** Past the flat camera's view, the game stops
     drawing a fighter and shows it in a magnifier bubble at the screen's
     edge. The 3D view sees the whole arena, so in XR the fighter keeps
@@ -1569,6 +1577,7 @@ On Quest, set these in `/sdcard/Android/data/dev.melee.game/files/melee-env.txt`
 | `AURORA_XR_HUD_CLEARANCE` | 40 | Game units between the stage's highest floor and the HUD's bottom edge |
 | `AURORA_XR_HUD_BACKDROP` | 0 | Minimum HUD alpha, as a translucent panel behind it |
 | `MELEE_POINTER_MOUSE` | 0 | 1: the mouse in the window is the screen's pointer, its right button Back (testing the menu hooks flat) |
+| `AURORA_XR_BEHIND` | 1 | 0: no left/right mirroring of the pads when the fight is watched from behind the stage |
 | `AURORA_XR_HUD_ON_TOP` | 0 | 1: the HUD draws over the fighters in mixed reality too (it always does in full VR) |
 | `AURORA_XR_DUMP` | unset | Directory to write each stream's image once (PPM, plus alpha as PGM) |
 | `AURORA_XR_RAYCAST` | 1 | 0 leaves `XR_META_environment_raycast` off: no surface measured under the stage (Quest 3/3S, spatial data permission) |
