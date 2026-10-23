@@ -65,6 +65,15 @@ if (_slippi_login_n EQUAL 2)
 else ()
     message(STATUS "melee: Slippi in-app login not compiled in (set MELEE_SLIPPI_FIREBASE_KEY and MELEE_SLIPPI_GRAPHQL_ENDPOINT)")
 endif ()
+# Send logs' log drop (src/pc/log_report.cpp, tools/log-drop), compiled in the
+# same way from XELEE_LOGS_URL. Unset, Send logs saves the bundle as a file.
+if (NOT "$ENV{XELEE_LOGS_URL}" STREQUAL "")
+    set_source_files_properties(src/pc/log_report.cpp PROPERTIES
+        COMPILE_DEFINITIONS "PC_LOGS_URL_BUILTIN=\"$ENV{XELEE_LOGS_URL}\"")
+    message(STATUS "melee: Send logs uploads to the log drop")
+else ()
+    message(STATUS "melee: Send logs saves files only (set XELEE_LOGS_URL)")
+endif ()
 
 # The version the app reports and the updater compares: the release tag CI
 # builds from (MELEE_VERSION, read at configure time), else version.cpp's.
@@ -325,6 +334,7 @@ set(PC_SOURCES
         src/pc/file_cache.cpp
         src/pc/launcher.cpp
         src/pc/launcher_data.cpp
+        src/pc/log_report.cpp
         src/pc/music_stream.cpp
         src/pc/textures.cpp
         src/pc/updater.cpp

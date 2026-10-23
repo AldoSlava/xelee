@@ -113,6 +113,11 @@ void pc_slippi_account_refresh_async(const PcSlippiAccount* a);
 bool pc_slippi_http_get(const char* url, const char* bearer, char* out, size_t cap, int* status);
 bool pc_slippi_http_post_json(const char* url, const char* body, const char* bearer, char* out,
                               size_t cap, int* status);
+/* POST `len` bytes of any type, for the launcher's log upload (src/pc/log_report.cpp):
+ * curl, java.net on Android, WinHTTP on Windows. True when a response came
+ * back (any status, in `status`), with its body in `out`. */
+bool pc_http_post(const char* url, const char* content_type, const char* body, size_t len, char* out,
+                  size_t cap, int* status);
 
 /* ---- login (launcher auth surface) ----------------------------------- */
 

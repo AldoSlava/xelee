@@ -229,9 +229,11 @@
     <table>
       <tr><th>OS</th><th>Log</th></tr>
       <tr><td>Windows</td><td><code>melee-pc.log</code> in the folder with <code>melee.exe</code> (always written). <code>RUN-AND-LOG.bat</code> adds <code>melee-pc-env.log</code> and <code>melee-frames.log</code>.</td></tr>
-      <tr><td>Linux / macOS</td><td>Console output. To keep it: <code>MELEE_LOG_FILE=melee-pc.log ./Melee-x86_64.AppImage disc.iso</code>.</td></tr>
-      <tr><td>Android</td><td><code>adb logcat -s Aurora</code>.</td></tr>
+      <tr><td>Linux</td><td>The newest file in <code>~/.local/share/melee-pc/logs/</code>.</td></tr>
+      <tr><td>macOS</td><td>The newest file in <code>~/Library/Application Support/melee-pc/logs/</code>.</td></tr>
+      <tr><td>Quest / Android</td><td>The newest files in <code>Android/data/dev.melee.game/files/logs/</code>.</td></tr>
     </table>
+    <p>Easier: in the launcher, Settings → Launcher → Logs → Send uploads your recent logs and shows a code (XL-...) to post with your report.</p>
     <p>The log records CPU, GPU, driver, backend, and on a crash the faulting address and module. It contains your username in file paths and nothing else personal.</p>
   </details>
 </section>

@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+# Where Send logs uploads, compiled into every build (CMakeLists.txt).
+env:
+  XELEE_LOGS_URL: ${{ secrets.XELEE_LOGS_URL }}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

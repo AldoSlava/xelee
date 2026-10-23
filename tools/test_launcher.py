@@ -20,6 +20,7 @@ parser.add_argument("--binary", type=Path, help="Path to executable or AppImage 
 parser.add_argument("--screenshots", type=Path)
 parser.add_argument("--case", action="append", help="Run only this named case (repeatable)")
 parser.add_argument("--native-picker", action="store_true", help="Also test the desktop's Zenity file picker (requires working GTK/X11)")
+parser.add_argument("--logs-url", help="A log drop (tools/log-drop, e.g. a local `wrangler dev`) for the send-logs case")
 parser.add_argument("--send-event", action="store_true",
                     help="Deliver keys with XSendEvent instead of XTest (XTest keys never reach the window under KWin's Xwayland)")
 args = parser.parse_args()
@@ -182,6 +183,33 @@ def settings_live(win, proc, config):
     close(win, proc)
 
 
+def send_logs(win, proc, config):
+    """Settings -> Launcher -> Logs: the first press says what the bundle
+    holds, the second uploads it to --logs-url and shows the code."""
+    key(win, "Down")
+    key(win, "Return")
+    time.sleep(0.5)
+    key(win, "Down", 5)  # Launcher
+    key(win, "Right")    # Interface size
+    key(win, "Down", 3)  # Check for updates -> Updates -> Logs
+    key(win, "Return")   # gathers the logs
+    time.sleep(0.5)
+    screenshot(win, "send-logs-confirm")
+    key(win, "Return")   # sends them
+    logs = config.parent / "logs"
+    for _ in range(100):
+        sent = [line for f in logs.glob("melee-*.log") for line in f.read_text().splitlines()
+                if "logs: sent" in line or "logs: not sent" in line]
+        if sent:
+            break
+        time.sleep(0.1)
+    time.sleep(0.5)
+    screenshot(win, "send-logs-sent")
+    assert sent and "logs: sent" in sent[0], f"Send logs did not upload: {sent}"
+    print(sent[0])
+    close(win, proc)
+
+
 def quest_layout(win, proc, config):
     """The Quest panel's layout (MELEE_LAUNCHER_PLATFORM=quest) at its default
     1280x800: the rows it has no use for are skipped, and Back is reachable
@@ -239,6 +267,8 @@ try:
     run_case("invalid-cli", ["/nonexistent/disc.iso"])
     run_case("missing-saved", [], saved_disc="/nonexistent/disc with spaces.iso")
     run_case("settings-live", [], interact=settings_live)
+    if args.logs_url:
+        run_case("send-logs", [], interact=send_logs, extra_env={"MELEE_LOGS_URL": args.logs_url})
     run_case("quest-layout", [], interact=quest_layout, extra_env={"MELEE_LAUNCHER_PLATFORM": "quest"},
              size=(1280, 800))
     if args.disc:

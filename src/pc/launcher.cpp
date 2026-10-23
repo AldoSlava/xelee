@@ -6,6 +6,7 @@
 #include "discfont.h"
 #include "version.hpp"
 #include "updater.hpp"
+#include "log_report.hpp"
 #include "net_match.h"
 #include "net.h"
 #include "pc.h"
@@ -36,6 +37,7 @@
 #include <cstdlib>
 #include <future>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <sys/stat.h>
 #include <vector>
@@ -388,6 +390,10 @@ class Launcher final : public Rml::EventListener {
     bool update_card_dismissed = false;
     pc::updater::Status last_updater_status = pc::updater::Status::Idle;
     float last_download_progress = -1.0f;
+    // Send logs: the first press gathers them and says what they hold, the
+    // second sends them.
+    std::optional<pc::log_report::Bundle> logs_bundle;
+    std::future<pc::log_report::Result> logs_upload;
     // Set once the player asks to play while the pipeline queue is still
     // draining: the game starts by itself when the queue empties, and a second
     // press starts it immediately.
@@ -460,7 +466,7 @@ class Launcher final : public Rml::EventListener {
             return {"auth-sign-in", "auth-sign-out", "auth-email", "auth-password", "net-name",
                 "net-delay"};
         case 5:
-            return {"scale", "check-updates", "check-now", "defaults-launcher"};
+            return {"scale", "check-updates", "check-now", "logs-send", "defaults-launcher"};
         default:
             return {};
         }
@@ -776,6 +782,24 @@ class Launcher final : public Rml::EventListener {
         }
         notice();
         quiet = false;
+    }
+    void logs_status(const std::string& value, bool error = false) {
+        text("logs-status", value);
+        if (auto* e = element("logs-status"))
+            e->SetClass("error", error);
+    }
+    void logs_done(const pc::log_report::Result& r) {
+        text("logs-send", "Send");
+        if (!r.code.empty())
+            logs_status("Sent. Your code is " + r.code +
+                        ": post it in the Xelee Discord or on your GitHub issue.");
+        else if (!r.saved.empty())
+            logs_status((pc::log_report::can_upload() ? r.error + ", so they were saved as " :
+                                                         "Saved as ") +
+                            r.saved + ". Attach that file to your bug report.",
+                pc::log_report::can_upload());
+        else
+            logs_status(r.error + ", and the logs could not be saved either.", true);
     }
     // The line under the settings rows, shown only while it has something
     // to say (settings save as they change, so that goes without saying).
@@ -1163,6 +1187,26 @@ class Launcher final : public Rml::EventListener {
             status("Checking for updates...");
             text("check-status", "Checking for updates...");
             element("check-now")->Focus();
+        } else if (id == "logs-send") {
+            if (logs_upload.valid()) {
+                // already on its way
+            } else if (!logs_bundle) {
+                logs_bundle = pc::log_report::build();
+                const std::string what = std::to_string(logs_bundle->files) + " logs, " +
+                                         std::to_string((logs_bundle->text.size() + 1023) / 1024) +
+                                         " KB";
+                logs_status(pc::log_report::can_upload() ?
+                                what + ", kept 30 days, with IP addresses hidden. Confirm to send them." :
+                                what + ". Confirm to save them as one file for a bug report.");
+                text("logs-send", "Confirm");
+            } else {
+                logs_upload = std::async(std::launch::async,
+                    [bundle = std::move(*logs_bundle)] { return pc::log_report::send(bundle); });
+                logs_bundle.reset();
+                logs_status(pc::log_report::can_upload() ? "Sending..." : "Saving...");
+                text("logs-send", "...");
+            }
+            element("logs-send")->Focus();
         } else if (id == "update-action") {
             auto ustate = pc::updater::get_state();
             if (ustate.status == pc::updater::Status::Downloaded) {
@@ -1390,6 +1434,9 @@ public:
                     element("choose")->Focus();
                 }
             }
+            if (logs_upload.valid() &&
+                logs_upload.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+                logs_done(logs_upload.get());
             if (inspection.valid() &&
                 inspection.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
             {

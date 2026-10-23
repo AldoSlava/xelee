@@ -3,23 +3,50 @@
 ## Log files
 
 Everything goes through `pc_log_line()` (`src/pc/pc.h`), timestamped in
-milliseconds from startup. The log goes to `stderr` and, when `MELEE_LOG_FILE`
-names a path, to that file too; output is flushed per line and both streams are
-flushed before a fatal `abort()`, so the file survives a crash. An empty value
-disables the file sink. On Windows it defaults to `melee-pc.log` beside
-`melee.exe`, because a double-clicked console app's window vanishes on exit.
+milliseconds from startup. The log goes to `stderr` and to a file; output is
+flushed per line and both streams are flushed before a fatal `abort()`, so the
+file survives a crash. `MELEE_LOG_FILE` picks the file (an empty value disables
+it). Without it:
+
+| Platform | Log file |
+|---|---|
+| Windows | `melee-pc.log` in the working directory (beside `melee.exe`); the session before it is kept as `melee-pc.1.log`. |
+| Linux | `~/.local/share/melee-pc/logs/melee-<date>-<time>-<pid>.log` |
+| macOS | `~/Library/Application Support/melee-pc/logs/melee-<date>-<time>-<pid>.log` |
+| Android / Quest | `/sdcard/Android/data/dev.melee.game/files/logs/melee-<date>-<time>-<pid>.log`; the Quest's launcher panel and game are separate processes and write one each. |
+
+The timestamped folders keep the newest 10 files. On Android every line also
+goes to logcat (tag `Melee` for `pc_log_line`, `Aurora` for aurora's), and a
+native crash's backtrace goes to logcat and the log file as `[FATAL]` lines
+(`src/pc/main.c`); iOS also logs through `os_log`.
 `MELEE_DEBUG=1` raises aurora's log level to debug. Any frame over 50 ms leaves
 a marker in the log (`src/pc/vi.c`). Backend selection logs one line per
 skipped backend with Dawn's reason (`No usable D3D12 adapter (...); trying the
 next backend`) and then a summary such as
 `graphics backend: d3d11 (auto), adapter: Intel(R) HD Graphics 4400 [8086:0a16], driver: ...`;
-that line is the first thing to read in a GPU report. Android logs to logcat
-under the tag `Aurora`; iOS uses `os_log`.
+that line is the first thing to read in a GPU report.
 
 The Windows zip ships `RUN-AND-LOG.bat`: it sets `MELEE_DEBUG`, `MELEE_LOG_FILE`
 and `MELEE_FPS`, records the OS version and GPU driver into `melee-pc-env.log`,
 boots a `melee.ciso` sitting beside the exe if there is one, and keeps the
 window open. Ask for both `.log` files when triaging a Windows report.
+
+## Send logs
+
+Settings → Launcher → Logs → **Send** gathers the newest six logs (each cut to
+its last 1 MB, at most 4 MB in all; home-folder paths shown as `~`, and
+internet addresses as `ip-1`, `ip-2`, ... with one number per address across
+the bundle, while loopback and LAN addresses stay) and on
+Android the app's own logcat into one text bundle (`src/pc/log_report.cpp`).
+The first press says how much it holds and what is in it, the second uploads
+it to the log drop (`tools/log-drop`), which answers with a code such as
+`XL-7K3QM2` for the player to post. `tools/fetch_logs.py <code>` fetches and
+splits it; `tools/log-drop/README.md` has the setup. When the upload fails, or
+the build has no log drop URL (compiled in from `XELEE_LOGS_URL` in the
+configure environment, which CI takes from the repository secret; overridden
+at run time by `MELEE_LOGS_URL`), the bundle is saved as `xelee-logs-<time>.txt` in
+`/sdcard/Download` on Android, beside `melee-pc.log` on Windows, or in the log
+folder, and the row says where.
 
 ## Crash handler (Windows)
 
@@ -54,7 +81,8 @@ only; none of them fixes anything. User-facing knobs (`MELEE_BACKEND`,
 | Variable | Effect |
 |---|---|
 | `MELEE_DEBUG=1` | Debug-level aurora logging. |
-| `MELEE_LOG_FILE=<path>` | Log file sink (default `melee-pc.log` on Windows; empty disables). |
+| `MELEE_LOG_FILE=<path>` | Log file sink (defaults under [Log files](#log-files); empty disables). |
+| `MELEE_LOGS_URL=<url>` | Where Send logs uploads, instead of the built-in log drop (e.g. a local `wrangler dev`). |
 | `MELEE_FPS=1` | Print frame rate once a second. |
 | `MELEE_HEAP_CHECK=1` | Canaries on every heap allocation, checked each frame; aborts at the first stomp. |
 | `MELEE_SEED=<n>` | Deterministic RNG for the attract demo. |

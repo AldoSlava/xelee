@@ -33,6 +33,12 @@ void pc_os_yield(void);
  * interleave with aurora's own records and can be attributed to whatever
  * the engine reported around them. */
 void pc_log_line(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+/* The file this process logs to, or NULL when MELEE_LOG_FILE is empty; and
+ * the folder that keeps the last sessions' timestamped logs (Android, Linux,
+ * macOS; NULL on Windows, which keeps melee-pc.log and melee-pc.1.log in the
+ * working directory). The launcher's Send logs row reads both. */
+const char* pc_log_path(void);
+const char* pc_log_dir(void);
 
 /* Keyboard -> virtual controller (src/pc/keyboard.c). */
 typedef union SDL_Event SDL_Event;

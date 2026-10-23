@@ -30,8 +30,8 @@ int melee_main(void);
 
 #if defined(__ANDROID__)
 #include <android/log.h>
-#include <dirent.h>
-#include <sys/stat.h>
+#endif
+#if !defined(_WIN32)
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -40,9 +40,11 @@ int melee_main(void);
 /* Android writes crash backtraces to a protobuf tombstone under /data, which
  * an unrooted device only surfaces through `adb bugreport` -- two minutes per
  * iteration, and the rotation drops them faster than that when the app is
- * crash-looping. So unwind in-process and put the frames straight in logcat.
- * dladdr gives the library and the nearest exported symbol; the offsets are
- * what `addr2line -f -C -e libmelee.so` wants. */
+ * crash-looping. So unwind in-process and put the frames straight in logcat,
+ * and in the log file, which outlives logcat's ring and is what the
+ * launcher's Send logs row reads. dladdr gives the library and the nearest
+ * exported symbol; the offsets are what `addr2line -f -C -e libmelee.so`
+ * wants. */
 #include <dlfcn.h>
 #include <signal.h>
 #include <unistd.h>
@@ -51,6 +53,32 @@ int melee_main(void);
 typedef struct {
     int n;
 } MeleeUnwindState;
+
+/* The log file's descriptor (log_file, below). A fatal signal is no place
+ * for stdio, so the crash lines go to it with write(). */
+static int s_log_fd = -1;
+
+static void crash_line(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+static void crash_line(const char* fmt, ...) {
+    char line[256];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(line, sizeof line - 1, fmt, ap); /* one byte spare for the newline */
+    va_end(ap);
+    if (n < 0) {
+        return;
+    }
+    if (n > (int)sizeof line - 2) {
+        n = (int)sizeof line - 2;
+    }
+    __android_log_print(ANDROID_LOG_FATAL, "melee", "%s", line);
+    if (s_log_fd >= 0) {
+        line[n] = '\n';
+        if (write(s_log_fd, "[FATAL] ", 8) == 8) {
+            write(s_log_fd, line, (size_t)n + 1);
+        }
+    }
+}
 
 static _Unwind_Reason_Code melee_unwind_frame(struct _Unwind_Context* ctx, void* arg) {
     MeleeUnwindState* st = (MeleeUnwindState*)arg;
@@ -62,12 +90,12 @@ static _Unwind_Reason_Code melee_unwind_frame(struct _Unwind_Context* ctx, void*
     memset(&info, 0, sizeof info);
     if (dladdr((void*)pc, &info) != 0 && info.dli_fname != NULL) {
         const char* base = strrchr(info.dli_fname, '/');
-        __android_log_print(ANDROID_LOG_FATAL, "melee", "  #%02d pc %012zx  %s (%s+%zu)", st->n,
+        crash_line("  #%02d pc %012zx  %s (%s+%zu)", st->n,
             (size_t)(pc - (uintptr_t)info.dli_fbase), base ? base + 1 : info.dli_fname,
             info.dli_sname ? info.dli_sname : "?",
             info.dli_saddr ? (size_t)(pc - (uintptr_t)info.dli_saddr) : (size_t)0);
     } else {
-        __android_log_print(ANDROID_LOG_FATAL, "melee", "  #%02d pc %016zx  ?", st->n, (size_t)pc);
+        crash_line("  #%02d pc %016zx  ?", st->n, (size_t)pc);
     }
     st->n++;
     return _URC_NO_REASON;
@@ -84,8 +112,7 @@ static struct sigaction s_prev_sa[NSIG];
 
 static void melee_fatal_signal(int sig, siginfo_t* si, void* uc) {
     (void)uc;
-    __android_log_print(ANDROID_LOG_FATAL, "melee", "FATAL signal %d at %p (tid %d)", sig,
-        si ? si->si_addr : NULL, (int)gettid());
+    crash_line("FATAL signal %d at %p (tid %d)", sig, si ? si->si_addr : NULL, (int)gettid());
     MeleeUnwindState st = {0};
     _Unwind_Backtrace(melee_unwind_frame, &st);
     /* Hand back to whoever had it, so a real tombstone is still written. */
@@ -114,52 +141,79 @@ static void melee_install_crash_handler(void) {}
 
 #if defined(__ANDROID__)
 #define ANDROID_LOG_DIR "/sdcard/Android/data/dev.melee.game/files/logs"
-#define ANDROID_LOGS_KEPT 10
+#endif
+#define LOGS_KEPT 10
 
-/* The newest ANDROID_LOGS_KEPT - 1 logs stay; the names sort by time. */
-static void android_prune_logs(void) {
-    DIR* d = opendir(ANDROID_LOG_DIR);
-    if (d == NULL) {
-        return;
-    }
-    char names[64][64];
-    int n = 0;
-    struct dirent* e;
-    while ((e = readdir(d)) != NULL && n < 64) {
-        if (strncmp(e->d_name, "melee-", 6) == 0 && strlen(e->d_name) < sizeof names[0]) {
-            strcpy(names[n++], e->d_name);
-        }
-    }
-    closedir(d);
-    qsort(names, n, sizeof names[0], (int (*)(const void*, const void*))strcmp);
-    for (int i = 0; i < n - (ANDROID_LOGS_KEPT - 1); i++) {
-        char path[160];
-        snprintf(path, sizeof path, "%s/%s", ANDROID_LOG_DIR, names[i]);
-        remove(path);
-    }
+#if !defined(_WIN32)
+static int cmp_name(const void* a, const void* b) {
+    return strcmp(*(char* const*)a, *(char* const*)b);
 }
 
-/* logcat is a RAM ring that a headset's power-off clears, so a session in
- * the headset left nothing to read afterwards. Each process (the launcher
- * panel, the game) writes its own file. */
-static const char* android_default_log_path(void) {
-    static char path[160];
-    mkdir(ANDROID_LOG_DIR, 0770);
-    android_prune_logs();
+/* The newest LOGS_KEPT - 1 logs stay; the names sort by time. */
+static void prune_logs(const char* dir) {
+    int n = 0;
+    char** names = SDL_GlobDirectory(dir, "melee-*.log", 0, &n);
+    if (names == NULL) {
+        return;
+    }
+    qsort(names, n, sizeof *names, cmp_name);
+    for (int i = 0; i < n - (LOGS_KEPT - 1); i++) {
+        char path[640];
+        snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+        SDL_RemovePath(path);
+    }
+    SDL_free(names);
+}
+#endif
+
+const char* pc_log_dir(void) {
+    static char dir[512];
+    static bool done;
+    if (!done) {
+        done = true;
+#if defined(__ANDROID__)
+        snprintf(dir, sizeof dir, "%s", ANDROID_LOG_DIR);
+#elif !defined(_WIN32)
+        char* pref = SDL_GetPrefPath("", "melee-pc");
+        if (pref != NULL) {
+            snprintf(dir, sizeof dir, "%slogs", pref);
+            SDL_free(pref);
+        }
+#endif
+    }
+    return dir[0] != '\0' ? dir : NULL;
+}
+
+#if !defined(_WIN32)
+/* logcat is a RAM ring that a headset's power-off clears, and a desktop
+ * console closes with the game, so a session left nothing to read
+ * afterwards. Each process (on Quest the launcher panel and the game)
+ * writes its own file. */
+static const char* default_log_path(void) {
+    static char path[640];
+    const char* dir = pc_log_dir();
+    if (dir == NULL) {
+        return NULL;
+    }
+    SDL_CreateDirectory(dir);
+    prune_logs(dir);
     const time_t now = time(NULL);
     struct tm tm;
     localtime_r(&now, &tm);
-    snprintf(path, sizeof path, "%s/melee-%04d%02d%02d-%02d%02d%02d-%d.log", ANDROID_LOG_DIR,
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, (int)getpid());
+    snprintf(path, sizeof path, "%s/melee-%04d%02d%02d-%02d%02d%02d-%d.log", dir, tm.tm_year + 1900,
+        tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, (int)getpid());
     return path;
 }
 #endif
 
+static const char* s_log_path;
+
 /* A log file sink, so a double-clicked build still leaves a diagnosable
  * trace after its console disappears. MELEE_LOG_FILE picks the path; an
- * empty value disables it. Windows defaults it on because that is where the
- * console is not a reliable place to read errors from, Android because
- * logcat does not outlive the device's power. */
+ * empty value disables it. Windows defaults to melee-pc.log beside the exe
+ * and keeps the session before it as melee-pc.1.log, since a player who
+ * reopens the game to send its logs would otherwise overwrite the one that
+ * crashed. Everywhere else gets a timestamped file in pc_log_dir(). */
 static FILE* log_file(void) {
     static FILE* fp;
     static bool tried;
@@ -169,17 +223,30 @@ static FILE* log_file(void) {
 #if defined(_WIN32)
         if (path == NULL) {
             path = "melee-pc.log";
+            remove("melee-pc.1.log");
+            rename("melee-pc.log", "melee-pc.1.log");
         }
-#elif defined(__ANDROID__)
+#else
         if (path == NULL) {
-            path = android_default_log_path();
+            path = default_log_path();
         }
 #endif
         if (path != NULL && path[0] != '\0') {
             fp = fopen(path, "w");
         }
+        if (fp != NULL) {
+            s_log_path = path;
+#if defined(__ANDROID__)
+            s_log_fd = fileno(fp);
+#endif
+        }
     }
     return fp;
+}
+
+const char* pc_log_path(void) {
+    log_file();
+    return s_log_path;
 }
 
 /* Milliseconds since the first log record. Without a time base there is no

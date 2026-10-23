@@ -250,7 +250,7 @@ All diagnostics should pass through `pc_log_line()`:
 pc_log_line("[Audio] Initialized SDL3 audio stream: %d Hz, %d channels", freq, channels);
 ```
 - Includes automatic millisecond timestamps from program startup.
-- Automatically mirrors to `stderr` and the persistent log file (`MELEE_LOG_FILE` / `melee-pc.log` on Windows).
+- Automatically mirrors to `stderr` and the persistent log file (`MELEE_LOG_FILE`, or the per-platform default in `docs/debugging.md`).
 - Never use raw `printf` or `std::cout` in production code.
 
 ### Assertions

@@ -26,8 +26,9 @@ bool threw(JNIEnv* env) {
 /* Same contract as the curl path: true when a response came back (any
  * status), false on a transport failure. `out` is NUL-terminated and
  * truncated to fit. */
-extern "C" bool pc_slippi_http_android(const char* url, const char* body, const char* bearer, bool post,
-                                      char* out, size_t cap, int* status) {
+extern "C" bool pc_http_android(const char* url, const char* body, size_t body_len, const char* content_type,
+                               const char* bearer, bool post, int read_timeout_ms, char* out, size_t cap,
+                               int* status) {
     JNIEnv* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
     if (env == nullptr || url == nullptr || out == nullptr || cap == 0) {
         return false;
@@ -83,11 +84,11 @@ extern "C" bool pc_slippi_http_android(const char* url, const char* body, const 
         }
         env->CallVoidMethod(conn, set_method, env->NewStringUTF(post ? "POST" : "GET"));
         env->CallVoidMethod(conn, set_conn_to, 10000);
-        env->CallVoidMethod(conn, set_read_to, 15000);
+        env->CallVoidMethod(conn, set_read_to, read_timeout_ms);
         env->CallVoidMethod(conn, set_prop, env->NewStringUTF("User-Agent"), env->NewStringUTF("melee-pc Slippi"));
         if (post) {
             env->CallVoidMethod(conn, set_prop, env->NewStringUTF("Content-Type"),
-                                env->NewStringUTF("application/json"));
+                                env->NewStringUTF(content_type));
         }
         if (bearer != nullptr && bearer[0] != '\0') {
             std::string auth = std::string("Bearer ") + bearer;
@@ -98,7 +99,7 @@ extern "C" bool pc_slippi_http_android(const char* url, const char* body, const 
             break;
         }
         if (post && body != nullptr) {
-            const jsize n = static_cast<jsize>(strlen(body));
+            const jsize n = static_cast<jsize>(body_len);
             jbyteArray bytes = env->NewByteArray(n);
             env->SetByteArrayRegion(bytes, 0, n, reinterpret_cast<const jbyte*>(body));
             env->CallVoidMethod(conn, set_do_out, JNI_TRUE);
@@ -149,6 +150,12 @@ extern "C" bool pc_slippi_http_android(const char* url, const char* body, const 
     }
     env->PopLocalFrame(nullptr);
     return ok;
+}
+
+extern "C" bool pc_slippi_http_android(const char* url, const char* body, const char* bearer, bool post,
+                                      char* out, size_t cap, int* status) {
+    return pc_http_android(url, body, body ? strlen(body) : 0, "application/json", bearer, post, 15000, out,
+                           cap, status);
 }
 
 #endif
