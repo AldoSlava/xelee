@@ -328,14 +328,21 @@ def run_phases(args):
         "MELEE_XR_CONTROL": CTL_FILE,
         # Nobody wears the headset: place the arena from wherever it lies
         # and looks, or the stage can be out of view and the GPU numbers
-        # meaningless (seen 2026-10-09: an empty eye at 7 ms).
-        "AURORA_XR_ARENA_AT_HEAD": "1",
+        # meaningless (seen 2026-10-09: an empty eye at 7 ms). "2" (the
+        # default since 2026-10-23): straight ahead, as a player looking at
+        # it sees it; "1" (--placement below) the default's 25 cm under the
+        # eyes, the stage at the bottom of the view (~2% of the eye: per-pixel
+        # costs hidden; runs before 2026-10-23 were made so).
+        "AURORA_XR_ARENA_AT_HEAD": "2" if args.placement == "view" else "1",
     }
     if args.view_check:
         # One eye image during the warmup, after the fight starts and before
         # measuring, to check the stage is in view.
         env["AURORA_XR_DUMP"] = DUMP_DIR
-        env["AURORA_XR_DUMP_AFTER"] = str(max(args.warmup - 15, 5) * 60)
+        # In 3D images released: the fight's 3D starts ~20-30 s in and runs
+        # below 60 a second when it's slow, so count low (60 a second from
+        # 15 s found no dump yet at a 200 s warmup).
+        env["AURORA_XR_DUMP_AFTER"] = str(max(args.warmup - 35, 5) * 40)
     if args.record:
         env["MELEE_NET_RECORD"] = f"{FILES}/{args.record}"
     if args.replay:
@@ -399,6 +406,9 @@ def main():
     r.add_argument("--warmup", type=int, default=50, help="seconds from launch to the first phase")
     r.add_argument("--settle", type=int, default=12, help="seconds after a mode switch before measuring")
     r.add_argument("--label", default="run")
+    r.add_argument("--placement", choices=["view", "below"], default="view",
+                   help="the stage straight ahead (as a player sees it; default) or 25 cm under the eyes (runs "
+                        "before 2026-10-23, ~2%% of the eye)")
     r.add_argument("--cpu-level", type=int, help="pin the CPU clock level for the run (e.g. 3)")
     r.add_argument("--gpu-level", type=int, help="pin the GPU clock level for the run (e.g. 2)")
     rr = r.add_mutually_exclusive_group()
